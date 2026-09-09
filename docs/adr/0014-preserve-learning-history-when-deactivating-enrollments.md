@@ -1,0 +1,9 @@
+# Preserve learning history when deactivating Enrollments
+
+A Coach may deactivate an Enrollment within their Coach Workspace with a mandatory recorded reason. The learner concerned may also deactivate their own Enrollment without a required reason. While the Enrollment is inactive, the learner cannot start new Tasks or send new Submissions or Submission Revisions. Skill-level Access Overrides do not bypass this Enrollment restriction.
+
+Existing work, Reviews, XP, and Mastery remain stored under their visibility rules. Submitted work and learning history remain readable by the learner concerned and the owning Coach; unsent Submission Draft contents remain private to the learner. Deactivation itself does not revoke an Approval or Mastery or remove XP. This preserves assessment history when participation stops, at the cost of the learner retaining read access to that history after deactivation.
+
+The Coach may still review pending Submission Revisions sent while the Enrollment was active and Access was valid, provided those revisions have not been superseded. Approvals from these Reviews contribute to XP and Mastery under the ordinary rules without reactivating the Enrollment. This lets the Coach finish assessing legitimately submitted work, at the cost of XP or Mastery potentially increasing after the Enrollment becomes inactive.
+
+Only the Coach who owns the relevant Workspace may reactivate an Enrollment, through an explicit action with a mandatory recorded reason, including when the learner chose to deactivate it. Reactivation retains the same Enrollment, Learning Path Version, and progress; each Skill's Access is evaluated under the applicable current rules. Accepting another invitation does not reactivate an inactive Enrollment. This preserves learning continuity and lets learners stop participating themselves, at the cost of the learner waiting for the Coach before resuming learning activity.

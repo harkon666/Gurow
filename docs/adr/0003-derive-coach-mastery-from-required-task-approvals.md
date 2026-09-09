@@ -1,0 +1,3 @@
+# Derive coach-mode Mastery from Required Task Approvals
+
+Coach-mode Mastery requires a nonempty set of Required Tasks chosen by the coach and is awarded automatically when each has at least one Submission Revision with a valid Approval. Enrichment Tasks do not block Mastery, and there is no additional Skill-level approval step after all Required Tasks qualify. This makes Mastery traceable to its supporting evidence and gives reevaluation a concrete rule, at the cost of requiring coaches to design Required Tasks that fully cover the learning outcome because the final qualifying Approval immediately grants Mastery.

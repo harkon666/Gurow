@@ -1,0 +1,5 @@
+# Use contextual Coach and Learner roles within one Account
+
+One Account can use personal mode, act as a Coach for Learning Paths it is authorized to manage, and participate as a Learner in other Learning Paths. For the MVP, those Enrollments must be in Coach Workspaces it does not own. Coach and Learner are contextual roles rather than permanent Account types. Coaching authority is limited to the Learning Paths the Account is authorized to manage; it does not apply globally. In the MVP, the scope of that authority covers all Paths within the Account's owned Coach Workspace, as described in [the Workspace ownership decision](0011-own-coach-learning-paths-through-workspaces.md).
+
+This allows a person to teach one subject and learn another without maintaining separate Accounts for each role. The application must make the active learning context clear and check each action against the Account's authority for the relevant Learning Path, at the cost of more contextual permission handling than a single global role would require.

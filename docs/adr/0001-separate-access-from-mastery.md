@@ -1,0 +1,11 @@
+# Keep Access independent from Mastery
+
+Gurow separates permission to work on a Skill (Access) from recognition of its learning outcome (Mastery) to support personal motivation and coach-led assessment. Personal users may freely declare Mastery without evidence or review. They may also explicitly grant themselves an Access Override for one Skill, waiving both Prerequisites and the XP Threshold without a required reason or review and without changing XP or Mastery. This preserves personal control over learning at the cost of making progression gates voluntary motivational rules. Coach-mode Mastery requires evidence approved by an authorized coach.
+
+In coach mode, an authorized coach may grant an Access Override for one Skill within one Enrollment, waiving both Prerequisite requirements and the XP Threshold without changing XP, Mastery, or other Enrollments' rules. Granting or revoking this exception requires a brief reason and an automatic record identifying the action, coach, learner, Enrollment, Skill, and time. This supports individual learning needs at the cost of allowing a coach to open a Skill while both progression requirements remain unmet.
+
+Revoking a coach-granted override restores ordinary Access rules but preserves existing work, XP, and awarded Mastery. Submissions sent with valid Access remain eligible for review and contribution to Mastery; this preserves legitimate learning outcomes at the cost of allowing Mastery to be awarded or retained while a Skill is locked.
+
+Access follows current Prerequisite satisfaction and applicable XP Thresholds even after a learner has started a Skill, except where an active Access Override waives those requirements. Losing prerequisite Mastery can therefore lock dependent Skills, but work sent with valid Access remains eligible for review and dependent Mastery supported by valid evidence remains in force. Loss of prerequisite Mastery does not by itself invalidate that evidence or cascade into revocation of dependent Mastery. This keeps prerequisite rules consistent but can prevent new submissions on a Skill already in progress.
+
+Coach-mode Access also requires an active Enrollment. An Access Override waives Prerequisites and XP Thresholds but cannot bypass [Enrollment Deactivation](0014-preserve-learning-history-when-deactivating-enrollments.md).

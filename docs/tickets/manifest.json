@@ -1,0 +1,1145 @@
+{
+  "parent": "https://github.com/harkon666/Gurow/issues/1",
+  "approval_status": "approved",
+  "publication_status": "published-and-verified",
+  "label_on_publication": "ready-for-agent",
+  "tickets": [
+    {
+      "id": 1,
+      "slug": "select-skills-in-webgpu",
+      "stage": "P1",
+      "title": "Create and select Skill cards in the Rust/WebGPU editor",
+      "summary_id": "Buat dan pilih kartu Skill pada WebGPU nyata; pilihan tampil di panel React.",
+      "blocked_by": [],
+      "stories": [
+        68,
+        73,
+        80
+      ],
+      "what_to_build": "Open a minimal Learning Path fixture in the browser, create flat Skill cards, and select a card to see the correct Skill in a React panel. Render actual card geometry and selection with Rust/Wasm/wgpu/WebGPU, with HTML labels positioned from engine output. This is the first usable P1 path, including the build and browser integration needed to run it; it does not add backend learning behavior.",
+      "acceptance": [
+        "A real WebGPU browser initializes the Rust/Wasm editor and displays created Skill cards and their HTML labels; a mocked canvas or list-only implementation does not satisfy this check.",
+        "Selecting different cards shows the corresponding stable fixture Skill ID and title in React, with one flat card per Skill and a visible selection state.",
+        "The pure editor core owns cards, positions, and selection; renderer and browser adapter responsibilities remain separate, and React has no second authoritative position store.",
+        "Defined commands and events connect the engine and application using the agreed initial JSON boundary; the fixture contains no learning progress inside the renderer.",
+        "A reproducible browser smoke check covers creation and selection, and the build/run procedure records the actual browser and GPU environment used."
+      ],
+      "issue_number": 2,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/2",
+      "published_title": "[P1/T01] Create and select Skill cards in the Rust/WebGPU editor",
+      "issue_database_id": 5401267069,
+      "native_blocking_issue_numbers": [],
+      "publication_verified": true
+    },
+    {
+      "id": 2,
+      "slug": "navigate-drag-and-undo",
+      "stage": "P1",
+      "title": "Pan, zoom, drag, and undo Skill placement",
+      "summary_id": "Pan, zoom di posisi pointer, dan drag kartu dengan satu langkah undo per drag.",
+      "blocked_by": [
+        1
+      ],
+      "stories": [
+        70,
+        72,
+        80
+      ],
+      "what_to_build": "Let a canvas user navigate the existing Skill cards and reposition one card predictably. A completed drag can be undone and redone as one edit, and labels and selection stay aligned during movement. This slice adds interaction behavior through the browser, engine commands, rendering, and public-core tests.",
+      "acceptance": [
+        "Mouse/trackpad pan and cursor-anchored zoom work across the initial 10%–400% range, with world coordinates bounded to plus or minus 1,000,000 on each axis.",
+        "Dragging preserves the initial pointer-to-card offset at different zoom levels, and the resulting card position is owned by the engine.",
+        "One completed drag is exactly one undo step; undo restores its initial position and redo restores the final position without affecting learning-domain state.",
+        "HTML labels, selection geometry, and the existing React selection remain associated with the correct Skill through pan, zoom, drag, undo, and redo.",
+        "Public-core tests cover coordinate round trips, cursor anchoring, drag offsets, and undo invariants; browser checks exercise the actual interactions without serializing the whole scene for every pointer movement."
+      ],
+      "issue_number": 3,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/3",
+      "published_title": "[P1/T02] Pan, zoom, drag, and undo Skill placement",
+      "issue_database_id": 5401267839,
+      "native_blocking_issue_numbers": [
+        2
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 3,
+      "slug": "connect-prerequisite-dag",
+      "stage": "P1",
+      "title": "Connect Skills while preserving a valid Prerequisite Graph",
+      "summary_id": "Buat koneksi Prerequisite dan tolak siklus tanpa merusak graph yang valid.",
+      "blocked_by": [
+        1
+      ],
+      "stories": [
+        11,
+        12,
+        71
+      ],
+      "what_to_build": "Create Prerequisite connections between visible Skill cards in one Learning Path fixture, render one Bezier connection style, and explain rejected cycle-creating edits. The same connection data drives the graph and canvas; this ticket needs selectable cards but can be implemented independently of camera interactions.",
+      "acceptance": [
+        "A user can connect two Skills and see the new directed Prerequisite connection rendered between their cards.",
+        "Branching and multiple Prerequisites are supported within the same Path fixture; self-cycles and longer cycles are rejected immediately, preserving the previous graph.",
+        "Rejected connections produce understandable application feedback and leave card identities and valid connections intact.",
+        "Connections remain attached to engine-owned card positions and represent one graph, without a second independently editable prerequisite authority in React.",
+        "Public-core and browser checks cover accepted connections, branching, and unchanged state after a cycle-creating edit."
+      ],
+      "issue_number": 4,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/4",
+      "published_title": "[P1/T03] Connect Skills while preserving a valid Prerequisite Graph",
+      "issue_database_id": 5401268937,
+      "native_blocking_issue_numbers": [
+        2
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 4,
+      "slug": "edit-task-and-restore-path",
+      "stage": "P1",
+      "title": "Edit a Skill Task and restore the complete local learning scene",
+      "summary_id": "Edit Task di sidebar; reload memulihkan ID, posisi, koneksi, dan isi Task.",
+      "blocked_by": [
+        2,
+        3
+      ],
+      "stories": [
+        8,
+        73,
+        76,
+        78,
+        83
+      ],
+      "what_to_build": "Select a Skill, edit one simple associated Task in React, and locally save and reopen the coherent Learning Path fixture. Combine the existing editor interactions and graph with application-owned Task data, preserving the boundary that P1 is intended to prove.",
+      "acceptance": [
+        "Selecting different Skills addresses the correct Task; editing its contents updates application-owned data without putting Task contents in the engine snapshot.",
+        "A checkpoint contains an editor snapshot with format version, Skill references, positions, and connections plus a separately owned, associated application payload.",
+        "Reload semantically restores IDs, positions, connections, and Task contents; the editor and Task payload cannot silently restore mismatched associations.",
+        "Completed operations save locally, and camera state is local to the Account/fixture and Path context; selection, in-progress drag, and undo history remain session-only.",
+        "The browser flow covers create, connect, drag, Task edit, undo/redo, save, and reload, comparing observable state rather than JSON property order. This local proof does not claim backend persistence."
+      ],
+      "issue_number": 5,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/5",
+      "published_title": "[P1/T04] Edit a Skill Task and restore the complete local learning scene",
+      "issue_database_id": 5401269931,
+      "native_blocking_issue_numbers": [
+        3,
+        4
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 5,
+      "slug": "recover-renderer-and-use-list",
+      "stage": "P1",
+      "title": "Keep Skill and Task navigation usable through renderer failure",
+      "summary_id": "Navigasi keyboard tetap tersedia saat GPU gagal; dokumen dipertahankan dan renderer bisa dicoba ulang.",
+      "blocked_by": [
+        4
+      ],
+      "stories": [
+        78,
+        81,
+        82
+      ],
+      "what_to_build": "Reach the existing Skills and Tasks through a keyboard-accessible Skill/Prerequisite list, including when WebGPU cannot initialize or the renderer fails during editing. Preserve the active CPU-side document, attempt renderer recreation, and let users retry while the list remains usable.",
+      "acceptance": [
+        "Keyboard navigation through the Skill/Prerequisite list selects the correct Skill and opens its existing Task panel with the same data as canvas selection.",
+        "No-WebGPU startup provides the usable list and Task path with an explanation of canvas availability; positioning remains a canvas operation.",
+        "Exercising renderer failure or device loss retains the CPU document and application Task data, including unsaved edits.",
+        "Successful recreation redraws the current document; unsuccessful recovery presents a retry action and keeps list navigation functional.",
+        "Browser checks exercise both the real rendering path and failure/list paths, verifying the retained graph, card positions, and Task association."
+      ],
+      "issue_number": 6,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/6",
+      "published_title": "[P1/T05] Keep Skill and Task navigation usable through renderer failure",
+      "issue_database_id": 5401271093,
+      "native_blocking_issue_numbers": [
+        5
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 6,
+      "slug": "meet-p1-responsiveness-gate",
+      "stage": "P1",
+      "title": "Meet the P1 responsiveness and recovery acceptance gate",
+      "summary_id": "Buktikan seluruh P1 dan target p95 frame 20 ms serta respons input 50 ms.",
+      "blocked_by": [
+        5
+      ],
+      "stories": [
+        80,
+        82,
+        83,
+        84
+      ],
+      "what_to_build": "Make the complete P1 interaction flow responsive on the agreed primary workload and record reproducible acceptance evidence. Resolve measured bottlenecks in the existing path rather than building speculative optimizations. This ticket is the explicit gate before P2 begins.",
+      "acceptance": [
+        "The actual Rust/Wasm/WebGPU path completes card creation, pan/zoom/drag, valid connections and cycle rejection, React Task editing, one-step drag undo/redo, local restoration, keyboard navigation, and renderer recovery.",
+        "For 1,000 cards, approximately 200 visible cards, and 2,000 total connections with HTML labels enabled, p95 frame time is at most 20 ms and p95 input-to-visible-response latency is at most 50 ms during the recorded pan/zoom/drag sequence.",
+        "Record CPU, RAM, GPU, OS, browser, viewport, DPR, refresh rate, actual visible counts, fixture, sequence, warm-up, sample count/duration, and measurement limitations; CPU processing time alone is not visible-response latency.",
+        "Record comparison results for 100 and 10,000 cards and diagnostics for initialization, memory, draw calls, uploads, and boundary traffic without inventing additional pass thresholds or promising 10,000-card capacity.",
+        "Failures are fixed or explicitly reported for design reassessment; a failed or unmeasured required check cannot close the P1 gate or unblock P2."
+      ],
+      "issue_number": 7,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/7",
+      "published_title": "[P1/T06] Meet the P1 responsiveness and recovery acceptance gate",
+      "issue_database_id": 5401272084,
+      "native_blocking_issue_numbers": [
+        6
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 7,
+      "slug": "enroll-through-postgres",
+      "stage": "P2",
+      "title": "Accept an Enrollment Invitation and read scoped participation",
+      "summary_id": "API dengan PostgreSQL menerima undangan fixture dan menghasilkan satu Enrollment yang terlindungi.",
+      "blocked_by": [
+        6
+      ],
+      "stories": [
+        37,
+        38,
+        39,
+        41,
+        65
+      ],
+      "what_to_build": "Through a small backend request interface, accept a fixture Invitation into a published Learning Path Version and read the resulting participation as its learner or owning Coach. Establish the real PostgreSQL persistence and controlled identity fixture needed for this complete P2 behavior. Production sign-in, email delivery, and a full dashboard remain later slices.",
+      "acceptance": [
+        "Controlled fixtures identify Accounts, one owning Coach Workspace, published learning content, and an Invitation to exactly one Version and verified email; fixture identity is not exposed as production authentication.",
+        "An eligible acceptance returns a persisted Enrollment pinned to the offered Version and does not join other Paths.",
+        "Repeated or competing acceptance for the same Account/Version returns one coherent Enrollment without resetting progress or creating another XP context.",
+        "The matching verified-email condition, admission closure, and prohibition on owner Enrollment in their Coach Workspace are enforced at the backend boundary.",
+        "Only the learner and owning Coach can read the Enrollment; peers, unrelated Accounts, and another Workspace's Coach are rejected.",
+        "Request-level integration tests use actual PostgreSQL and read back durable outcomes, including rejected operations without partial Enrollment creation."
+      ],
+      "issue_number": 8,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/8",
+      "published_title": "[P2/T07] Accept an Enrollment Invitation and read scoped participation",
+      "issue_database_id": 5401273491,
+      "native_blocking_issue_numbers": [
+        7
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 8,
+      "slug": "submit-private-draft-revisions",
+      "stage": "P2",
+      "title": "Send private Task drafts as immutable Submission Revisions",
+      "summary_id": "Draft privat dikirim menjadi revisi immutable dalam satu Submission per Task dan Enrollment.",
+      "blocked_by": [
+        7
+      ],
+      "stories": [
+        42,
+        43,
+        44,
+        45,
+        47,
+        48
+      ],
+      "what_to_build": "Let an enrolled learner save and read a private Task draft, send text and URLs for assessment, and correct it through a new immutable revision using the P2 backend interface. The Coach can read sent contents but never the unsent draft. This introduces the durable Submission behavior consumed by later Review and product UI slices.",
+      "acceptance": [
+        "Saved draft contents are visible only to the learner; unauthorized draft reads and writes, including Coach reads, are rejected.",
+        "Sending with valid Access creates an immutable revision for exactly one Task, with at most one Submission per Task/Enrollment even under competing sends.",
+        "Text and submitted URLs are retained exactly as sent; linked destinations are neither fetched into a frozen archive nor claimed to be immutable.",
+        "A newer revision supersedes earlier undecided revisions of the same Submission; previously sent contents cannot be edited in place.",
+        "Separate Tasks require separate Submission histories even when evidence is reused; unavailable Access blocks new sends without deleting existing work.",
+        "PostgreSQL-backed request tests demonstrate draft privacy, immutable revision reads, supersession, uniqueness, and no successful response before persistence."
+      ],
+      "issue_number": 9,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/9",
+      "published_title": "[P2/T08] Send private Task drafts as immutable Submission Revisions",
+      "issue_database_id": 5401274460,
+      "native_blocking_issue_numbers": [
+        8
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 9,
+      "slug": "review-and-derive-progress",
+      "stage": "P2",
+      "title": "Review a Submission Revision and derive XP, Mastery, and Access",
+      "summary_id": "Approval atau Changes Requested menghasilkan progres yang benar dan menolak Review revisi usang.",
+      "blocked_by": [
+        8
+      ],
+      "stories": [
+        13,
+        15,
+        26,
+        31,
+        32,
+        46,
+        49,
+        50,
+        54,
+        56,
+        59
+      ],
+      "what_to_build": "Let the owning Coach decide an exact Submission Revision through the backend and read the resulting learning state. Approval contributes its Task reward once, derives Skill Mastery from Required Tasks, and reevaluates dependent Access; Changes Requested provides mandatory feedback. Use the agreed two-Skill reference Path to demonstrate the full request-to-progress behavior.",
+      "acceptance": [
+        "Only the authorized owning Coach can record Approval or Changes Requested; feedback is mandatory for Changes Requested, and superseded pending revisions reject decisions without progress effects.",
+        "A nonempty set of Required Tasks yields Skill Mastery only when every Task has a valid Approval; Enrichment Tasks do not block it, and there is no separate Skill sign-off.",
+        "A Task contributes its configured reward once while any valid Approval exists in the Enrollment; repeated decisions or additional approved revisions do not multiply it.",
+        "In the reference Path, approving A's Required Task grants 20 Enrollment XP and Mastery of A, opening B with its Mastery and 20-XP requirements without spending XP.",
+        "Access uses current ALL Prerequisites and Enrollment-local XP; personal or other Enrollment XP cannot satisfy it.",
+        "A new revision after Approval neither invalidates the earlier Approval nor inherits it; prior eligible, unsuperseded work remains reviewable if Skill Access has since been lost.",
+        "PostgreSQL-backed requests verify the transitions, readable feedback/history, authorization, and coherent rejection of stale or repeated operations."
+      ],
+      "issue_number": 10,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/10",
+      "published_title": "[P2/T09] Review a Submission Revision and derive XP, Mastery, and Access",
+      "issue_database_id": 5401275351,
+      "native_blocking_issue_numbers": [
+        9
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 10,
+      "slug": "revoke-approval-and-correct-progress",
+      "stage": "P2",
+      "title": "Revoke Approval and retain coherent learning history",
+      "summary_id": "Pencabutan Approval mengoreksi XP dan Mastery tanpa menghapus riwayat atau Mastery lain yang valid.",
+      "blocked_by": [
+        9
+      ],
+      "stories": [
+        27,
+        51,
+        52,
+        53,
+        55,
+        59
+      ],
+      "what_to_build": "Correct an assessed revision through an authorized Approval Revocation and read the resulting XP, Mastery, Access, and retained history from the backend. The correction is scoped to the supporting evidence, including cases with multiple valid Approvals for one Task.",
+      "acceptance": [
+        "Revocation identifies one Approval, requires the owning Coach and a recorded reason, and retains the original Review decision.",
+        "Revoking one of several valid Approvals preserves the Task contribution; revoking the last removes it through one recorded XP Correction.",
+        "Mastery is reevaluated from remaining valid Approvals and retained or revoked accordingly, with award history preserved.",
+        "The reference scenario relocks B when A's supporting Mastery/XP is lost, while independently supported Mastery on B and eligible previously sent work are retained.",
+        "A later valid Approval restores the Task reward without multiplying it; repeated or rejected revocations leave coherent progress and correction history.",
+        "PostgreSQL-backed request tests read back the full before/after state and demonstrate that unauthorized or failed corrections leave no partial XP/Mastery effects."
+      ],
+      "issue_number": 11,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/11",
+      "published_title": "[P2/T10] Revoke Approval and retain coherent learning history",
+      "issue_database_id": 5401276409,
+      "native_blocking_issue_numbers": [
+        10
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 11,
+      "slug": "grant-scoped-access-override",
+      "stage": "P2",
+      "title": "Grant and revoke an audited Access Override",
+      "summary_id": "Coach membuka satu Skill untuk satu Enrollment dengan alasan dan audit, tanpa mengubah XP atau Mastery.",
+      "blocked_by": [
+        9
+      ],
+      "stories": [
+        57,
+        58,
+        59
+      ],
+      "what_to_build": "Allow an owning Coach to grant or withdraw an Access Override for one Skill in one Enrollment through the backend. Demonstrate that waived Prerequisites and XP requirements change permission without changing achievement or another learner's rules.",
+      "acceptance": [
+        "Granting an override bypasses both Prerequisites and the XP Threshold only for the identified Skill and Enrollment.",
+        "Grant and revocation require a brief reason and record action, Coach, learner, Enrollment, Skill, and time automatically.",
+        "Revocation returns to ordinary Access rules while retaining existing work, XP, and Mastery; eligible pending work remains reviewable.",
+        "Unauthorized Actors and cross-Workspace or cross-Enrollment targets are rejected without changing Access elsewhere.",
+        "PostgreSQL-backed request tests cover unmet Prerequisites and XP together, record completeness, revocation, and unchanged learning achievements. Enrollment inactivity is integrated in the lifecycle slice."
+      ],
+      "issue_number": 12,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/12",
+      "published_title": "[P2/T11] Grant and revoke an audited Access Override",
+      "issue_database_id": 5401277392,
+      "native_blocking_issue_numbers": [
+        10
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 12,
+      "slug": "deactivate-and-reactivate-enrollment",
+      "stage": "P2",
+      "title": "Stop and resume Enrollment while retaining eligible Reviews",
+      "summary_id": "Deaktivasi menghentikan pekerjaan baru; Review lama tetap sah dan reaktivasi hanya oleh Coach.",
+      "blocked_by": [
+        11
+      ],
+      "stories": [
+        60,
+        61,
+        62,
+        63,
+        64
+      ],
+      "what_to_build": "Expose the agreed Enrollment Deactivation and Reactivation behavior through the backend, preserving learning history and draft privacy. Integrate the existing Review and override behavior so stopping participation has the same result regardless of Skill gates or pending work.",
+      "acceptance": [
+        "The owning Coach can deactivate with a recorded reason, while the learner can self-deactivate without a required reason.",
+        "Inactivity blocks new Task starts and new Submissions/revisions even with an active Skill override; invitation acceptance does not reactivate participation.",
+        "Eligible unsuperseded work sent while active and with valid Access remains reviewable, and its Approval may still contribute XP/Mastery.",
+        "Deactivation itself removes no Approval, XP, or Mastery; history remains readable within its existing visibility rules and drafts remain learner-only.",
+        "Only the owning Coach can explicitly reactivate with a recorded reason, retaining Enrollment, Version, and progress and reevaluating current Access.",
+        "PostgreSQL-backed request tests cover both deactivation actors, override/admission interactions, eligible Reviews, privacy, and unauthorized reactivation."
+      ],
+      "issue_number": 13,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/13",
+      "published_title": "[P2/T12] Stop and resume Enrollment while retaining eligible Reviews",
+      "issue_database_id": 5401278380,
+      "native_blocking_issue_numbers": [
+        12
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 13,
+      "slug": "correct-personal-rewards",
+      "stage": "P2",
+      "title": "Correct personal Task rewards without rewriting Mastery",
+      "summary_id": "Uji completion, perubahan reward 20→50, koreksi XP, dan kebebasan Mastery personal.",
+      "blocked_by": [
+        7
+      ],
+      "stories": [
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        27,
+        67
+      ],
+      "what_to_build": "Use owner-only personal Learning Path fixtures through the backend to complete Tasks, correct rewards, declare Mastery freely, and explicitly bypass Access gates. This P2 slice verifies personal rules independently of the coach Review chain, including retention of an archived completed Task's contribution without defining a full archive-management UI.",
+      "acceptance": [
+        "Only the personal owner can act; Mastery can be declared without evidence or left unclaimed, and Task completion neither declares Mastery nor requires evidence/review.",
+        "A completed Task contributes its current reward and an incomplete Task contributes zero; repeated completion actions never multiply the contribution.",
+        "For a completed Task, changing 20 to 50 records +30; undoing completion removes 50 and completing again restores 50. Editing an incomplete reward leaves its contribution zero.",
+        "Personal XP Thresholds use only current XP from that Path and can relock started work; an explicit personal override waives both gates without a reason or changes to XP/Mastery.",
+        "Corrections preserve independently declared Mastery; archiving a completed Task preserves its contribution, Mastery, history, and owner-only visibility without adding a restoration policy.",
+        "Request-level domain tests read back persisted contributions, corrections, ownership, and Access outcomes, keeping personal progress separate from coach Enrollments."
+      ],
+      "issue_number": 14,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/14",
+      "published_title": "[P2/T13] Correct personal Task rewards without rewriting Mastery",
+      "issue_database_id": 5401279594,
+      "native_blocking_issue_numbers": [
+        8
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 14,
+      "slug": "meet-p2-concurrency-gate",
+      "stage": "P2",
+      "title": "Preserve progress under competing learning requests and pass P2",
+      "summary_id": "Buktikan retry dan request bersamaan tidak menggandakan reward atau merusak progres; tutup gate P2.",
+      "blocked_by": [
+        10,
+        12,
+        13
+      ],
+      "stories": [
+        39,
+        44,
+        45,
+        54,
+        55,
+        65,
+        85
+      ],
+      "what_to_build": "Make the complete P2 request flow retain coherent learning results when operations are retried or race across Enrollment, Submission, Review, revocation, and lifecycle boundaries. Repair any integration races and record actual PostgreSQL-backed acceptance results. This is the gate before subsequent product slices.",
+      "acceptance": [
+        "Competing invitation acceptance retains one Enrollment, and competing sends retain one Submission per Task/Enrollment with immutable, coherently ordered revisions.",
+        "A Review that becomes stale through a newer authoritative revision is rejected without XP/Mastery effects; operations respect the accepted order when Review wins first.",
+        "Repeated or competing Approvals and revocations produce correct single Task contributions and correction history, without partial progress on rejected writes.",
+        "Races involving deactivation or override changes enforce Access at the authoritative operation while preserving eligibility of legitimate earlier work.",
+        "The reference Enrollment-to-Approval-to-revocation flow, privacy/authority matrix, lifecycle checks, and personal 20-to-50 correction/retention behavior pass against real persistence.",
+        "Report actual commands, fixtures, PostgreSQL environment, and outcomes; calculation-only tests, mock persistence, or unexecuted checks cannot close the P2 gate."
+      ],
+      "issue_number": 15,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/15",
+      "published_title": "[P2/T14] Preserve progress under competing learning requests and pass P2",
+      "issue_database_id": 5401280607,
+      "native_blocking_issue_numbers": [
+        11,
+        13,
+        14
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 15,
+      "slug": "sign-in-to-private-workspace",
+      "stage": "MVP",
+      "title": "Sign in and enter an owner-only Personal Workspace",
+      "summary_id": "Login dengan identitas tepercaya membuka satu Personal Workspace privat per Account.",
+      "blocked_by": [
+        14
+      ],
+      "stories": [
+        1,
+        2,
+        3,
+        5,
+        65
+      ],
+      "what_to_build": "Replace fixture-only access at the product entry point with a trusted sign-in flow, persisted Account identity, and the user's private Personal Workspace. Select and record the concrete authentication integration as an implementation choice while keeping new Account lifecycle policies outside this slice.",
+      "acceptance": [
+        "A browser sign-in establishes an authenticated Account backed by the chosen identity integration; the backend does not accept a client-supplied fixture Actor as authority.",
+        "The same Account has exactly one persisted Personal Workspace across repeated sign-ins or concurrent first entry.",
+        "Only its owner can access the Workspace through UI and backend reads/writes, including after Account switching.",
+        "Trusted identity exposes verified-email state for the later invitation flow; unverified client input cannot claim a verified address.",
+        "The application clearly identifies the active personal context without introducing permanent Coach/Learner Account types.",
+        "An integration check covers sign-in, Workspace entry, reload, and rejection of another Account; record actual provider/configuration prerequisites and distinguish local test evidence from an unverified production integration."
+      ],
+      "issue_number": 16,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/16",
+      "published_title": "[MVP/T15] Sign in and enter an owner-only Personal Workspace",
+      "issue_database_id": 5401282314,
+      "native_blocking_issue_numbers": [
+        15
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 16,
+      "slug": "author-personal-learning-path",
+      "stage": "MVP",
+      "title": "Create and reopen a personal Learning Path with Skills and Tasks",
+      "summary_id": "Buat Path personal berisi Skill, Task, dan Prerequisite lalu simpan dan buka kembali dari backend.",
+      "blocked_by": [
+        15
+      ],
+      "stories": [
+        2,
+        6,
+        8,
+        11,
+        12,
+        68,
+        73,
+        77,
+        83
+      ],
+      "what_to_build": "Let a signed-in personal owner create a Learning Path with a goal, add Skills with outcomes and Tasks, arrange their cards, and connect Prerequisites. Persist and reopen the Path through the backend and PostgreSQL while reusing the proven editor/application boundary.",
+      "acceptance": [
+        "The owner can create and reopen multiple personal Paths, each with its own goal, Skills, Tasks, and one flat card per Skill.",
+        "Skill/Task editing in React and card/connection editing in Rust remain correctly associated after backend persistence and reload; Tasks stay outside the editor snapshot.",
+        "Backend writes enforce ownership, one Path per Skill, one Skill per Task, same-Path connections, and DAG validity as well as immediate editor cycle rejection.",
+        "Completed edits autosave with an expected revision; stale writes do not overwrite accepted state and the local dirty work remains available. Rich conflict-resolution presentation follows in its own slice.",
+        "Camera remains local per Account/Path and ephemeral selection/undo state is not confused with durable content or shared layout.",
+        "Browser-to-backend tests cover authoring, a rejected unauthorized or invalid edit, coherent reload, and failure feedback without claiming an unsaved change is durable."
+      ],
+      "issue_number": 17,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/17",
+      "published_title": "[MVP/T16] Create and reopen a personal Learning Path with Skills and Tasks",
+      "issue_database_id": 5401283136,
+      "native_blocking_issue_numbers": [
+        16
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 17,
+      "slug": "track-personal-learning",
+      "stage": "MVP",
+      "title": "Track personal completion, Mastery, rewards, and Access",
+      "summary_id": "UI personal menyediakan completion, reward, Mastery bebas, lock reason, dan override eksplisit.",
+      "blocked_by": [
+        16
+      ],
+      "stories": [
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        79
+      ],
+      "what_to_build": "Use a real personal Path from the browser to mark Tasks complete, configure rewards, independently declare Mastery, inspect Access reasons, and explicitly bypass gates. Connect the already-proven personal rules to the canvas/list and learning panels so the user's motivational choices survive reload.",
+      "acceptance": [
+        "The UI distinguishes Access, XP, and Mastery; Task completion and personal Mastery declaration are separate actions with evidence/review optional.",
+        "Users may leave Mastery unclaimed or declare it freely, and may explicitly bypass both Prerequisites and XP without a required reason or score/Mastery mutation.",
+        "Completion, undoing completion, and reward edits produce the backend-confirmed current contribution and understandable recorded corrections, including the 20-to-50 example.",
+        "Each Path displays its own XP, spending no XP on unlock; current thresholds and ALL Prerequisites can relock started work while retaining existing work and declared Mastery.",
+        "Locked Skills retain title, outcome, and lock reasons, and the same actions and outcomes are reachable from keyboard/list navigation.",
+        "Browser-to-PostgreSQL checks cover the motivational flow, retry behavior, independent Mastery, cross-Path XP isolation, reload, and failed-write feedback."
+      ],
+      "issue_number": 18,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/18",
+      "published_title": "[MVP/T17] Track personal completion, Mastery, rewards, and Access",
+      "issue_database_id": 5401284320,
+      "native_blocking_issue_numbers": [
+        17
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 18,
+      "slug": "author-coach-learning-path-draft",
+      "stage": "MVP",
+      "title": "Own a Coach Workspace and author a Learning Path Draft",
+      "summary_id": "Coach membuat Workspace dan Draft dengan outcome, Required/Enrichment Task, Optional Skill, serta aturan progres.",
+      "blocked_by": [
+        16
+      ],
+      "stories": [
+        1,
+        4,
+        5,
+        6,
+        7,
+        8,
+        28,
+        65
+      ],
+      "what_to_build": "Let an Account enter its owning Coach context, create a Coach Workspace and editable Learning Path Drafts, and design their Skills, Tasks, and progression rules. Reuse the persistent authoring flow while applying Coach Workspace ownership and the distinction between required and enrichment work.",
+      "acceptance": [
+        "A Coach Workspace has exactly one owning Coach and can contain multiple coach-mode Paths; each Path belongs to one Workspace and ownership grants no authority elsewhere.",
+        "The owner authors outcomes and Tasks for each Path independently, including different Tasks for the same subject in different Paths.",
+        "Draft editing configures Required and Enrichment Tasks, Optional Skills, Task rewards, XP Thresholds, and same-Version Prerequisites; incomplete Drafts may be saved without awarding Mastery.",
+        "An Optional Skill cannot be a Prerequisite for a required Skill, and cycles or cross-Path connections are rejected through UI feedback and backend validation.",
+        "The browser clearly switches personal and owning Coach contexts without exposing private personal data to a coached-learning context.",
+        "End-to-end authoring/reload tests verify Workspace authority, persisted Draft requirements, and isolation from another Coach's content."
+      ],
+      "issue_number": 19,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/19",
+      "published_title": "[MVP/T18] Own a Coach Workspace and author a Learning Path Draft",
+      "issue_database_id": 5401285438,
+      "native_blocking_issue_numbers": [
+        17
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 19,
+      "slug": "publish-valid-learning-path-version",
+      "stage": "MVP",
+      "title": "Publish a completable Version and preserve its learning contract",
+      "summary_id": "Validasi rute wajib saat publish; perubahan konten membuat Version baru dengan ID logis yang tetap.",
+      "blocked_by": [
+        18
+      ],
+      "stories": [
+        29,
+        30,
+        31,
+        33,
+        34,
+        35,
+        36
+      ],
+      "what_to_build": "Publish a Coach's Draft only when its required learning route can be completed under ordinary rules. Show useful validation failures, freeze the published learning contract, and prepare subsequent changes as a new Version while retaining earlier content and pinned fixture Enrollments.",
+      "acceptance": [
+        "Publication checks reachability using Required Tasks on required Skills only, accounting for current prerequisite Mastery and available XP without counting locked work toward its own unlock.",
+        "Optional Skills, Enrichment Tasks, and Access Overrides cannot rescue a blocked required route; reject it with affected Skills and unmet requirements, including the 60-reachable-XP versus 100-required example.",
+        "Every publishable required Skill can obtain Mastery through a nonempty Required Task set; drafts with zero Tasks never obtain Mastery by an empty condition.",
+        "Published learning content and rules cannot be edited in place, including typo corrections; preparing an update yields an editable Draft and a distinct published Version.",
+        "Logical Skill and Task IDs remain stable across Versions in the same Path while definitions remain version-specific; old fixture Enrollments retain their Version and progress without migration.",
+        "Browser/backend tests demonstrate rejected publication, a valid published route, a new content Version, immutable old content, and enforcement against direct unauthorized writes."
+      ],
+      "issue_number": 20,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/20",
+      "published_title": "[MVP/T19] Publish a completable Version and preserve its learning contract",
+      "issue_database_id": 5401286358,
+      "native_blocking_issue_numbers": [
+        19
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 20,
+      "slug": "invite-and-admit-learners",
+      "stage": "MVP",
+      "title": "Invite verified learners and control new Enrollments",
+      "summary_id": "Kirim dan terima undangan Version tertentu; Coach dapat membuka atau menutup Enrollment baru.",
+      "blocked_by": [
+        19
+      ],
+      "stories": [
+        37,
+        38,
+        39,
+        40,
+        64,
+        65
+      ],
+      "what_to_build": "From a published Path, let the owning Coach send an Invitation to a particular email and let the matching verified Account accept it in the application. Connect real invitation delivery and identity to the proven Enrollment contract, and provide admission closure/reopening for that Version.",
+      "acceptance": [
+        "The Coach addresses an Invitation to one email and one published Version, with a usable delivery-and-acceptance flow through the selected email integration.",
+        "Only a trusted Account with the matching verified email can accept, creating participation only in the offered Version.",
+        "Repeated acceptance reuses the existing Enrollment and progress, while inactive participation remains inactive and owner Enrollment in an owned Coach Workspace is rejected.",
+        "Closure blocks new Enrollment creation from pending invitations; reopening permits it, and existing Enrollments keep their current status throughout.",
+        "The UI shows backend-confirmed acceptance or the relevant admission/identity failure, without introducing an unagreed invitation-expiry policy.",
+        "Integration evidence covers delivery to the acceptance flow, verified identity, retries, closed admission, and unrelated-Account rejection; record any external setup still required rather than claiming it worked."
+      ],
+      "issue_number": 21,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/21",
+      "published_title": "[MVP/T20] Invite verified learners and control new Enrollments",
+      "issue_database_id": 5401287185,
+      "native_blocking_issue_numbers": [
+        20
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 21,
+      "slug": "navigate-enrolled-learning-path",
+      "stage": "MVP",
+      "title": "Navigate an enrolled Version and inspect learning requirements",
+      "summary_id": "Learner membuka Version yang diikuti melalui canvas/list dan melihat Task, progres, serta alasan terkunci.",
+      "blocked_by": [
+        20
+      ],
+      "stories": [
+        5,
+        13,
+        14,
+        15,
+        35,
+        41,
+        56,
+        68,
+        75,
+        76,
+        81
+      ],
+      "what_to_build": "Give an enrolled learner a complete read/navigation path from their Enrollment to its pinned Skills and Tasks through the canvas or keyboard list. Display current XP, Mastery, Access, and lock reasons using server-authoritative state while retaining Coach control of card positions.",
+      "acceptance": [
+        "The learner opens the Version joined by their Enrollment, sees its Skill outcomes and Tasks, and never silently switches to newer learning content.",
+        "Current Access, Mastery, and Enrollment-local XP are distinct; Locked Skills show title, outcome, and lock reason while existing learning history remains reachable.",
+        "Learners can pan, zoom, and select but cannot change card positions or published content through either UI or backend requests.",
+        "Keyboard Skill/Prerequisite navigation reaches the same Task details when WebGPU is unavailable, with local camera state isolated by Account and Path context.",
+        "Enrollment records are visible only to the learner and owning Coach; peer and cross-Workspace requests fail without exposing private data.",
+        "Browser-to-backend tests use actual enrolled Accounts to cover pinned content, readonly navigation, lock display, keyboard fallback, and privacy."
+      ],
+      "issue_number": 22,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/22",
+      "published_title": "[MVP/T21] Navigate an enrolled Version and inspect learning requirements",
+      "issue_database_id": 5401288196,
+      "native_blocking_issue_numbers": [
+        21
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 22,
+      "slug": "submit-work-from-learning-ui",
+      "stage": "MVP",
+      "title": "Prepare private work and send Task revisions from the learning UI",
+      "summary_id": "Learner menyiapkan draft privat, mengirim teks/URL, dan membaca riwayat revisi dari UI.",
+      "blocked_by": [
+        21
+      ],
+      "stories": [
+        42,
+        43,
+        44,
+        45,
+        47,
+        48,
+        49,
+        50,
+        78,
+        79,
+        81
+      ],
+      "what_to_build": "Turn the learner's Task panel into a private working space and connect sending/correcting work to the existing Submission API. Show sent revision history separately from editable draft contents and provide Account-scoped local recovery for unsent work.",
+      "acceptance": [
+        "A learner can edit and save text/URL draft contents privately, recover local unsent edits in the same Account context, and send only when Access and Enrollment state permit.",
+        "Sending shows a backend-confirmed immutable revision in the Task's one Submission history; a failed or offline send retains editable work and does not appear successfully submitted.",
+        "New revisions supersede pending older ones, and UI history preserves prior valid Approvals without implying that a new revision inherits them.",
+        "Reusing evidence for another Task uses a separate Submission; the UI accurately explains that submitted URLs do not freeze the external destination.",
+        "Coach and peer views never receive unsent draft contents, including through local recovery or Account switching.",
+        "Browser-to-PostgreSQL tests cover draft-to-send-to-correction-to-reload from both canvas and keyboard/list entry, including Access failure and privacy."
+      ],
+      "issue_number": 23,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/23",
+      "published_title": "[MVP/T22] Prepare private work and send Task revisions from the learning UI",
+      "issue_database_id": 5401289151,
+      "native_blocking_issue_numbers": [
+        22
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 23,
+      "slug": "review-work-from-coach-ui",
+      "stage": "MVP",
+      "title": "Review learner work and show the resulting progress",
+      "summary_id": "Coach memberi Approval/Changes Requested; learner melihat feedback, XP, Mastery, dan Access terbaru.",
+      "blocked_by": [
+        22
+      ],
+      "stories": [
+        15,
+        26,
+        31,
+        32,
+        41,
+        46,
+        49,
+        50,
+        54,
+        56,
+        59,
+        79,
+        81
+      ],
+      "what_to_build": "Let the owning Coach open sent work for an enrolled learner, decide an exact revision, and let the learner see feedback and resulting progress in the learning UI. Reuse the existing transactional Review rules and retain keyboard access to assessment activities.",
+      "acceptance": [
+        "The owning Coach can find and inspect a learner's submitted revision and choose Approval or Changes Requested, with mandatory feedback for the latter.",
+        "Stale pending revisions cannot be decided; the UI explains the rejected operation and refreshes authoritative revision state without partial progress.",
+        "The learner sees feedback and may correct through a new revision with valid Access, while older valid Approvals remain effective and newer ones are independently assessed.",
+        "After backend confirmation, Task reward, Required-Task Mastery, and dependent Access display the correct state without duplicate rewards or XP spending.",
+        "The Coach can review previously eligible work after Skill Access loss, and keyboard/list navigation reaches the Review without requiring a working canvas.",
+        "A two-Account browser scenario submits, requests changes, resubmits, approves, and observes progress, including self-approval/peer rejection and private-draft exclusion."
+      ],
+      "issue_number": 24,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/24",
+      "published_title": "[MVP/T23] Review learner work and show the resulting progress",
+      "issue_database_id": 5401290075,
+      "native_blocking_issue_numbers": [
+        23
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 24,
+      "slug": "correct-review-from-coach-ui",
+      "stage": "MVP",
+      "title": "Correct an Approval and explain resulting learning changes",
+      "summary_id": "UI pencabutan Approval menampilkan alasan, koreksi progres, dan riwayat yang tetap tersimpan.",
+      "blocked_by": [
+        23
+      ],
+      "stories": [
+        27,
+        51,
+        52,
+        53,
+        55,
+        59
+      ],
+      "what_to_build": "Expose Approval Revocation in the Coach's assessment history and show its effects to the learner without hiding earlier work or decisions. Make current XP, Mastery, and Access changes understandable using the already-proven correction contract.",
+      "acceptance": [
+        "Only the owning Coach can revoke an identified Approval through the UI, with a mandatory reason stored alongside the retained original decision.",
+        "The learner and Coach see whether remaining valid Approvals preserve the Task contribution and Mastery or whether the final supporting Approval's loss corrects them.",
+        "Dependent Access updates and lock reasons remain distinct from independently supported Mastery on dependent Skills.",
+        "Later Approval restores the contribution without duplication, while revision, award, and correction history remain readable within their existing visibility rules.",
+        "Browser-to-backend checks cover multiple-valid-Approval and final-Approval cases, unauthorized correction, reload, and no successful correction display before confirmation."
+      ],
+      "issue_number": 25,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/25",
+      "published_title": "[MVP/T24] Correct an Approval and explain resulting learning changes",
+      "issue_database_id": 5401291139,
+      "native_blocking_issue_numbers": [
+        24
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 25,
+      "slug": "manage-coach-access-overrides",
+      "stage": "MVP",
+      "title": "Manage an individual learner's Access Overrides",
+      "summary_id": "Coach memberikan atau mencabut override dari UI; learner melihat pengecualian dan alasan Access.",
+      "blocked_by": [
+        23
+      ],
+      "stories": [
+        57,
+        58,
+        59,
+        64
+      ],
+      "what_to_build": "Add an individual Skill's override grant/revocation flow to the Coach's learner view and reflect it in the learner's learning panel. Include the required reason and readable audit record while keeping ordinary progress and Enrollment lifecycle intact.",
+      "acceptance": [
+        "The Coach targets one learner Enrollment and Skill, supplies a brief reason, and sees the automatically recorded action, Actor, target, and time.",
+        "The learner gains Access despite unmet Prerequisites and XP only for that target, with XP/Mastery unchanged and other Enrollments unaffected.",
+        "Revocation with a reason restores ordinary Access and preserves work, history, and eligibility of earlier valid submissions.",
+        "An inactive Enrollment remains unable to start or send work even if an override is present; the UI does not present override as reactivation.",
+        "A browser flow grants, uses, and revokes the exception, verifies an eligible later Review, and rejects cross-Workspace changes."
+      ],
+      "issue_number": 26,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/26",
+      "published_title": "[MVP/T25] Manage an individual learner's Access Overrides",
+      "issue_database_id": 5401292084,
+      "native_blocking_issue_numbers": [
+        24
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 26,
+      "slug": "manage-enrollment-participation",
+      "stage": "MVP",
+      "title": "Stop and resume participation from learner and Coach views",
+      "summary_id": "Learner/Coach melakukan deaktivasi; Coach mereaktivasi Enrollment yang sama sambil mempertahankan histori.",
+      "blocked_by": [
+        23
+      ],
+      "stories": [
+        60,
+        61,
+        62,
+        63,
+        64
+      ],
+      "what_to_build": "Provide learner self-deactivation and Coach deactivation/reactivation in the application, showing the resulting read-only learning history and continued eligibility of previously submitted work. This consumes the existing lifecycle API and can proceed independently of the override-management UI.",
+      "acceptance": [
+        "Learner self-deactivation requires no reason; Coach deactivation and reactivation require recorded reasons.",
+        "Inactive participation blocks new Task starts and sends while preserving history, XP, and Mastery; unsent draft contents remain private.",
+        "The Coach can still decide eligible unsuperseded work submitted before inactivity, and resulting XP/Mastery is visible without reactivating the Enrollment.",
+        "Only the owning Coach can resume participation, retaining the Enrollment, Version, and progress and showing current Access; replayed invitations or an existing override do not resume it.",
+        "Browser scenarios cover both deactivation actors, pending Review, unauthorized reactivation, and resumed learning with preserved history."
+      ],
+      "issue_number": 27,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/27",
+      "published_title": "[MVP/T26] Stop and resume participation from learner and Coach views",
+      "issue_database_id": 5401293230,
+      "native_blocking_issue_numbers": [
+        24
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 27,
+      "slug": "share-coach-layout-updates",
+      "stage": "MVP",
+      "title": "Update shared Canvas Layout without changing learning content",
+      "summary_id": "Coach merapikan posisi kartu pada Version terbit; learner mendapat layout terbaru dengan kamera masing-masing.",
+      "blocked_by": [
+        21
+      ],
+      "stories": [
+        74,
+        75,
+        76,
+        77
+      ],
+      "what_to_build": "Allow the owning Coach to improve card positions on an already published Version and let an enrolled learner see the updated shared Canvas Layout on reopening. Keep learning content immutable and camera navigation local to each Account and Path context.",
+      "acceptance": [
+        "The owning Coach can reposition published Skill cards through the editor and persist a layout-only update without creating a new Learning Path Version.",
+        "Learners see the latest layout for their pinned Version on reopening while retaining their own local camera state; they cannot save position edits.",
+        "Layout requests cannot alter Skills, Tasks, Prerequisites, progress, Reviews, or XP, and backend authorization protects against direct requests as well as UI misuse.",
+        "Expected-revision saves reject stale layout writes while retaining local edits; undoing a saved position change creates a newly validated edit.",
+        "A Coach/learner browser scenario verifies layout refresh, unchanged learning definitions/history, camera isolation, and rejected learner mutation."
+      ],
+      "issue_number": 28,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/28",
+      "published_title": "[MVP/T27] Update shared Canvas Layout without changing learning content",
+      "issue_database_id": 5401294094,
+      "native_blocking_issue_numbers": [
+        22
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 28,
+      "slug": "recover-stale-and-unsaved-work",
+      "stage": "MVP",
+      "title": "Recover stale editor saves and private unsent work",
+      "summary_id": "Konflik dua tab mempertahankan perubahan lokal; pemulihan draft dan editor aman antar-Account.",
+      "blocked_by": [
+        22,
+        27
+      ],
+      "stories": [
+        77,
+        78,
+        79,
+        83,
+        85
+      ],
+      "what_to_build": "Make rejected stale saves and interrupted editing recoverable from the application without silently overwriting accepted state or mixing private work across Accounts. Complete the user-facing recovery path for personal/Coach editing and learner drafts while preserving the distinct editor and application payloads.",
+      "acceptance": [
+        "When two tabs save against the same base revision, the stale write is rejected, accepted server state remains intact, and the losing tab retains its local editor/application checkpoint.",
+        "The UI explains the conflict and lets the owner inspect retained local work, load current state, and deliberately reapply edits through a new validated save rather than force-overwriting stale state.",
+        "Interrupted draft editing remains recoverable only for its owning Account/context; Account switching cannot expose another learner's draft or personal Path recovery data.",
+        "Restored editor IDs, positions, connections, and separately owned Task data remain coherent; format version, save revision, and Learning Path Version are not interchangeable.",
+        "Offline/failed Submission, Review, and XP requests remain unsuccessful until backend confirmation and retain appropriate local input without claiming offline domain completion.",
+        "Browser integration checks exercise competing tabs, reload/recovery, rejected reapplication, and Account switching through the real persistence and visibility boundaries."
+      ],
+      "issue_number": 29,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/29",
+      "published_title": "[MVP/T28] Recover stale editor saves and private unsent work",
+      "issue_database_id": 5401295161,
+      "native_blocking_issue_numbers": [
+        23,
+        28
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 29,
+      "slug": "copy-independent-learning-content",
+      "stage": "MVP",
+      "title": "Reuse Skills and Tasks as independent learning definitions",
+      "summary_id": "Salin Skill beserta Task atau salin Task saja dengan ID baru dan tanpa membawa progres.",
+      "blocked_by": [
+        19
+      ],
+      "stories": [
+        7,
+        9,
+        10,
+        36,
+        48
+      ],
+      "what_to_build": "Let an authorized author reuse an accessible Skill with its Tasks in another editable Learning Path, or reuse one Task in another Skill, through a deliberate copy action. Give the resulting definitions independent identities and editing behavior without inheriting evidence or progress.",
+      "acceptance": [
+        "Copying a Skill creates a new Skill logical ID and new IDs for its copied Task definitions in the destination Path; copying a Task alone creates a new Task in its destination Skill.",
+        "The source remains unchanged when the copy is edited, and its Submissions, Approvals, XP, Mastery, and Enrollment progress never transfer.",
+        "A copied Skill brings its own Task definitions; prerequisites involving Skills outside the copied set are not carried across as cross-Path or cross-Version links. Destination dependencies are authored under the normal graph rules.",
+        "Source reads and destination writes obey their existing privacy/ownership rules, and published content can only be changed through an editable Draft/new Version.",
+        "Browser/backend tests copy personal and authorized Coach content, edit the result, reload both sides, and verify new identities, isolated definitions, and absent inherited progress."
+      ],
+      "issue_number": 30,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/30",
+      "published_title": "[MVP/T29] Reuse Skills and Tasks as independent learning definitions",
+      "issue_database_id": 5401296304,
+      "native_blocking_issue_numbers": [
+        20
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 30,
+      "slug": "archive-content-with-history",
+      "stage": "MVP",
+      "title": "Archive learning content while keeping evidence and progress readable",
+      "summary_id": "Konten berhistori diarsipkan; Submission, Review, XP, Mastery, dan privasinya tetap dipertahankan.",
+      "blocked_by": [
+        17,
+        23
+      ],
+      "stories": [
+        41,
+        42,
+        66,
+        67
+      ],
+      "what_to_build": "Provide a minimal Archival action and retained-history view for learning content with progress, reusing the proven personal retention behavior and applying it to existing assessment references. Preserve published coach-mode learning contracts and avoid introducing an undecided restoration or broader Workspace lifecycle policy.",
+      "acceptance": [
+        "Attempts to permanently delete learning content with progress history are rejected in favor of Archival; content and historical references remain available to their authorized readers.",
+        "Archival by itself removes no Task XP contribution and revokes no Mastery, Approval, Submission, or Review; current history remains understandable after reload.",
+        "Personal content stays owner-only, Enrollment history stays learner/owning-Coach-only, and unsent drafts remain learner-only through archived read paths.",
+        "Published Version content cannot be removed or rewritten by archival/deletion; removing content from a later editable Draft preserves earlier Versions and Enrollments.",
+        "The minimal UI reports retained history and honors existing edit permissions without adding archive restoration, account deletion, or ownership-transfer policies.",
+        "Browser-to-PostgreSQL tests archive a completed personal Task and exercise retained coached evidence, blocked permanent deletion, immutable published content, and privacy."
+      ],
+      "issue_number": 31,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/31",
+      "published_title": "[MVP/T30] Archive learning content while keeping evidence and progress readable",
+      "issue_database_id": 5401297258,
+      "native_blocking_issue_numbers": [
+        18,
+        24
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 31,
+      "slug": "arrange-selected-skills",
+      "stage": "MVP",
+      "title": "Arrange several selected Skills in one editor operation",
+      "summary_id": "Box multiselection dan drag beberapa Skill tersimpan sebagai satu operasi yang bisa di-undo.",
+      "blocked_by": [
+        16
+      ],
+      "stories": [
+        69,
+        72,
+        77,
+        80
+      ],
+      "what_to_build": "Select several Skill cards with a box and drag the selection as one arrangement edit in a persisted editable Path. Extend the proven single-card flow while keeping connections, HTML labels, undo semantics, and backend saves coherent.",
+      "acceptance": [
+        "Box selection identifies the intended cards at different camera positions/zoom levels, and dragging preserves their relative positions within world limits.",
+        "Connections and labels remain attached to the correct Skills while a selection moves, without copying position authority into React.",
+        "One completed selection drag is one undo step; undo/redo and the subsequent validated save restore all affected positions coherently.",
+        "Reload preserves the final saved arrangement while selection and undo history remain session-only; unauthorized layout editing remains rejected.",
+        "Public-core and browser persistence checks cover multiselection, dragging, undo/redo, limits, and label/edge alignment, with relevant primary-workload regression measurements for changed interaction paths."
+      ],
+      "issue_number": 32,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/32",
+      "published_title": "[MVP/T31] Arrange several selected Skills in one editor operation",
+      "issue_database_id": 5401298380,
+      "native_blocking_issue_numbers": [
+        17
+      ],
+      "publication_verified": true
+    },
+    {
+      "id": 32,
+      "slug": "delete-unused-editor-content",
+      "stage": "MVP",
+      "title": "Delete unused Skills and connections without erasing learning history",
+      "summary_id": "Hapus konten yang belum berhistori dan koneksi editable dengan aman; undo tetap tunduk pada validasi domain.",
+      "blocked_by": [
+        30
+      ],
+      "stories": [
+        66,
+        67,
+        71,
+        72,
+        77
+      ],
+      "what_to_build": "Complete the editor deletion flow for unused learning content and editable Prerequisite connections, using the existing history-retention guard. A delete or undo must produce a valid persisted editor/application result and cannot bypass published-content immutability or rewrite assessment history.",
+      "acceptance": [
+        "An authorized author can delete an unused Skill card and its unused owned Task definitions, or remove a connection from an editable Path, leaving no dangling editor or learning references.",
+        "Any affected learning history prevents permanent deletion and leads to the existing Archival behavior; the action cannot delete published Version content in place.",
+        "Undo/redo for accepted editor deletion restores or reapplies valid definitions, positions, and graph connections through the normal ownership/validation boundary, including after a save.",
+        "Undo does not rewind Reviews, XP, Mastery, or Enrollment history; a restoration that no longer passes current backend rules is rejected with local work retained.",
+        "Browser-to-backend checks cover unused deletion, connection deletion, semantic reload, undo/redo, retained historical work, and rejection of forbidden or stale edits."
+      ],
+      "issue_number": 33,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/33",
+      "published_title": "[MVP/T32] Delete unused Skills and connections without erasing learning history",
+      "issue_database_id": 5401299281,
+      "native_blocking_issue_numbers": [
+        31
+      ],
+      "publication_verified": true
+    }
+  ],
+  "relationship_type": "native-blocking",
+  "publication_verified_at_utc": "2026-09-09T15:14:01.653500+00:00",
+  "verification": {
+    "issue_count": 32,
+    "native_blocking_edge_count": 36,
+    "parent_unchanged": true,
+    "all_bodies_match_local_files": true,
+    "all_labels_present": true,
+    "initial_frontier": [
+      2
+    ]
+  }
+}

@@ -1,0 +1,5 @@
+# Model Prerequisites as a directed acyclic graph
+
+Both personal and coach modes model Skills and their Prerequisites as a directed acyclic graph: a Skill may have multiple prerequisites, and a prerequisite may feed multiple downstream Skills. Adding a prerequisite that creates a cycle is rejected immediately, keeping prerequisite-based progression from depending on a loop of unmet Mastery requirements. This supports branching and shared foundations within the graph, while iterative learning relationships must be expressed as distinct stages rather than cyclic Prerequisites.
+
+For the MVP, Prerequisites connect Skills only within the same Learning Path and, in coach mode, within the same Learning Path Version. A Skill from another path can be reused through an independent copy, following the ownership rule in [ADR 0004](0004-scope-skills-and-tasks-to-learning-paths.md). This lets each path be managed independently at the cost of being unable to directly require Mastery of a Skill belonging to another path.

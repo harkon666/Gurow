@@ -1,0 +1,5 @@
+# Scope Skills and Tasks to their Learning Path
+
+In the MVP, each Skill belongs to exactly one Learning Path and each Task belongs to exactly one Skill, allowing learning outcomes and assessment requirements to be designed for the owning Learning Path. Reuse across Learning Paths copies a Skill definition and its Task definitions into an independently editable Skill; reusing a Task in another Skill similarly creates a separate Task with its own learner work and Reviews. This keeps definition changes local to their owning Skill and Learning Path at the cost of duplicated content and source corrections that do not automatically update copies.
+
+Within a Learning Path, Skill and Task logical IDs remain stable across Learning Path Versions, while their definitions are version-specific. Independent copies receive new logical IDs. This allows changes to be traced across Versions, at the cost of distinguishing an object's logical identity from a particular version of its definition. Matching IDs do not transfer progress between Enrollments or relax the MVP rule against Enrollment migration.
