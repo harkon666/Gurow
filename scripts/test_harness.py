@@ -131,6 +131,17 @@ class HarnessTests(unittest.TestCase):
         (self.root / report['checks'][0]['log']).write_text('different output')
         self.assertIn('Evidence log missing/changed', self.cli('review', code=1))
 
+    def test_modified_or_missing_reviewer_spec_cannot_reuse_passing_evidence(self):
+        self.cli('check')
+        spec = self.root / '.harness/spec.md'
+        spec.write_text('# Different spec\nNo restoration required\n')
+        self.assertIn('STALE', self.cli('status'))
+        self.cli('review', code=1)
+        self.assertIn('spec.md differs', self.cli('check', code=1))
+        spec.unlink()
+        self.cli('review', code=1)
+        self.assertIn('spec.md differs', self.cli('check', code=1))
+
 
 if __name__ == '__main__':
     unittest.main()

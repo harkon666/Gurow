@@ -69,7 +69,12 @@ def task():
 
 def input_hash():
     return digest((source_hash() + (STATE / 'task.json').read_text()
-                   + (STATE / 'issue.json').read_text()).encode())
+                   + (STATE / 'issue.json').read_text()
+                   + (STATE / 'spec.md').read_text()).encode())
+
+
+def spec_text(issue):
+    return f"# {issue['title']}\n\n{issue['url']}\n\n{issue['body']}"
 
 
 def acceptance_criteria(body):
@@ -98,7 +103,7 @@ def start(args):
     criteria = acceptance_criteria(issue['body'])
     STATE.mkdir(exist_ok=True)
     write_json(STATE / 'issue.json', issue)
-    (STATE / 'spec.md').write_text(f"# {issue['title']}\n\n{issue['url']}\n\n{issue['body']}")
+    (STATE / 'spec.md').write_text(spec_text(issue))
     write_json(STATE / 'task.json', {
         'ticket': ticket, 'base': base, 'issue_url': issue['url'],
         'criteria': [{'id': f'AC{i}', 'requirement': text, 'test': '', 'assertion': ''}
@@ -110,7 +115,11 @@ def start(args):
 
 
 def proof_gaps(current):
-    expected = acceptance_criteria(read_json(STATE / 'issue.json')['body'])
+    issue = read_json(STATE / 'issue.json')
+    spec = STATE / 'spec.md'
+    if not spec.is_file() or spec.read_text() != spec_text(issue):
+        return ['spec.md differs from the captured GitHub issue; restore it from issue.json.']
+    expected = acceptance_criteria(issue['body'])
     rows = current.get('criteria', [])
     if [r.get('requirement') for r in rows] != expected:
         return ['Acceptance criteria differ from the captured GitHub issue.']
