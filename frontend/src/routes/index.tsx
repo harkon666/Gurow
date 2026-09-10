@@ -1,8 +1,9 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useState, useEffect } from 'react'
-import { WebGpuEditor } from '../components/editor/WebGpuEditor'
+import { useState, useEffect, useRef, useCallback } from 'react'
+import { WebGpuEditor, type WebGpuEditorActions } from '../components/editor/WebGpuEditor'
 import { SkillDetailPanel } from '../components/editor/SkillDetailPanel'
 import type { SelectedSkillInfo } from '../components/editor/types'
+import type { PrerequisiteConnection } from '../components/editor/protocol'
 import { INITIAL_LEARNING_PATH_FIXTURE } from '../fixtures/learningPath'
 
 
@@ -11,9 +12,24 @@ export const Route = createFileRoute('/')({ component: LearningPathEditorPage })
 function LearningPathEditorPage() {
   const [mounted, setMounted] = useState(false)
   const [selectedSkill, setSelectedSkill] = useState<SelectedSkillInfo | null>(null)
+  const [connections, setConnections] = useState<PrerequisiteConnection[]>([])
+  const [connectionRejection, setConnectionRejection] = useState<string | null>(null)
+  const actionsRef = useRef<WebGpuEditorActions | null>(null)
 
   useEffect(() => {
     setMounted(true)
+  }, [])
+
+  const handleActionsReady = useCallback((actions: WebGpuEditorActions) => {
+    actionsRef.current = actions
+  }, [])
+
+  const handleConnect = useCallback((fromId: string, toId: string) => {
+    actionsRef.current?.connectSkills(fromId, toId)
+  }, [])
+
+  const handleDisconnect = useCallback((fromId: string, toId: string) => {
+    actionsRef.current?.disconnectSkills(fromId, toId)
   }, [])
 
   return (
@@ -25,7 +41,7 @@ function LearningPathEditorPage() {
             <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
               P1 Slice: WebGPU Editor
             </span>
-            <span className="text-xs text-slate-500 font-mono">US68 • US73 • US80</span>
+            <span className="text-xs text-slate-500 font-mono">US11 • US12 • US71 • US80</span>
           </div>
           <h1 className="text-2xl font-bold text-slate-100 tracking-tight">
             {INITIAL_LEARNING_PATH_FIXTURE.title}
@@ -52,8 +68,18 @@ function LearningPathEditorPage() {
           <>
             <WebGpuEditor
               onSelectSkill={setSelectedSkill}
+              onConnectionsChange={setConnections}
+              onRejection={setConnectionRejection}
+              onActionsReady={handleActionsReady}
             />
-            <SkillDetailPanel selectedSkill={selectedSkill} />
+            <SkillDetailPanel
+              selectedSkill={selectedSkill}
+              connections={connections}
+              connectionRejection={connectionRejection}
+              onClearRejection={() => setConnectionRejection(null)}
+              onConnect={handleConnect}
+              onDisconnect={handleDisconnect}
+            />
           </>
         ) : (
           <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">

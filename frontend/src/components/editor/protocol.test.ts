@@ -330,5 +330,88 @@ describe('Editor Protocol Schemas (Matt Pocock SDD)', () => {
         EditorEventsSchema.parse([{ type: 'BogusEvent' }])
       ).toThrow()
     })
+
+    it('validates ConnectSkills and DisconnectSkills commands', () => {
+      const connect = EditorCommandSchema.parse({
+        type: 'ConnectSkills',
+        from_id: 'skill-1',
+        to_id: 'skill-2',
+      })
+      expect(connect).toEqual({
+        type: 'ConnectSkills',
+        from_id: 'skill-1',
+        to_id: 'skill-2',
+      })
+
+      const disconnect = EditorCommandSchema.parse({
+        type: 'DisconnectSkills',
+        from_id: 'skill-1',
+        to_id: 'skill-2',
+      })
+      expect(disconnect).toEqual({
+        type: 'DisconnectSkills',
+        from_id: 'skill-1',
+        to_id: 'skill-2',
+      })
+    })
+
+    it('validates ConnectionCreated, ConnectionDeleted, ConnectionRejected, and ConnectionsUpdated events', () => {
+      const created = EditorEventSchema.parse({
+        type: 'ConnectionCreated',
+        from_id: 'skill-a',
+        to_id: 'skill-b',
+      })
+      expect(created).toEqual({
+        type: 'ConnectionCreated',
+        from_id: 'skill-a',
+        to_id: 'skill-b',
+      })
+
+      const deleted = EditorEventSchema.parse({
+        type: 'ConnectionDeleted',
+        from_id: 'skill-a',
+        to_id: 'skill-b',
+      })
+      expect(deleted).toEqual({
+        type: 'ConnectionDeleted',
+        from_id: 'skill-a',
+        to_id: 'skill-b',
+      })
+
+      const rejected = EditorEventSchema.parse({
+        type: 'ConnectionRejected',
+        from_id: 'skill-b',
+        to_id: 'skill-a',
+        reason: 'Cannot connect: creates a cycle (Skill B → Skill A → Skill B). Prerequisite graph must remain acyclic (DAG).',
+      })
+      expect(rejected.type).toBe('ConnectionRejected')
+      if (rejected.type === 'ConnectionRejected') {
+        expect(rejected.reason).toContain('creates a cycle')
+      }
+
+      const updated = EditorEventSchema.parse({
+        type: 'ConnectionsUpdated',
+        connections: [{ from_id: 'skill-a', to_id: 'skill-b' }],
+      })
+      expect(updated.type).toBe('ConnectionsUpdated')
+      if (updated.type === 'ConnectionsUpdated') {
+        expect(updated.connections.length).toBe(1)
+        expect(updated.connections[0]).toEqual({ from_id: 'skill-a', to_id: 'skill-b' })
+      }
+    })
+
+    it('validates LoadDocument with connections', () => {
+      const loadWithConn = EditorCommandSchema.parse({
+        type: 'LoadDocument',
+        document: {
+          cards: [{ id: 'c1', title: 'Card 1', position: { x: 0, y: 0 } }],
+          connections: [{ from_id: 'c1', to_id: 'c2' }],
+        },
+      })
+      expect(loadWithConn.type).toBe('LoadDocument')
+      if (loadWithConn.type === 'LoadDocument') {
+        expect(loadWithConn.document.connections?.length).toBe(1)
+      }
+    })
   })
 })

@@ -1,4 +1,4 @@
-use crate::document::{CanvasDocument, SkillCard};
+use crate::document::{CanvasDocument, PrerequisiteConnection, SkillCard};
 use crate::geometry::{Point, Rect, Size};
 use serde::{Deserialize, Serialize};
 
@@ -58,6 +58,14 @@ pub enum EditorCommand {
         width: f32,
         height: f32,
     },
+    ConnectSkills {
+        from_id: String,
+        to_id: String,
+    },
+    DisconnectSkills {
+        from_id: String,
+        to_id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -82,6 +90,22 @@ pub enum EditorEvent {
     HistoryChanged {
         can_undo: bool,
         can_redo: bool,
+    },
+    ConnectionCreated {
+        from_id: String,
+        to_id: String,
+    },
+    ConnectionDeleted {
+        from_id: String,
+        to_id: String,
+    },
+    ConnectionRejected {
+        from_id: String,
+        to_id: String,
+        reason: String,
+    },
+    ConnectionsUpdated {
+        connections: Vec<PrerequisiteConnection>,
     },
     GpuError { message: String },
     Error { message: String },

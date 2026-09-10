@@ -1,4 +1,4 @@
-use crate::document::{CanvasDocument, SkillCard};
+use crate::document::{CanvasDocument, ConnectionError, SkillCard};
 use crate::geometry::{clamp_world_point, Camera, Point, Size};
 use crate::protocol::{EditorCommand, EditorEvent, LabelLayout, SelectionChange};
 
@@ -108,6 +108,10 @@ impl EditorState {
             .collect()
     }
 
+    pub fn find_path(&self, start: &str, target: &str) -> Option<Vec<String>> {
+        self.document.find_path(start, target)
+    }
+
     pub fn cancel_active_interaction(&mut self, events: &mut Vec<EditorEvent>) -> bool {
         let mut labels_changed = false;
         match std::mem::replace(&mut self.interaction, InteractionState::Idle) {
@@ -186,6 +190,9 @@ impl EditorState {
                     }
                 }
                 events.push(EditorEvent::DocumentLoaded);
+                events.push(EditorEvent::ConnectionsUpdated {
+                    connections: self.document.connections.clone(),
+                });
                 events.push(EditorEvent::HistoryChanged {
                     can_undo: false,
                     can_redo: false,
@@ -418,6 +425,88 @@ impl EditorState {
             EditorCommand::ResizeViewport { width, height } => {
                 self.set_viewport(width, height);
                 labels_changed = true;
+            }
+            EditorCommand::ConnectSkills { from_id, to_id } => {
+                match self.document.try_add_connection(&from_id, &to_id) {
+                    Ok(()) => {
+                        events.push(EditorEvent::ConnectionCreated {
+                            from_id: from_id.clone(),
+                            to_id: to_id.clone(),
+                        });
+                        events.push(EditorEvent::ConnectionsUpdated {
+                            connections: self.document.connections.clone(),
+                        });
+                    }
+                    Err(ConnectionError::SourceCardNotFound(id)) => {
+                        events.push(EditorEvent::ConnectionRejected {
+                            from_id: from_id.clone(),
+                            to_id: to_id.clone(),
+                            reason: format!("Source skill card '{}' not found", id),
+                        });
+                    }
+                    Err(ConnectionError::TargetCardNotFound(id)) => {
+                        events.push(EditorEvent::ConnectionRejected {
+                            from_id: from_id.clone(),
+                            to_id: to_id.clone(),
+                            reason: format!("Target skill card '{}' not found", id),
+                        });
+                    }
+                    Err(ConnectionError::SelfCycle(id)) => {
+                        events.push(EditorEvent::ConnectionRejected {
+                            from_id: from_id.clone(),
+                            to_id: to_id.clone(),
+                            reason: format!(
+                                "Cannot connect '{}' to itself: self-prerequisite creates an immediate cycle",
+                                id
+                            ),
+                        });
+                    }
+                    Err(ConnectionError::AlreadyConnected(from, to)) => {
+                        events.push(EditorEvent::ConnectionRejected {
+                            from_id: from_id.clone(),
+                            to_id: to_id.clone(),
+                            reason: format!(
+                                "Prerequisite connection from '{}' to '{}' already exists",
+                                from, to
+                            ),
+                        });
+                    }
+                    Err(ConnectionError::CreatesCycle { path }) => {
+                        let cycle_display: Vec<String> = std::iter::once(&from_id)
+                            .chain(path.iter())
+                            .map(|id| {
+                                self.document
+                                    .find_card(id)
+                                    .map(|c| format!("{} ({})", c.title, id))
+                                    .unwrap_or_else(|| id.clone())
+                            })
+                            .collect();
+                        let reason = format!(
+                            "Cannot connect: creates a cycle ({}). Prerequisite graph must remain acyclic (DAG).",
+                            cycle_display.join(" → ")
+                        );
+                        events.push(EditorEvent::ConnectionRejected {
+                            from_id,
+                            to_id,
+                            reason,
+                        });
+                    }
+                }
+            }
+            EditorCommand::DisconnectSkills { from_id, to_id } => {
+                if self.document.remove_connection(&from_id, &to_id) {
+                    events.push(EditorEvent::ConnectionDeleted {
+                        from_id: from_id.clone(),
+                        to_id: to_id.clone(),
+                    });
+                    events.push(EditorEvent::ConnectionsUpdated {
+                        connections: self.document.connections.clone(),
+                    });
+                } else {
+                    events.push(EditorEvent::Error {
+                        message: format!("Connection from '{}' to '{}' does not exist", from_id, to_id),
+                    });
+                }
             }
         }
 

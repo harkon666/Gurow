@@ -7,6 +7,7 @@ import {
   type EditorEvent,
   type LabelLayout,
   type Point,
+  type PrerequisiteConnection,
   type Size,
 } from './protocol'
 import type { GpuStatus, SelectedSkillInfo } from './types'
@@ -32,6 +33,8 @@ export function useWasmEditor({
 }: UseWasmEditorOptions) {
   const editorRef = useRef<WasmEditor | null>(null)
   const [labels, setLabels] = useState<LabelLayout[]>([])
+  const [connections, setConnections] = useState<PrerequisiteConnection[]>([])
+  const [connectionRejection, setConnectionRejection] = useState<string | null>(null)
   const [zoom, setZoom] = useState<number>(1.0)
   const [canUndo, setCanUndo] = useState<boolean>(false)
   const [canRedo, setCanRedo] = useState<boolean>(false)
@@ -57,6 +60,17 @@ export function useWasmEditor({
           break
         case 'LabelsUpdated':
           setLabels(event.labels)
+          break
+        case 'ConnectionsUpdated':
+          setConnections(event.connections)
+          break
+        case 'ConnectionCreated':
+        case 'ConnectionDeleted':
+          setConnectionRejection(null)
+          break
+        case 'ConnectionRejected':
+          setConnectionRejection(event.reason)
+          setEngineError(event.reason)
           break
         case 'CameraChanged':
           setZoom(event.zoom)
@@ -402,8 +416,33 @@ export function useWasmEditor({
     })
   }, [canvasRef, dispatch, zoom])
 
+  const connectSkills = useCallback(
+    (fromId: string, toId: string) => {
+      dispatch({
+        type: 'ConnectSkills',
+        from_id: fromId,
+        to_id: toId,
+      })
+    },
+    [dispatch]
+  )
+
+  const disconnectSkills = useCallback(
+    (fromId: string, toId: string) => {
+      dispatch({
+        type: 'DisconnectSkills',
+        from_id: fromId,
+        to_id: toId,
+      })
+    },
+    [dispatch]
+  )
+
   return {
     labels,
+    connections,
+    connectionRejection,
+    clearConnectionRejection: () => setConnectionRejection(null),
     zoom,
     canUndo,
     canRedo,
@@ -412,6 +451,8 @@ export function useWasmEditor({
     engineError,
     clearEngineError: () => setEngineError(null),
     dispatch,
+    connectSkills,
+    disconnectSkills,
     handlePointerDown,
     handlePointerMove,
     handlePointerUp,

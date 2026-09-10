@@ -500,4 +500,386 @@ fn test_undo_during_active_drag_preserves_history() {
     assert_eq!(state.document.find_card("card-drag-bug").unwrap().position, Point::new(100.0, 100.0));
 }
 
+#[test]
+fn test_connect_skills_valid_and_branching() {
+    let mut state = EditorState::new();
+    state.apply_command(EditorCommand::CreateCard {
+        id: "skill-a".into(),
+        title: "Skill A".into(),
+        position: Point::new(0.0, 0.0),
+        size: None,
+    });
+    state.apply_command(EditorCommand::CreateCard {
+        id: "skill-b".into(),
+        title: "Skill B".into(),
+        position: Point::new(200.0, 0.0),
+        size: None,
+    });
+    state.apply_command(EditorCommand::CreateCard {
+        id: "skill-c".into(),
+        title: "Skill C".into(),
+        position: Point::new(400.0, 0.0),
+        size: None,
+    });
+    state.apply_command(EditorCommand::CreateCard {
+        id: "skill-d".into(),
+        title: "Skill D".into(),
+        position: Point::new(200.0, 200.0),
+        size: None,
+    });
+
+    // 1. Connect A -> B (A is prerequisite for B)
+    let events = state.apply_command(EditorCommand::ConnectSkills {
+        from_id: "skill-a".into(),
+        to_id: "skill-b".into(),
+    });
+    assert!(events.iter().any(|e| matches!(
+        e,
+        EditorEvent::ConnectionCreated { from_id, to_id }
+            if from_id == "skill-a" && to_id == "skill-b"
+    )));
+    assert_eq!(state.document.connections.len(), 1);
+    assert!(state.document.has_connection("skill-a", "skill-b"));
+
+    // 2. Convergent Branching: Multiple prerequisites for C (A -> C and B -> C)
+    state.apply_command(EditorCommand::ConnectSkills {
+        from_id: "skill-a".into(),
+        to_id: "skill-c".into(),
+    });
+    state.apply_command(EditorCommand::ConnectSkills {
+        from_id: "skill-b".into(),
+        to_id: "skill-c".into(),
+    });
+    assert_eq!(state.document.connections.len(), 3);
+
+    // 3. Divergent Branching: A feeds both B and D
+    state.apply_command(EditorCommand::ConnectSkills {
+        from_id: "skill-a".into(),
+        to_id: "skill-d".into(),
+    });
+    assert_eq!(state.document.connections.len(), 4);
+    assert!(state.document.has_connection("skill-a", "skill-d"));
+}
+
+#[test]
+fn test_connect_skills_self_cycle_rejected() {
+    let mut state = EditorState::new();
+    state.apply_command(EditorCommand::CreateCard {
+        id: "skill-a".into(),
+        title: "Skill A".into(),
+        position: Point::new(0.0, 0.0),
+        size: None,
+    });
+
+    // Attempt connecting A -> A
+    let events = state.apply_command(EditorCommand::ConnectSkills {
+        from_id: "skill-a".into(),
+        to_id: "skill-a".into(),
+    });
+
+    assert_eq!(state.document.connections.len(), 0);
+    let rejected = events.iter().find(|e| matches!(e, EditorEvent::ConnectionRejected { .. }));
+    assert!(rejected.is_some(), "Expected ConnectionRejected event");
+    if let Some(EditorEvent::ConnectionRejected { from_id, to_id, reason }) = rejected {
+        assert_eq!(from_id, "skill-a");
+        assert_eq!(to_id, "skill-a");
+        assert!(reason.contains("self-prerequisite") || reason.contains("cycle"));
+    }
+}
+
+#[test]
+fn test_connect_skills_2_node_cycle_rejected() {
+    let mut state = EditorState::new();
+    state.apply_command(EditorCommand::CreateCard {
+        id: "skill-a".into(),
+        title: "Skill A".into(),
+        position: Point::new(0.0, 0.0),
+        size: None,
+    });
+    state.apply_command(EditorCommand::CreateCard {
+        id: "skill-b".into(),
+        title: "Skill B".into(),
+        position: Point::new(200.0, 0.0),
+        size: None,
+    });
+
+    // A -> B succeeds
+    state.apply_command(EditorCommand::ConnectSkills {
+        from_id: "skill-a".into(),
+        to_id: "skill-b".into(),
+    });
+    assert_eq!(state.document.connections.len(), 1);
+
+    // Attempt B -> A (creates cycle B -> A -> B)
+    let events = state.apply_command(EditorCommand::ConnectSkills {
+        from_id: "skill-b".into(),
+        to_id: "skill-a".into(),
+    });
+
+    // Previous graph must be completely preserved!
+    assert_eq!(state.document.connections.len(), 1);
+    assert!(state.document.has_connection("skill-a", "skill-b"));
+    assert!(!state.document.has_connection("skill-b", "skill-a"));
+
+    let rejected = events.iter().find(|e| matches!(e, EditorEvent::ConnectionRejected { .. }));
+    assert!(rejected.is_some());
+    if let Some(EditorEvent::ConnectionRejected { from_id, to_id, reason }) = rejected {
+        assert_eq!(from_id, "skill-b");
+        assert_eq!(to_id, "skill-a");
+        assert!(reason.contains("cycle"), "Reason must explain cycle: {}", reason);
+    }
+}
+
+#[test]
+fn test_connect_skills_multi_node_cycle_rejected_with_path_explanation() {
+    let mut state = EditorState::new();
+    for name in &["A", "B", "C", "D"] {
+        state.apply_command(EditorCommand::CreateCard {
+            id: format!("skill-{}", name.to_lowercase()),
+            title: format!("Skill {}", name),
+            position: Point::new(0.0, 0.0),
+            size: None,
+        });
+    }
+
+    // A -> B -> C -> D
+    state.apply_command(EditorCommand::ConnectSkills {
+        from_id: "skill-a".into(),
+        to_id: "skill-b".into(),
+    });
+    state.apply_command(EditorCommand::ConnectSkills {
+        from_id: "skill-b".into(),
+        to_id: "skill-c".into(),
+    });
+    state.apply_command(EditorCommand::ConnectSkills {
+        from_id: "skill-c".into(),
+        to_id: "skill-d".into(),
+    });
+    assert_eq!(state.document.connections.len(), 3);
+
+    // Attempt D -> A (would create D -> A -> B -> C -> D)
+    let events = state.apply_command(EditorCommand::ConnectSkills {
+        from_id: "skill-d".into(),
+        to_id: "skill-a".into(),
+    });
+
+    // Unchanged state after cycle-creating edit
+    assert_eq!(state.document.connections.len(), 3);
+    assert!(!state.document.has_connection("skill-d", "skill-a"));
+
+    let rejected = events.iter().find(|e| matches!(e, EditorEvent::ConnectionRejected { .. }));
+    assert!(rejected.is_some());
+    if let Some(EditorEvent::ConnectionRejected { reason, .. }) = rejected {
+        assert!(reason.contains("cycle"), "Reason should mention cycle: {}", reason);
+        assert!(reason.contains("Skill D") && reason.contains("Skill A"));
+    }
+}
+
+#[test]
+fn test_connect_skills_branching_cycle_rejected() {
+    let mut state = EditorState::new();
+    for name in &["A", "B", "C", "D"] {
+        state.apply_command(EditorCommand::CreateCard {
+            id: format!("skill-{}", name.to_lowercase()),
+            title: format!("Skill {}", name),
+            position: Point::new(0.0, 0.0),
+            size: None,
+        });
+    }
+
+    // A -> B -> D
+    // A -> C -> D
+    state.apply_command(EditorCommand::ConnectSkills {
+        from_id: "skill-a".into(),
+        to_id: "skill-b".into(),
+    });
+    state.apply_command(EditorCommand::ConnectSkills {
+        from_id: "skill-b".into(),
+        to_id: "skill-d".into(),
+    });
+    state.apply_command(EditorCommand::ConnectSkills {
+        from_id: "skill-a".into(),
+        to_id: "skill-c".into(),
+    });
+    state.apply_command(EditorCommand::ConnectSkills {
+        from_id: "skill-c".into(),
+        to_id: "skill-d".into(),
+    });
+    assert_eq!(state.document.connections.len(), 4);
+
+    // Attempt D -> A (creates cycle through both branches)
+    let events = state.apply_command(EditorCommand::ConnectSkills {
+        from_id: "skill-d".into(),
+        to_id: "skill-a".into(),
+    });
+
+    assert_eq!(state.document.connections.len(), 4);
+    assert!(events.iter().any(|e| matches!(e, EditorEvent::ConnectionRejected { .. })));
+}
+
+#[test]
+fn test_connect_skills_unknown_card_and_duplicate() {
+    let mut state = EditorState::new();
+    state.apply_command(EditorCommand::CreateCard {
+        id: "skill-1".into(),
+        title: "Skill 1".into(),
+        position: Point::new(0.0, 0.0),
+        size: None,
+    });
+
+    // Unknown target
+    let events1 = state.apply_command(EditorCommand::ConnectSkills {
+        from_id: "skill-1".into(),
+        to_id: "non-existent".into(),
+    });
+    assert!(events1.iter().any(|e| matches!(e, EditorEvent::ConnectionRejected { .. })));
+
+    // Unknown source
+    let events2 = state.apply_command(EditorCommand::ConnectSkills {
+        from_id: "non-existent".into(),
+        to_id: "skill-1".into(),
+    });
+    assert!(events2.iter().any(|e| matches!(e, EditorEvent::ConnectionRejected { .. })));
+
+    // Create skill-2 and connect
+    state.apply_command(EditorCommand::CreateCard {
+        id: "skill-2".into(),
+        title: "Skill 2".into(),
+        position: Point::new(100.0, 0.0),
+        size: None,
+    });
+    state.apply_command(EditorCommand::ConnectSkills {
+        from_id: "skill-1".into(),
+        to_id: "skill-2".into(),
+    });
+    assert_eq!(state.document.connections.len(), 1);
+
+    // Duplicate connect
+    let dup_events = state.apply_command(EditorCommand::ConnectSkills {
+        from_id: "skill-1".into(),
+        to_id: "skill-2".into(),
+    });
+    assert_eq!(state.document.connections.len(), 1);
+    assert!(dup_events.iter().any(|e| matches!(e, EditorEvent::ConnectionRejected { .. })));
+}
+
+#[test]
+fn test_disconnect_skills() {
+    let mut state = EditorState::new();
+    state.apply_command(EditorCommand::CreateCard {
+        id: "skill-1".into(),
+        title: "Skill 1".into(),
+        position: Point::new(0.0, 0.0),
+        size: None,
+    });
+    state.apply_command(EditorCommand::CreateCard {
+        id: "skill-2".into(),
+        title: "Skill 2".into(),
+        position: Point::new(100.0, 0.0),
+        size: None,
+    });
+    state.apply_command(EditorCommand::ConnectSkills {
+        from_id: "skill-1".into(),
+        to_id: "skill-2".into(),
+    });
+    assert_eq!(state.document.connections.len(), 1);
+
+    // Disconnect
+    let events = state.apply_command(EditorCommand::DisconnectSkills {
+        from_id: "skill-1".into(),
+        to_id: "skill-2".into(),
+    });
+    assert_eq!(state.document.connections.len(), 0);
+    assert!(events.iter().any(|e| matches!(
+        e,
+        EditorEvent::ConnectionDeleted { from_id, to_id }
+            if from_id == "skill-1" && to_id == "skill-2"
+    )));
+}
+
+#[test]
+fn test_connection_protocol_serialization_roundtrip() {
+    let conn_cmd = EditorCommand::ConnectSkills {
+        from_id: "skill-a".into(),
+        to_id: "skill-b".into(),
+    };
+    let json_cmd = serde_json::to_string(&conn_cmd).unwrap();
+    let deserialized_cmd: EditorCommand = serde_json::from_str(&json_cmd).unwrap();
+    assert_eq!(conn_cmd, deserialized_cmd);
+
+    let disconn_cmd = EditorCommand::DisconnectSkills {
+        from_id: "skill-a".into(),
+        to_id: "skill-b".into(),
+    };
+    let json_disconn = serde_json::to_string(&disconn_cmd).unwrap();
+    let deserialized_disconn: EditorCommand = serde_json::from_str(&json_disconn).unwrap();
+    assert_eq!(disconn_cmd, deserialized_disconn);
+
+    let events = vec![
+        EditorEvent::ConnectionCreated {
+            from_id: "skill-a".into(),
+            to_id: "skill-b".into(),
+        },
+        EditorEvent::ConnectionDeleted {
+            from_id: "skill-a".into(),
+            to_id: "skill-b".into(),
+        },
+        EditorEvent::ConnectionRejected {
+            from_id: "skill-b".into(),
+            to_id: "skill-a".into(),
+            reason: "Cycle detected".into(),
+        },
+        EditorEvent::ConnectionsUpdated {
+            connections: vec![crate::document::PrerequisiteConnection::new("skill-a", "skill-b")],
+        },
+    ];
+
+    for event in events {
+        let json_event = serde_json::to_string(&event).unwrap();
+        let deserialized_event: EditorEvent = serde_json::from_str(&json_event).unwrap();
+        assert_eq!(event, deserialized_event);
+    }
+}
+
+#[test]
+fn test_canvas_document_encapsulates_connection_invariants() {
+    use crate::document::{CanvasDocument, ConnectionError, SkillCard};
+
+    let mut doc = CanvasDocument::new();
+    doc.add_card(SkillCard::new("card-1", "Card 1", Point::new(0.0, 0.0), None)).unwrap();
+    doc.add_card(SkillCard::new("card-2", "Card 2", Point::new(100.0, 0.0), None)).unwrap();
+    doc.add_card(SkillCard::new("card-3", "Card 3", Point::new(200.0, 0.0), None)).unwrap();
+
+    // 1. Valid connection
+    assert!(doc.try_add_connection("card-1", "card-2").is_ok());
+    assert!(doc.has_connection("card-1", "card-2"));
+
+    // 2. Duplicate connection rejected by document
+    assert_eq!(
+        doc.try_add_connection("card-1", "card-2"),
+        Err(ConnectionError::AlreadyConnected("card-1".into(), "card-2".into()))
+    );
+
+    // 3. Self-cycle rejected by document
+    assert_eq!(
+        doc.try_add_connection("card-1", "card-1"),
+        Err(ConnectionError::SelfCycle("card-1".into()))
+    );
+
+    // 4. Missing cards rejected by document
+    assert_eq!(
+        doc.try_add_connection("missing", "card-2"),
+        Err(ConnectionError::SourceCardNotFound("missing".into()))
+    );
+    assert_eq!(
+        doc.try_add_connection("card-1", "missing"),
+        Err(ConnectionError::TargetCardNotFound("missing".into()))
+    );
+
+    // 5. Multi-node cycle rejected by document with path
+    assert!(doc.try_add_connection("card-2", "card-3").is_ok());
+    let cycle_err = doc.try_add_connection("card-3", "card-1");
+    assert!(matches!(cycle_err, Err(ConnectionError::CreatesCycle { ref path }) if path == &vec!["card-1", "card-2", "card-3"]));
+}
+
 

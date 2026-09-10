@@ -31,6 +31,11 @@ export const SkillCardSchema = z.object({
   size: SizeSchema,
 })
 
+export const PrerequisiteConnectionSchema = z.object({
+  from_id: z.string(),
+  to_id: z.string(),
+})
+
 export const LoadDocumentCommandSchema = z.object({
   type: z.literal('LoadDocument'),
   document: z.object({
@@ -42,6 +47,7 @@ export const LoadDocumentCommandSchema = z.object({
         size: SizeSchema.optional(),
       })
     ),
+    connections: z.array(PrerequisiteConnectionSchema).optional(),
   }),
 })
 
@@ -103,6 +109,18 @@ export const ResizeViewportCommandSchema = z.object({
   height: z.number(),
 })
 
+export const ConnectSkillsCommandSchema = z.object({
+  type: z.literal('ConnectSkills'),
+  from_id: z.string(),
+  to_id: z.string(),
+})
+
+export const DisconnectSkillsCommandSchema = z.object({
+  type: z.literal('DisconnectSkills'),
+  from_id: z.string(),
+  to_id: z.string(),
+})
+
 export const EditorCommandSchema = z.discriminatedUnion('type', [
   LoadDocumentCommandSchema,
   CreateCardCommandSchema,
@@ -115,6 +133,8 @@ export const EditorCommandSchema = z.discriminatedUnion('type', [
   UndoCommandSchema,
   RedoCommandSchema,
   ResizeViewportCommandSchema,
+  ConnectSkillsCommandSchema,
+  DisconnectSkillsCommandSchema,
 ])
 
 export const DocumentLoadedEventSchema = z.object({
@@ -156,6 +176,30 @@ export const HistoryChangedEventSchema = z.object({
   can_redo: z.boolean(),
 })
 
+export const ConnectionCreatedEventSchema = z.object({
+  type: z.literal('ConnectionCreated'),
+  from_id: z.string(),
+  to_id: z.string(),
+})
+
+export const ConnectionDeletedEventSchema = z.object({
+  type: z.literal('ConnectionDeleted'),
+  from_id: z.string(),
+  to_id: z.string(),
+})
+
+export const ConnectionRejectedEventSchema = z.object({
+  type: z.literal('ConnectionRejected'),
+  from_id: z.string(),
+  to_id: z.string(),
+  reason: z.string(),
+})
+
+export const ConnectionsUpdatedEventSchema = z.object({
+  type: z.literal('ConnectionsUpdated'),
+  connections: z.array(PrerequisiteConnectionSchema),
+})
+
 export const GpuErrorEventSchema = z.object({
   type: z.literal('GpuError'),
   message: z.string(),
@@ -174,10 +218,13 @@ export const EditorEventSchema = z.discriminatedUnion('type', [
   LabelsUpdatedEventSchema,
   CameraChangedEventSchema,
   HistoryChangedEventSchema,
+  ConnectionCreatedEventSchema,
+  ConnectionDeletedEventSchema,
+  ConnectionRejectedEventSchema,
+  ConnectionsUpdatedEventSchema,
   GpuErrorEventSchema,
   ErrorEventSchema,
 ])
-
 
 export const EditorEventsSchema = z.array(EditorEventSchema)
 
@@ -187,5 +234,6 @@ export type Size = z.infer<typeof SizeSchema>
 export type Rect = z.infer<typeof RectSchema>
 export type LabelLayout = z.infer<typeof LabelLayoutSchema>
 export type SkillCard = z.infer<typeof SkillCardSchema>
+export type PrerequisiteConnection = z.infer<typeof PrerequisiteConnectionSchema>
 export type EditorCommand = z.infer<typeof EditorCommandSchema>
 export type EditorEvent = z.infer<typeof EditorEventSchema>

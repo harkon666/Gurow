@@ -1,16 +1,28 @@
-import React, { useRef, useMemo } from 'react'
+import React, { useRef, useMemo, useEffect } from 'react'
 import { INITIAL_LEARNING_PATH_FIXTURE } from '../../fixtures/learningPath'
 import type { SelectedSkillInfo } from './types'
+import type { PrerequisiteConnection } from './protocol'
 import { useWasmEditor } from './useWasmEditor'
 import { EditorToolbar } from './EditorToolbar'
 import { SkillCardOverlay } from './SkillCardOverlay'
 
+export interface WebGpuEditorActions {
+  connectSkills: (fromId: string, toId: string) => void
+  disconnectSkills: (fromId: string, toId: string) => void
+}
+
 interface WebGpuEditorProps {
   onSelectSkill: (skill: SelectedSkillInfo | null) => void
+  onConnectionsChange?: (connections: PrerequisiteConnection[]) => void
+  onRejection?: (reason: string | null) => void
+  onActionsReady?: (actions: WebGpuEditorActions) => void
 }
 
 export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
   onSelectSkill,
+  onConnectionsChange,
+  onRejection,
+  onActionsReady,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -27,6 +39,8 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
 
   const {
     labels,
+    connections,
+    connectionRejection,
     zoom,
     canUndo,
     canRedo,
@@ -34,6 +48,8 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
     errorMessage,
     engineError,
     clearEngineError,
+    connectSkills,
+    disconnectSkills,
     handlePointerDown,
     handlePointerMove,
     handlePointerUp,
@@ -48,6 +64,21 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
     onSelectionChanged: onSelectSkill,
     initialCards,
   })
+
+  useEffect(() => {
+    onConnectionsChange?.(connections)
+  }, [connections, onConnectionsChange])
+
+  useEffect(() => {
+    onRejection?.(connectionRejection)
+  }, [connectionRejection, onRejection])
+
+  useEffect(() => {
+    onActionsReady?.({
+      connectSkills,
+      disconnectSkills,
+    })
+  }, [connectSkills, disconnectSkills, onActionsReady])
 
   return (
     <div className="relative flex-1 flex flex-col h-full overflow-hidden bg-slate-950">

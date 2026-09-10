@@ -29,7 +29,10 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   return (
     <div className="h-12 border-b border-slate-800/80 bg-slate-900/60 px-4 flex items-center justify-between backdrop-blur-sm z-20">
       <div className="flex items-center gap-3">
-        <span className="text-xs font-semibold text-slate-300 tracking-wide flex items-center gap-2">
+        <span
+          id="gpu-status-badge"
+          className="text-xs font-semibold text-slate-300 tracking-wide flex items-center gap-2"
+        >
           <span
             className={`w-2 h-2 rounded-full ${
               gpuStatus === 'ready'
@@ -128,7 +131,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
       </div>
 
       <div className="flex items-center gap-2 text-xs text-slate-400">
-        <span className="text-[11px] text-slate-500 font-mono">P1/T02 • Pan, Zoom, Drag & Undo</span>
+        <span className="text-[11px] text-slate-500 font-mono">P1/T03 • Prerequisite DAG & Connections</span>
       </div>
     </div>
   )

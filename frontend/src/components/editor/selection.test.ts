@@ -126,4 +126,53 @@ describe('Editor Seams & Coordinate Transformations (ADR-0015, Matt Pocock SDD)'
       expect(historyEvent.can_redo).toBe(false)
     }
   })
+
+  it('validates prerequisite connection creation and single engine authority', () => {
+    // React dispatches ConnectSkills command without modifying local graph
+    const connectCmd = EditorCommandSchema.parse({
+      type: 'ConnectSkills',
+      from_id: 'skill-rust-basics',
+      to_id: 'skill-ownership',
+    })
+    expect(connectCmd.type).toBe('ConnectSkills')
+
+    // Engine responds with ConnectionCreated and authoritative ConnectionsUpdated
+    const createdEvent = EditorEventSchema.parse({
+      type: 'ConnectionCreated',
+      from_id: 'skill-rust-basics',
+      to_id: 'skill-ownership',
+    })
+    const updatedEvent = EditorEventSchema.parse({
+      type: 'ConnectionsUpdated',
+      connections: [{ from_id: 'skill-rust-basics', to_id: 'skill-ownership' }],
+    })
+
+    expect(createdEvent.type).toBe('ConnectionCreated')
+    expect(updatedEvent.type).toBe('ConnectionsUpdated')
+    if (updatedEvent.type === 'ConnectionsUpdated') {
+      expect(updatedEvent.connections.length).toBe(1)
+      expect(updatedEvent.connections[0]).toEqual({
+        from_id: 'skill-rust-basics',
+        to_id: 'skill-ownership',
+      })
+    }
+  })
+
+  it('validates cycle rejection event with understandable application feedback', () => {
+    // When author attempts cycle: ownership -> rust-basics (which already requires rust-basics)
+    const rejectEvent = EditorEventSchema.parse({
+      type: 'ConnectionRejected',
+      from_id: 'skill-ownership',
+      to_id: 'skill-rust-basics',
+      reason:
+        'Cannot connect: creates a cycle (Rust Fundamentals → Ownership & Borrowing → Rust Fundamentals). Prerequisite graph must remain acyclic (DAG).',
+    })
+
+    expect(rejectEvent.type).toBe('ConnectionRejected')
+    if (rejectEvent.type === 'ConnectionRejected') {
+      expect(rejectEvent.reason).toContain('creates a cycle')
+      expect(rejectEvent.reason).toContain('Prerequisite graph must remain acyclic (DAG)')
+    }
+  })
+
 })
