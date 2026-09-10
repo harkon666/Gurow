@@ -1,0 +1,157 @@
+{
+  "timestamp": "2026-09-10T02:28:28.868Z",
+  "gitCommit": "16f60f550264bab571d7956615a3a1d09c5a629c",
+  "gitTree": "9bbc4d5a291ac63ee2cd7c56eaa91f50f84adbeb",
+  "sourceClean": true,
+  "ticket": "P1/T01",
+  "status": {
+    "ticketStatus": "PASSED",
+    "p1StageStatus": "IN_PROGRESS"
+  },
+  "layersExecuted": [
+    "Layer 1: Native Rust tests (coordinate transforms, hit-testing, protocol serialization, cards with selection query)",
+    "Layer 2: TypeScript protocol schemas & invariants (Matt Pocock SDD, Zod runtime validation, single selection authority)",
+    "Layer 3: Browser WebGPU integration & hit-testing (Chromium WebGPU, canvas hit-test selection, pixel assertion, Enrichment Task glossary verification)"
+  ],
+  "buildAndRunProcedure": {
+    "prerequisites": [
+      "Bun v1.3+ (package manager and test runner)",
+      "Rust & Cargo with wasm32-unknown-unknown target",
+      "wasm-pack (via bunx or cargo)",
+      "Chromium or Google Chrome binary",
+      "Python 3 with Pillow library (pip install Pillow)"
+    ],
+    "commands": [
+      "cargo test --manifest-path editor/Cargo.toml",
+      "cd frontend && bun run typecheck",
+      "cd frontend && bun test",
+      "cd frontend && bun run build",
+      "cd frontend && bun run smoke-check"
+    ]
+  },
+  "environment": {
+    "os": "Linux 6.19.9-arch1-1 x86_64",
+    "browser": "Chromium 146.0.7680.164 Arch Linux",
+    "browserPath": "/usr/bin/chromium",
+    "viewport": {
+      "width": 1280,
+      "height": 800,
+      "devicePixelRatio": 1
+    },
+    "checkedDevicePixelRatios": [
+      1,
+      1.5,
+      2
+    ],
+    "hostGpuHardware": "00:02.0 VGA compatible controller: Intel Corporation Alder Lake-S [UHD Graphics] (rev 0c)\n01:00.0 VGA compatible controller: NVIDIA Corporation AD107M [GeForce RTX 4050 Max-Q / Mobile] (rev a1)",
+    "webgpuAdapter": {
+      "available": true,
+      "vendor": "google",
+      "architecture": "swiftshader",
+      "device": "unknown",
+      "description": "unknown",
+      "isFallbackAdapter": true,
+      "requestOptions": {
+        "powerPreference": "high-performance"
+      },
+      "adapterType": "SwiftShader (Software Fallback via ANGLE)",
+      "note": "Renderer adapter observed at requestAdapter: SwiftShader (Software Fallback via ANGLE). Hardware performance is not measured by this smoke check."
+    }
+  },
+  "results": {
+    "layer1RustTests": "PASSED",
+    "layer2SchemaTests": "PASSED",
+    "layer2Typecheck": "PASSED",
+    "canvasChecks": [
+      {
+        "phase": "initial",
+        "dpr": 1,
+        "width": 926,
+        "height": 590,
+        "cssWidth": 926,
+        "cssHeight": 590,
+        "exactFixtureCards": true,
+        "selectionPixelsVerified": true
+      },
+      {
+        "phase": "resized",
+        "dpr": 1,
+        "width": 826,
+        "height": 590,
+        "cssWidth": 826,
+        "cssHeight": 590,
+        "exactFixtureCards": true,
+        "selectionPixelsVerified": true
+      },
+      {
+        "phase": "initial",
+        "dpr": 1.5,
+        "width": 1389,
+        "height": 885,
+        "cssWidth": 926,
+        "cssHeight": 590,
+        "exactFixtureCards": true,
+        "selectionPixelsVerified": true
+      },
+      {
+        "phase": "resized",
+        "dpr": 1.5,
+        "width": 1239,
+        "height": 885,
+        "cssWidth": 826,
+        "cssHeight": 590,
+        "exactFixtureCards": true,
+        "selectionPixelsVerified": true
+      },
+      {
+        "phase": "initial",
+        "dpr": 2,
+        "width": 1852,
+        "height": 1180,
+        "cssWidth": 926,
+        "cssHeight": 590,
+        "exactFixtureCards": true,
+        "selectionPixelsVerified": true
+      },
+      {
+        "phase": "resized",
+        "dpr": 2,
+        "width": 1652,
+        "height": 1180,
+        "cssWidth": 826,
+        "cssHeight": 590,
+        "exactFixtureCards": true,
+        "selectionPixelsVerified": true
+      }
+    ],
+    "canvasMounted": true,
+    "canvasDrawnPixelVerified": true,
+    "measuredClearPct": 88.79,
+    "measuredCardPct": 6.97,
+    "measuredBgPct": 0,
+    "initialCardsLoaded": [
+      "card-label-skill-rust-basics",
+      "card-label-skill-ownership",
+      "card-label-skill-wgpu-pipeline",
+      "card-label-skill-concurrency"
+    ],
+    "canvasHitTestCard1": "skill-rust-basics",
+    "canvasHitTestCard2": "skill-wgpu-pipeline",
+    "enrichmentTaskGlossaryVerified": true
+  },
+  "verifiedCriteria": [
+    "A real WebGPU browser initializes the Rust/Wasm editor and displays created Skill cards and HTML labels (pixel assertion: clear=88.8% [asserted >=40.0%], card=7.0% [asserted >=3.0%]).",
+    "Selecting different cards shows the corresponding stable fixture Skill ID and title in React, with one flat card per Skill and visible selection state.",
+    "Pure editor core owns cards, positions, and selection; React maintains zero canvas card positions.",
+    "Defined commands and events connect engine and application via Zod-validated JSON boundary per Matt Pocock SDD.",
+    "Smoke check records the actual browser and GPU environment, exact build/run commands, and git SHA.",
+    "Glossary terms respected: non-required tasks verified labeled as \"Enrichment Task\" per CONTEXT.md."
+  ],
+  "plannedChecksRemaining": [
+    "P1/T02: Pan and zoom around pointer respecting zoom range and coordinate bounds; card dragging with 1 undo step per drag.",
+    "P1/T03: Prerequisite connections and DAG cycle rejection.",
+    "P1/T04: Task editing in sidebar and local save/restore.",
+    "P1/T05: GPU device loss recovery while preserving CPU document; full keyboard list navigation through tasks.",
+    "P1/T06: Latency acceptance gate (p95 frame time <= 20ms, input-to-visible <= 50ms on 1,000 cards workload)."
+  ]
+}
