@@ -508,6 +508,24 @@ impl EditorState {
                     });
                 }
             }
+            EditorCommand::ExportSnapshot => {
+                events.push(EditorEvent::SnapshotExported {
+                    document: self.document.clone(),
+                });
+            }
+            EditorCommand::SetCamera {
+                offset_x,
+                offset_y,
+                zoom,
+            } => {
+                self.camera = Camera::new(offset_x, offset_y, zoom);
+                events.push(EditorEvent::CameraChanged {
+                    offset_x: self.camera.offset_x,
+                    offset_y: self.camera.offset_y,
+                    zoom: self.camera.zoom,
+                });
+                labels_changed = true;
+            }
         }
 
         if labels_changed {

@@ -413,5 +413,90 @@ describe('Editor Protocol Schemas (Matt Pocock SDD)', () => {
         expect(loadWithConn.document.connections?.length).toBe(1)
       }
     })
+
+    it('validates ExportSnapshot and SetCamera commands', () => {
+      const exportCmd = EditorCommandSchema.parse({
+        type: 'ExportSnapshot',
+      })
+      expect(exportCmd).toEqual({ type: 'ExportSnapshot' })
+
+      const setCam = EditorCommandSchema.parse({
+        type: 'SetCamera',
+        offset_x: 120,
+        offset_y: -45,
+        zoom: 1.25,
+      })
+      expect(setCam).toEqual({
+        type: 'SetCamera',
+        offset_x: 120,
+        offset_y: -45,
+        zoom: 1.25,
+      })
+    })
+
+    it('validates SnapshotExported event', () => {
+      const snapshotEvent = EditorEventSchema.parse({
+        type: 'SnapshotExported',
+        document: {
+          cards: [
+            {
+              id: 'skill-1',
+              title: 'Skill One',
+              position: { x: 10, y: 20 },
+              size: { width: 180, height: 80 },
+            },
+          ],
+          connections: [{ from_id: 'skill-1', to_id: 'skill-2' }],
+        },
+      })
+      expect(snapshotEvent.type).toBe('SnapshotExported')
+      if (snapshotEvent.type === 'SnapshotExported') {
+        expect(snapshotEvent.document.cards.length).toBe(1)
+        expect(snapshotEvent.document.connections.length).toBe(1)
+      }
+    })
+  })
+
+  describe('Checkpoint & Application Payload Schemas (Matt Pocock SDD)', () => {
+    it('validates complete LearningPathCheckpointSchema roundtrip', () => {
+      const checkpoint = {
+        version: 1 as const,
+        saved_at: '2026-09-10T10:00:00.000Z',
+        editor: {
+          format_version: 1 as const,
+          revision: 4,
+          cards: [
+            {
+              id: 'skill-a',
+              title: 'Skill A',
+              position: { x: 100, y: 150 },
+              size: { width: 180, height: 80 },
+            },
+          ],
+          connections: [],
+        },
+        application: {
+          learning_path_id: 'lp-test',
+          skills: [
+            {
+              id: 'skill-a',
+              outcome: 'Understand A',
+              tasks: [
+                {
+                  id: 'task-1',
+                  title: 'Task 1',
+                  description: 'Do Task 1',
+                  required: true,
+                },
+              ],
+            },
+          ],
+        },
+      }
+
+      const { LearningPathCheckpointSchema } = require('./protocol')
+      const parsed = LearningPathCheckpointSchema.parse(checkpoint)
+      expect(parsed).toEqual(checkpoint)
+    })
   })
 })

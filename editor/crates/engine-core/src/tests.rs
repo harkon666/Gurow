@@ -1,6 +1,7 @@
 use crate::geometry::{Camera, Point, Rect, Size};
 use crate::protocol::{EditorCommand, EditorEvent};
 use crate::state::{EditorState, InteractionState};
+use crate::SkillCard;
 
 #[test]
 fn test_camera_world_screen_round_trip() {
@@ -880,6 +881,49 @@ fn test_canvas_document_encapsulates_connection_invariants() {
     assert!(doc.try_add_connection("card-2", "card-3").is_ok());
     let cycle_err = doc.try_add_connection("card-3", "card-1");
     assert!(matches!(cycle_err, Err(ConnectionError::CreatesCycle { ref path }) if path == &vec!["card-1", "card-2", "card-3"]));
+}
+
+#[test]
+fn test_export_snapshot_and_set_camera() {
+    let mut state = EditorState::new();
+    let card1 = SkillCard::new("card-1", "Card 1", Point::new(10.0, 20.0), None);
+    let card2 = SkillCard::new("card-2", "Card 2", Point::new(100.0, 200.0), None);
+    state.document.add_card(card1).unwrap();
+    state.document.add_card(card2).unwrap();
+    state.document.try_add_connection("card-1", "card-2").unwrap();
+
+    // 1. Export snapshot returns current document
+    let events = state.apply_command(EditorCommand::ExportSnapshot);
+    assert_eq!(events.len(), 1);
+    match &events[0] {
+        EditorEvent::SnapshotExported { document } => {
+            assert_eq!(document.cards.len(), 2);
+            assert_eq!(document.connections.len(), 1);
+            assert_eq!(document.cards[0].id, "card-1");
+            assert_eq!(document.connections[0].from_id, "card-1");
+            assert_eq!(document.connections[0].to_id, "card-2");
+        }
+        _ => panic!("Expected SnapshotExported event"),
+    }
+
+    // 2. Set camera directly restores camera parameters within bounds
+    let events = state.apply_command(EditorCommand::SetCamera {
+        offset_x: 45.0,
+        offset_y: -80.0,
+        zoom: 1.5,
+    });
+    assert!(events.iter().any(|e| matches!(e, EditorEvent::CameraChanged { offset_x, offset_y, zoom } if *offset_x == 45.0 && *offset_y == -80.0 && *zoom == 1.5)));
+    assert_eq!(state.camera.offset_x, 45.0);
+    assert_eq!(state.camera.offset_y, -80.0);
+    assert_eq!(state.camera.zoom, 1.5);
+
+    // 3. Set camera clamps zoom limits
+    state.apply_command(EditorCommand::SetCamera {
+        offset_x: 0.0,
+        offset_y: 0.0,
+        zoom: 10.0,
+    });
+    assert_eq!(state.camera.zoom, crate::geometry::MAX_ZOOM);
 }
 
 

@@ -9,6 +9,8 @@ import {
   type Point,
   type PrerequisiteConnection,
   type Size,
+  type SkillCard,
+  type CameraState,
 } from './protocol'
 import type { GpuStatus, SelectedSkillInfo } from './types'
 import { getCanvasDpr, toCanvasBufferSize, cssToLogicalPoint } from './coords'
@@ -17,12 +19,16 @@ interface UseWasmEditorOptions {
   canvasRef: React.RefObject<HTMLCanvasElement | null>
   containerRef: React.RefObject<HTMLDivElement | null>
   onSelectionChanged: (selected: SelectedSkillInfo | null) => void
-  initialCards: Array<{
+  initialCards?: Array<{
     id: string
     title: string
     position: Point
     size?: Size
   }>
+  initialConnections?: PrerequisiteConnection[]
+  initialCamera?: CameraState | null
+  onOperationCompleted?: () => void
+  onCameraChanged?: (camera: CameraState) => void
 }
 
 export function useWasmEditor({
@@ -30,6 +36,10 @@ export function useWasmEditor({
   containerRef,
   onSelectionChanged,
   initialCards,
+  initialConnections,
+  initialCamera,
+  onOperationCompleted,
+  onCameraChanged,
 }: UseWasmEditorOptions) {
   const editorRef = useRef<WasmEditor | null>(null)
   const [labels, setLabels] = useState<LabelLayout[]>([])
@@ -45,6 +55,16 @@ export function useWasmEditor({
   const onSelectionChangedRef = useRef(onSelectionChanged)
   onSelectionChangedRef.current = onSelectionChanged
 
+  const onOperationCompletedRef = useRef(onOperationCompleted)
+  onOperationCompletedRef.current = onOperationCompleted
+
+  const onCameraChangedRef = useRef(onCameraChanged)
+  onCameraChangedRef.current = onCameraChanged
+
+  const initialCardsRef = useRef(initialCards)
+  const initialConnectionsRef = useRef(initialConnections)
+  const initialCameraRef = useRef(initialCamera)
+
   const handleEvents = useCallback((events: EditorEvent[]) => {
     for (const event of events) {
       switch (event.type) {
@@ -58,6 +78,9 @@ export function useWasmEditor({
             onSelectionChangedRef.current(null)
           }
           break
+        case 'CardCreated':
+          onOperationCompletedRef.current?.()
+          break
         case 'LabelsUpdated':
           setLabels(event.labels)
           break
@@ -67,6 +90,7 @@ export function useWasmEditor({
         case 'ConnectionCreated':
         case 'ConnectionDeleted':
           setConnectionRejection(null)
+          onOperationCompletedRef.current?.()
           break
         case 'ConnectionRejected':
           setConnectionRejection(event.reason)
@@ -74,10 +98,18 @@ export function useWasmEditor({
           break
         case 'CameraChanged':
           setZoom(event.zoom)
+          onCameraChangedRef.current?.({
+            offset_x: event.offset_x,
+            offset_y: event.offset_y,
+            zoom: event.zoom,
+          })
           break
         case 'HistoryChanged':
           setCanUndo(event.can_undo)
           setCanRedo(event.can_redo)
+          if (event.can_undo || event.can_redo) {
+            onOperationCompletedRef.current?.()
+          }
           break
         case 'GpuError':
           setGpuStatus('error')
@@ -162,10 +194,13 @@ export function useWasmEditor({
 
         editorRef.current = editor
 
-        // Seed engine with initial fixture cards once; pure Rust EditorState owns positions (ADR-0015)
+        // Seed engine with initial or restored document; pure Rust EditorState owns positions (ADR-0015)
         dispatchInternal(editor, {
           type: 'LoadDocument',
-          document: { cards: initialCards },
+          document: {
+            cards: initialCardsRef.current ?? [],
+            connections: initialConnectionsRef.current ?? [],
+          },
         })
 
         // Configure engine viewport with logical CSS dimensions
@@ -174,6 +209,16 @@ export function useWasmEditor({
           width: cssWidth,
           height: cssHeight,
         })
+
+        // Restore camera state if provided
+        if (initialCameraRef.current) {
+          dispatchInternal(editor, {
+            type: 'SetCamera',
+            offset_x: initialCameraRef.current.offset_x,
+            offset_y: initialCameraRef.current.offset_y,
+            zoom: initialCameraRef.current.zoom,
+          })
+        }
 
         setGpuStatus('ready')
       } catch (err: unknown) {
@@ -438,6 +483,46 @@ export function useWasmEditor({
     [dispatch]
   )
 
+  const exportSnapshot = useCallback((): {
+    cards: SkillCard[]
+    connections: PrerequisiteConnection[]
+  } | null => {
+    const editor = editorRef.current
+    if (!editor) return null
+
+    const events = dispatchInternal(editor, { type: 'ExportSnapshot' })
+    const snapshotEvent = events.find((e) => e.type === 'SnapshotExported')
+    if (snapshotEvent && snapshotEvent.type === 'SnapshotExported') {
+      return snapshotEvent.document
+    }
+    return null
+  }, [dispatchInternal])
+
+  const createCard = useCallback(
+    (id: string, title: string, position: Point, size?: Size) => {
+      dispatch({
+        type: 'CreateCard',
+        id,
+        title,
+        position,
+        size,
+      })
+    },
+    [dispatch]
+  )
+
+  const setCamera = useCallback(
+    (offset_x: number, offset_y: number, zoom: number) => {
+      dispatch({
+        type: 'SetCamera',
+        offset_x,
+        offset_y,
+        zoom,
+      })
+    },
+    [dispatch]
+  )
+
   return {
     labels,
     connections,
@@ -451,8 +536,11 @@ export function useWasmEditor({
     engineError,
     clearEngineError: () => setEngineError(null),
     dispatch,
+    createCard,
     connectSkills,
     disconnectSkills,
+    exportSnapshot,
+    setCamera,
     handlePointerDown,
     handlePointerMove,
     handlePointerUp,

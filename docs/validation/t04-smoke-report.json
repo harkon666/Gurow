@@ -1,0 +1,33 @@
+{
+  "ticket": "P1/T04",
+  "github_issue": "https://github.com/harkon666/Gurow/issues/5",
+  "date": "2026-09-10T05:15:23.425Z",
+  "status": "PASSED",
+  "commit": "244d068acd5b2288774bbc9721e78548a79ed912",
+  "tree": "20a507fdfd69b823ca342be8c25a38666a958dc8",
+  "acceptance_criteria": {
+    "ac1_skill_selection_and_task_editing": "PASSED",
+    "ac2_checkpoint_envelope_and_format_version": "PASSED",
+    "ac3_semantic_restore_and_mismatch_rejection": "PASSED",
+    "ac4_local_persistence_and_session_only_state": "PASSED",
+    "ac5_observable_browser_flow": "PASSED"
+  },
+  "executed_validations": [
+    "Skill creation disabled during delayed Wasm initialization; subsequent Task save succeeds",
+    "Initial skill selection and task display in React sidebar",
+    "Task title, description, and required flag toggling (Required <-> Enrichment)",
+    "Zero task content in Rust engine snapshot boundary check",
+    "Card creation via toolbar (+ Skill), dynamic label overlay mounting, and initial task binding",
+    "Two newly created Skills can connect and display their titles; full graph restored after reload",
+    "Card drag with observable coordinate verification",
+    "Actual Undo command execution moving card back to pre-drag coordinates",
+    "Actual Redo command execution restoring card to dragged coordinates",
+    "Camera zoom and offset restoration observed through label geometry and zoom indicator",
+    "Full browser reload comparing live card IDs, titles, geometry, complete graph and edited Task fields",
+    "Reset of session-only state across reload (selection null, undo/redo disabled)",
+    "Fast-fail CheckpointMismatchError rejection for foreign learning_path_id payloads",
+    "Fast-fail CheckpointMismatchError rejection for orphan card mismatches",
+    "Shared save guard preventing corrupted/rejected checkpoint overwrite during task edits (ADR-0016 recovery preservation)",
+    "Reset Scene recovery operation restoring clean fixture"
+  ]
+}

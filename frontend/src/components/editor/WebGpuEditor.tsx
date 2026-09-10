@@ -1,14 +1,26 @@
 import React, { useRef, useMemo, useEffect } from 'react'
 import { INITIAL_LEARNING_PATH_FIXTURE } from '../../fixtures/learningPath'
 import type { SelectedSkillInfo } from './types'
-import type { PrerequisiteConnection } from './protocol'
+import type {
+  PrerequisiteConnection,
+  SkillCard,
+  CameraState,
+  Point,
+  Size,
+} from './protocol'
 import { useWasmEditor } from './useWasmEditor'
 import { EditorToolbar } from './EditorToolbar'
 import { SkillCardOverlay } from './SkillCardOverlay'
 
 export interface WebGpuEditorActions {
+  createCard: (id: string, title: string, position: Point, size?: Size) => void
   connectSkills: (fromId: string, toId: string) => void
   disconnectSkills: (fromId: string, toId: string) => void
+  exportSnapshot: () => {
+    cards: SkillCard[]
+    connections: PrerequisiteConnection[]
+  } | null
+  setCamera: (offset_x: number, offset_y: number, zoom: number) => void
 }
 
 interface WebGpuEditorProps {
@@ -16,6 +28,17 @@ interface WebGpuEditorProps {
   onConnectionsChange?: (connections: PrerequisiteConnection[]) => void
   onRejection?: (reason: string | null) => void
   onActionsReady?: (actions: WebGpuEditorActions) => void
+  onCreateSkill?: () => void
+  initialCards?: Array<{
+    id: string
+    title: string
+    position: Point
+    size?: Size
+  }>
+  initialConnections?: PrerequisiteConnection[]
+  initialCamera?: CameraState | null
+  onOperationCompleted?: () => void
+  onCameraChanged?: (camera: CameraState) => void
 }
 
 export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
@@ -23,11 +46,17 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
   onConnectionsChange,
   onRejection,
   onActionsReady,
+  onCreateSkill,
+  initialCards: customInitialCards,
+  initialConnections,
+  initialCamera,
+  onOperationCompleted,
+  onCameraChanged,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
 
-  const initialCards = useMemo(
+  const defaultInitialCards = useMemo(
     () =>
       INITIAL_LEARNING_PATH_FIXTURE.skills.map((s) => ({
         id: s.id,
@@ -36,6 +65,8 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
       })),
     []
   )
+
+  const initialCards = customInitialCards ?? defaultInitialCards
 
   const {
     labels,
@@ -48,8 +79,11 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
     errorMessage,
     engineError,
     clearEngineError,
+    createCard,
     connectSkills,
     disconnectSkills,
+    exportSnapshot,
+    setCamera,
     handlePointerDown,
     handlePointerMove,
     handlePointerUp,
@@ -63,6 +97,10 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
     containerRef,
     onSelectionChanged: onSelectSkill,
     initialCards,
+    initialConnections,
+    initialCamera,
+    onOperationCompleted,
+    onCameraChanged,
   })
 
   useEffect(() => {
@@ -75,10 +113,13 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
 
   useEffect(() => {
     onActionsReady?.({
+      createCard,
       connectSkills,
       disconnectSkills,
+      exportSnapshot,
+      setCamera,
     })
-  }, [connectSkills, disconnectSkills, onActionsReady])
+  }, [createCard, connectSkills, disconnectSkills, exportSnapshot, setCamera, onActionsReady])
 
   return (
     <div className="relative flex-1 flex flex-col h-full overflow-hidden bg-slate-950">
@@ -94,6 +135,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
         onZoomIn={zoomIn}
         onZoomOut={zoomOut}
         onResetZoom={resetZoom}
+        onCreateSkill={onCreateSkill}
       />
 
       {/* Engine Error Toast Banner */}

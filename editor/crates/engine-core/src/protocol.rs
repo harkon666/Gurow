@@ -66,6 +66,12 @@ pub enum EditorCommand {
         from_id: String,
         to_id: String,
     },
+    ExportSnapshot,
+    SetCamera {
+        offset_x: f32,
+        offset_y: f32,
+        zoom: f32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -106,6 +112,9 @@ pub enum EditorEvent {
     },
     ConnectionsUpdated {
         connections: Vec<PrerequisiteConnection>,
+    },
+    SnapshotExported {
+        document: CanvasDocument,
     },
     GpuError { message: String },
     Error { message: String },

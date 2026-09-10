@@ -121,6 +121,17 @@ export const DisconnectSkillsCommandSchema = z.object({
   to_id: z.string(),
 })
 
+export const ExportSnapshotCommandSchema = z.object({
+  type: z.literal('ExportSnapshot'),
+})
+
+export const SetCameraCommandSchema = z.object({
+  type: z.literal('SetCamera'),
+  offset_x: z.number(),
+  offset_y: z.number(),
+  zoom: z.number(),
+})
+
 export const EditorCommandSchema = z.discriminatedUnion('type', [
   LoadDocumentCommandSchema,
   CreateCardCommandSchema,
@@ -135,6 +146,8 @@ export const EditorCommandSchema = z.discriminatedUnion('type', [
   ResizeViewportCommandSchema,
   ConnectSkillsCommandSchema,
   DisconnectSkillsCommandSchema,
+  ExportSnapshotCommandSchema,
+  SetCameraCommandSchema,
 ])
 
 export const DocumentLoadedEventSchema = z.object({
@@ -200,6 +213,14 @@ export const ConnectionsUpdatedEventSchema = z.object({
   connections: z.array(PrerequisiteConnectionSchema),
 })
 
+export const SnapshotExportedEventSchema = z.object({
+  type: z.literal('SnapshotExported'),
+  document: z.object({
+    cards: z.array(SkillCardSchema),
+    connections: z.array(PrerequisiteConnectionSchema),
+  }),
+})
+
 export const GpuErrorEventSchema = z.object({
   type: z.literal('GpuError'),
   message: z.string(),
@@ -222,11 +243,51 @@ export const EditorEventSchema = z.discriminatedUnion('type', [
   ConnectionDeletedEventSchema,
   ConnectionRejectedEventSchema,
   ConnectionsUpdatedEventSchema,
+  SnapshotExportedEventSchema,
   GpuErrorEventSchema,
   ErrorEventSchema,
 ])
 
 export const EditorEventsSchema = z.array(EditorEventSchema)
+
+// Checkpoint & Application Payload Schemas (ADR-0016, Matt Pocock SDD pattern)
+export const EditorSnapshotSchema = z.object({
+  format_version: z.literal(1),
+  revision: z.number().int().nonnegative(),
+  cards: z.array(SkillCardSchema),
+  connections: z.array(PrerequisiteConnectionSchema),
+})
+
+export const TaskPayloadSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  description: z.string(),
+  required: z.boolean(),
+})
+
+export const SkillPayloadSchema = z.object({
+  id: z.string(),
+  outcome: z.string(),
+  tasks: z.array(TaskPayloadSchema),
+})
+
+export const ApplicationPayloadSchema = z.object({
+  learning_path_id: z.string(),
+  skills: z.array(SkillPayloadSchema),
+})
+
+export const LearningPathCheckpointSchema = z.object({
+  version: z.literal(1),
+  saved_at: z.string(),
+  editor: EditorSnapshotSchema,
+  application: ApplicationPayloadSchema,
+})
+
+export const CameraStateSchema = z.object({
+  offset_x: z.number(),
+  offset_y: z.number(),
+  zoom: z.number(),
+})
 
 // Inferred TypeScript types (Matt Pocock SDD pattern)
 export type Point = z.infer<typeof PointSchema>
@@ -237,3 +298,9 @@ export type SkillCard = z.infer<typeof SkillCardSchema>
 export type PrerequisiteConnection = z.infer<typeof PrerequisiteConnectionSchema>
 export type EditorCommand = z.infer<typeof EditorCommandSchema>
 export type EditorEvent = z.infer<typeof EditorEventSchema>
+export type EditorSnapshot = z.infer<typeof EditorSnapshotSchema>
+export type TaskPayload = z.infer<typeof TaskPayloadSchema>
+export type SkillPayload = z.infer<typeof SkillPayloadSchema>
+export type ApplicationPayload = z.infer<typeof ApplicationPayloadSchema>
+export type LearningPathCheckpoint = z.infer<typeof LearningPathCheckpointSchema>
+export type CameraState = z.infer<typeof CameraStateSchema>

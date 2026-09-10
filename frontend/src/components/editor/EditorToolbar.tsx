@@ -12,6 +12,7 @@ interface EditorToolbarProps {
   onZoomIn?: () => void
   onZoomOut?: () => void
   onResetZoom?: () => void
+  onCreateSkill?: () => void
 }
 
 export const EditorToolbar: React.FC<EditorToolbarProps> = ({
@@ -25,6 +26,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   onZoomIn,
   onZoomOut,
   onResetZoom,
+  onCreateSkill,
 }) => {
   return (
     <div className="h-12 border-b border-slate-800/80 bg-slate-900/60 px-4 flex items-center justify-between backdrop-blur-sm z-20">
@@ -50,6 +52,21 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
         >
           {cardCount} cards
         </span>
+
+        {onCreateSkill && (
+          <button
+            id="editor-add-card-btn"
+            onClick={onCreateSkill}
+            disabled={gpuStatus !== 'ready'}
+            title="Create new Skill card"
+            className="px-2 py-1 text-xs rounded font-medium bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 hover:text-white border border-emerald-500/30 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 flex items-center gap-1 transition-colors"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            <span>+ Skill</span>
+          </button>
+        )}
 
         <div className="h-4 w-px bg-slate-800 mx-1" />
 

@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { INITIAL_LEARNING_PATH_FIXTURE } from '../../fixtures/learningPath'
+import { INITIAL_LEARNING_PATH_FIXTURE, type FixtureTask } from '../../fixtures/learningPath'
 import type { SelectedSkillInfo } from './types'
 import type { PrerequisiteConnection } from './protocol'
 
@@ -11,6 +11,9 @@ interface SkillDetailPanelProps {
   onDisconnect?: (fromId: string, toId: string) => void
   connectionRejection?: string | null
   onClearRejection?: () => void
+  tasks?: FixtureTask[]
+  outcome?: string
+  onUpdateTask?: (taskId: string, updates: Partial<FixtureTask>) => void
 }
 
 interface ConnectionListItemProps {
@@ -53,6 +56,9 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
   onDisconnect,
   connectionRejection,
   onClearRejection,
+  tasks,
+  outcome,
+  onUpdateTask,
 }) => {
   const [selectedTargetId, setSelectedTargetId] = useState<string>('')
 
@@ -94,13 +100,13 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
     )
   }
 
-  // Lookup learning metadata from application fixture; title is authoritative from engine
+  // Lookup learning metadata from props or application fixture; title is authoritative from engine
   const fixtureSkill = INITIAL_LEARNING_PATH_FIXTURE.skills.find(
     (s) => s.id === selectedSkill.id
   )
 
-  const outcome = fixtureSkill?.outcome ?? ''
-  const tasks = fixtureSkill?.tasks ?? []
+  const activeOutcome = outcome ?? fixtureSkill?.outcome ?? ''
+  const activeTasks = tasks ?? fixtureSkill?.tasks ?? []
 
   // Derived prerequisite connections for this skill
   const incomingPrereqs = connections.filter((c) => c.to_id === selectedSkill.id)
@@ -178,7 +184,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
             Learning Outcome
           </h4>
           <p className="text-sm text-slate-300 leading-relaxed">
-            {outcome}
+            {activeOutcome}
           </p>
         </div>
 
@@ -288,37 +294,95 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
           )}
         </div>
 
-        {/* Associated Tasks (Application-owned) */}
+        {/* Associated Tasks (Application-owned, ADR-0015 & Ticket T04 AC 1) */}
         <div>
-          <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3 flex items-center justify-between">
-            <span>Associated Tasks</span>
-            <span className="text-[10px] text-slate-500 font-normal">React Domain Store</span>
-          </h4>
+          <div className="mb-2 flex items-center justify-between">
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+              Associated Tasks
+            </h4>
+            <span className="text-[10px] text-emerald-400/90 font-mono bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+              React Domain Payload
+            </span>
+          </div>
 
-          {tasks.length > 0 ? (
-            <div className="space-y-2.5">
-              {tasks.map((task) => (
+          <div className="text-[10px] text-slate-500 mb-3 italic">
+            Task contents belong to application state and are not included in engine canvas snapshots.
+          </div>
+
+          {activeTasks.length > 0 ? (
+            <div id="associated-tasks-list" className="space-y-3">
+              {activeTasks.map((task) => (
                 <div
                   key={task.id}
-                  className="rounded-lg bg-slate-800/30 p-3 border border-slate-700/30 hover:border-slate-600/50 transition-colors"
+                  id={`task-container-${task.id}`}
+                  className="rounded-xl bg-slate-800/40 p-3.5 border border-slate-700/50 space-y-2.5 transition-colors focus-within:border-blue-500/50"
                 >
-                  <div className="flex items-center justify-between mb-1">
-                    <span className="text-xs font-medium text-slate-200">
-                      {task.title}
+                  <div className="flex items-center justify-between gap-2">
+                    <label
+                      htmlFor={`task-edit-title-${task.id}`}
+                      className="text-[11px] font-semibold text-slate-300 font-mono"
+                    >
+                      Task Title:
+                    </label>
+                    <span
+                      id={`task-badge-${task.id}`}
+                      className={`text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded ${
+                        task.required
+                          ? 'text-amber-400 bg-amber-400/10 border border-amber-400/20'
+                          : 'text-slate-400 bg-slate-800 border border-slate-700'
+                      }`}
+                    >
+                      {task.required ? 'Required' : 'Enrichment'}
                     </span>
-                    {task.required ? (
-                      <span className="text-[10px] uppercase font-semibold text-amber-400/90 bg-amber-400/10 px-1.5 py-0.5 rounded">
-                        Required
-                      </span>
-                    ) : (
-                      <span className="text-[10px] uppercase font-semibold text-slate-400 bg-slate-800 px-1.5 py-0.5 rounded">
-                        Enrichment Task
-                      </span>
-                    )}
                   </div>
-                  <p className="text-xs text-slate-400 leading-normal">
-                    {task.description}
-                  </p>
+
+                  <input
+                    id={`task-edit-title-${task.id}`}
+                    type="text"
+                    value={task.title}
+                    onChange={(e) =>
+                      onUpdateTask?.(task.id, { title: e.target.value })
+                    }
+                    className="w-full text-xs font-medium text-slate-100 bg-slate-950 border border-slate-700/80 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-500"
+                    placeholder="Task title..."
+                  />
+
+                  <div>
+                    <label
+                      htmlFor={`task-edit-description-${task.id}`}
+                      className="block text-[11px] text-slate-400 mb-1"
+                    >
+                      Description / Learning Goal:
+                    </label>
+                    <textarea
+                      id={`task-edit-description-${task.id}`}
+                      value={task.description}
+                      onChange={(e) =>
+                        onUpdateTask?.(task.id, { description: e.target.value })
+                      }
+                      rows={2}
+                      className="w-full text-xs text-slate-300 bg-slate-950 border border-slate-700/80 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-500 resize-none leading-relaxed"
+                      placeholder="Task description..."
+                    />
+                  </div>
+
+                  <div className="pt-1 flex items-center justify-between">
+                    <label
+                      htmlFor={`task-edit-required-${task.id}`}
+                      className="flex items-center gap-2 cursor-pointer select-none text-[11px] text-slate-300"
+                    >
+                      <input
+                        id={`task-edit-required-${task.id}`}
+                        type="checkbox"
+                        checked={task.required}
+                        onChange={(e) =>
+                          onUpdateTask?.(task.id, { required: e.target.checked })
+                        }
+                        className="rounded border-slate-700 bg-slate-900 text-blue-500 focus:ring-0 cursor-pointer"
+                      />
+                      <span>Is Required Task (Mandatory for Skill Mastery)</span>
+                    </label>
+                  </div>
                 </div>
               ))}
             </div>
