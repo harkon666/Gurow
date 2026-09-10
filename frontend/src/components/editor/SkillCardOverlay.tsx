@@ -28,7 +28,7 @@ export const SkillCardOverlay: React.FC<SkillCardOverlayProps> = ({
               width: `${cssRect.width}px`,
               height: `${cssRect.height}px`,
             }}
-            className={`p-3 flex flex-col justify-between select-none rounded-xl transition-all duration-150 ${
+            className={`p-3 flex flex-col justify-between select-none rounded-xl transition-colors duration-150 ${
               label.selected
                 ? 'ring-2 ring-blue-500/80 bg-blue-500/5 shadow-lg shadow-blue-500/10'
                 : ''

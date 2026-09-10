@@ -27,11 +27,21 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
 
   const {
     labels,
+    zoom,
+    canUndo,
+    canRedo,
     gpuStatus,
     errorMessage,
     engineError,
     clearEngineError,
     handlePointerDown,
+    handlePointerMove,
+    handlePointerUp,
+    undo,
+    redo,
+    zoomIn,
+    zoomOut,
+    resetZoom,
   } = useWasmEditor({
     canvasRef,
     containerRef,
@@ -45,6 +55,14 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
       <EditorToolbar
         gpuStatus={gpuStatus}
         cardCount={labels.length}
+        canUndo={canUndo}
+        canRedo={canRedo}
+        onUndo={undo}
+        onRedo={redo}
+        zoom={zoom}
+        onZoomIn={zoomIn}
+        onZoomOut={zoomOut}
+        onResetZoom={resetZoom}
       />
 
       {/* Engine Error Toast Banner */}
@@ -92,6 +110,8 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
           id="editor-canvas"
           ref={canvasRef}
           onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
           className="absolute inset-0 w-full h-full block cursor-pointer touch-none"
         />
 

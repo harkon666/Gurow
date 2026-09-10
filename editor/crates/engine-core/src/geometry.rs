@@ -49,6 +49,19 @@ impl Rect {
     }
 }
 
+pub const MIN_WORLD_COORD: f32 = -1_000_000.0;
+pub const MAX_WORLD_COORD: f32 = 1_000_000.0;
+pub const MIN_ZOOM: f32 = 0.1;
+pub const MAX_ZOOM: f32 = 4.0;
+
+pub fn clamp_world_coord(val: f32) -> f32 {
+    val.clamp(MIN_WORLD_COORD, MAX_WORLD_COORD)
+}
+
+pub fn clamp_world_point(p: Point) -> Point {
+    Point::new(clamp_world_coord(p.x), clamp_world_coord(p.y))
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Camera {
     pub offset_x: f32,
@@ -68,11 +81,13 @@ impl Default for Camera {
 
 impl Camera {
     pub fn new(offset_x: f32, offset_y: f32, zoom: f32) -> Self {
-        Self {
+        let mut cam = Self {
             offset_x,
             offset_y,
-            zoom,
-        }
+            zoom: zoom.clamp(MIN_ZOOM, MAX_ZOOM),
+        };
+        cam.clamp_bounds();
+        cam
     }
 
     pub fn world_to_screen(&self, world_p: Point) -> Point {
@@ -97,5 +112,36 @@ impl Camera {
             rect.width * self.zoom,
             rect.height * self.zoom,
         )
+    }
+
+    pub fn pan(&mut self, delta_x: f32, delta_y: f32) {
+        self.offset_x += delta_x;
+        self.offset_y += delta_y;
+        self.clamp_bounds();
+    }
+
+    pub fn zoom_at(&mut self, anchor_screen: Point, factor: f32) {
+        let old_zoom = self.zoom;
+        let new_zoom = (old_zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
+        if (new_zoom - old_zoom).abs() < 1e-6 {
+            return;
+        }
+        let anchor_world = self.screen_to_world(anchor_screen);
+        self.zoom = new_zoom;
+        self.offset_x = anchor_screen.x - anchor_world.x * new_zoom;
+        self.offset_y = anchor_screen.y - anchor_world.y * new_zoom;
+        self.clamp_bounds();
+    }
+
+    pub fn clamp_bounds(&mut self) {
+        let top_left_world = self.screen_to_world(Point::ZERO);
+        let clamped_x = clamp_world_coord(top_left_world.x);
+        let clamped_y = clamp_world_coord(top_left_world.y);
+        if (top_left_world.x - clamped_x).abs() > 1e-5 {
+            self.offset_x = -clamped_x * self.zoom;
+        }
+        if (top_left_world.y - clamped_y).abs() > 1e-5 {
+            self.offset_y = -clamped_y * self.zoom;
+        }
     }
 }

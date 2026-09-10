@@ -64,6 +64,39 @@ export const PointerDownCommandSchema = z.object({
   screen_y: z.number(),
 })
 
+export const PointerMoveCommandSchema = z.object({
+  type: z.literal('PointerMove'),
+  screen_x: z.number(),
+  screen_y: z.number(),
+})
+
+export const PointerUpCommandSchema = z.object({
+  type: z.literal('PointerUp'),
+  screen_x: z.number(),
+  screen_y: z.number(),
+})
+
+export const PanCameraCommandSchema = z.object({
+  type: z.literal('PanCamera'),
+  delta_x: z.number(),
+  delta_y: z.number(),
+})
+
+export const ZoomAtCommandSchema = z.object({
+  type: z.literal('ZoomAt'),
+  screen_x: z.number(),
+  screen_y: z.number(),
+  factor: z.number(),
+})
+
+export const UndoCommandSchema = z.object({
+  type: z.literal('Undo'),
+})
+
+export const RedoCommandSchema = z.object({
+  type: z.literal('Redo'),
+})
+
 export const ResizeViewportCommandSchema = z.object({
   type: z.literal('ResizeViewport'),
   width: z.number(),
@@ -75,6 +108,12 @@ export const EditorCommandSchema = z.discriminatedUnion('type', [
   CreateCardCommandSchema,
   SelectCardCommandSchema,
   PointerDownCommandSchema,
+  PointerMoveCommandSchema,
+  PointerUpCommandSchema,
+  PanCameraCommandSchema,
+  ZoomAtCommandSchema,
+  UndoCommandSchema,
+  RedoCommandSchema,
   ResizeViewportCommandSchema,
 ])
 
@@ -87,6 +126,12 @@ export const CardCreatedEventSchema = z.object({
   card: SkillCardSchema,
 })
 
+export const CardMovedEventSchema = z.object({
+  type: z.literal('CardMoved'),
+  card_id: z.string(),
+  position: PointSchema,
+})
+
 export const SelectionChangedEventSchema = z.object({
   type: z.literal('SelectionChanged'),
   selected_id: z.string().nullable(),
@@ -96,6 +141,19 @@ export const SelectionChangedEventSchema = z.object({
 export const LabelsUpdatedEventSchema = z.object({
   type: z.literal('LabelsUpdated'),
   labels: z.array(LabelLayoutSchema),
+})
+
+export const CameraChangedEventSchema = z.object({
+  type: z.literal('CameraChanged'),
+  offset_x: z.number(),
+  offset_y: z.number(),
+  zoom: z.number(),
+})
+
+export const HistoryChangedEventSchema = z.object({
+  type: z.literal('HistoryChanged'),
+  can_undo: z.boolean(),
+  can_redo: z.boolean(),
 })
 
 export const GpuErrorEventSchema = z.object({
@@ -111,8 +169,11 @@ export const ErrorEventSchema = z.object({
 export const EditorEventSchema = z.discriminatedUnion('type', [
   DocumentLoadedEventSchema,
   CardCreatedEventSchema,
+  CardMovedEventSchema,
   SelectionChangedEventSchema,
   LabelsUpdatedEventSchema,
+  CameraChangedEventSchema,
+  HistoryChangedEventSchema,
   GpuErrorEventSchema,
   ErrorEventSchema,
 ])

@@ -12,6 +12,7 @@
     "build": "bun run build:wasm && vite build",
     "typecheck": "tsc --noEmit",
     "smoke-check": "bun run scripts/smoke-check.ts",
+    "smoke-check:t02": "bun run scripts/t02-smoke-check.ts",
     "preview": "vite preview"
   },
 

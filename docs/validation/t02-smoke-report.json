@@ -1,0 +1,52 @@
+{
+  "timestamp": "2026-09-10T03:08:42.223Z",
+  "gitCommit": "7c23c16272a698ae9de225f03929da877b2d7e1f",
+  "gitTree": "fd9321421a12528f1d3551cac068fb4245379180",
+  "sourceClean": true,
+  "ticket": "P1/T02",
+  "status": {
+    "ticketStatus": "PASSED",
+    "p1StageStatus": "IN_PROGRESS"
+  },
+  "layersExecuted": [
+    "Layer 1: Native Rust tests (zoom_at, zoom limits, world bounds clamping, drag offset preservation across zoom, undo/redo invariants, undo-during-active-drag cancellation, canvas pan & zoom commands)",
+    "Layer 2: TypeScript protocol schemas (Matt Pocock SDD: PointerMove, PointerUp, PanCamera, ZoomAt, Undo, Redo, CardMoved, CameraChanged, HistoryChanged)",
+    "Layer 3: Browser WebGPU integration (drag gesture with 2-axis position check, WebGPU canvas visual pixel assertion, undo/redo restoration, undo-during-active-drag regression check, toolbar zoom, 2-axis canvas panning, cursor-anchored wheel zoom, drag at non-1.0 zoom)"
+  ],
+  "results": {
+    "layer1RustTests": "PASSED (14 native tests)",
+    "layer2SchemaTests": "PASSED (29 frontend tests)",
+    "webgpuVisualPixelAssertion": {
+      "passed": true,
+      "initialQuadCardPct": 100,
+      "draggedQuadCardPct": 100,
+      "draggedVacatedClearPct": 100,
+      "undoRestoredCardPct": 100,
+      "undoVacatedClearPct": 100,
+      "redoRestoredCardPct": 100
+    },
+    "dragGesturePreservesOffset2Axis": true,
+    "oneDragStepUndoVerified2Axis": true,
+    "redoRestorationVerified2Axis": true,
+    "undoDuringActiveDragPreservesHistory": true,
+    "selectionPreservedDuringMove": true,
+    "toolbarZoomControlsVerified": true,
+    "canvasPanVerified2Axis": true,
+    "cursorAnchoredWheelZoomVerified": true,
+    "cursorAnchorErrorCssPixels": {
+      "x": 0.026909722222228538,
+      "y": 0.0078125
+    },
+    "labelsAlignedDuringPointerMovement": true,
+    "dragAtNon100ZoomVerified2Axis": true
+  },
+  "verifiedCriteria": [
+    "Native-core tests cover 10%–400% zoom limits and world bounds of plus or minus 1,000,000. Browser checks cover mouse-drag pan and Ctrl+wheel zoom to 128%, preserving the cursor anchor on both axes. Non-Ctrl trackpad wheel-pan is not exercised by this check.",
+    "Dragging preserves the initial pointer-to-card offset at different zoom levels, verified on both horizontal and vertical axes (dx=+140, dy=+80 at 1.0x; dx=+60, dy=+40 at 128%).",
+    "Actual WebGPU canvas visual pixel assertions verified: card quad is verified at new dragged coordinates (card=100.0%) and old position verified cleared (clear=100.0%); undo verified visual restoration (card=100.0%).",
+    "One completed drag is exactly one undo step; undo restores its initial position on both axes and redo restores the final position without affecting learning-domain state.",
+    "Undo during active drag cleanly cancels gesture, restores initial position, and preserves undo/redo stack without clobbering history.",
+    "Label positions checked during mouse pan and drag at two zoom levels. GPU card positions checked before/after drag, undo, and redo; GPU alignment during camera changes and selection-border pixels are not independently asserted.",
+    "Public-core tests cover coordinate round trips, cursor anchoring, drag offsets, undo invariants, and mid-drag cancellation; browser checks exercise actual interactions (2-axis assertions, wheel zoom, mid-drag undo, canvas drag)."
+  ]
+}

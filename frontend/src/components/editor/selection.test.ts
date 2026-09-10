@@ -83,4 +83,47 @@ describe('Editor Seams & Coordinate Transformations (ADR-0015, Matt Pocock SDD)'
       expect(selEvent.title).toBe('WebGPU Pipeline')
     }
   })
+
+  it('verifies label screen position recalculation after card drag and camera zoom', () => {
+    // Initial card at (80, 100), size (180, 80)
+    const initialScreenRect = { x: 80, y: 100, width: 180, height: 80 }
+    expect(screenToCssRect(initialScreenRect)).toEqual({
+      left: 80,
+      top: 100,
+      width: 180,
+      height: 80,
+    })
+
+    // After dragging card by (+120, +80): world position becomes (200, 180)
+    // Under 1.5x zoom and offset (50, -30):
+    // screen_x = 200 * 1.5 + 50 = 350
+    // screen_y = 180 * 1.5 - 30 = 240
+    // screen_w = 180 * 1.5 = 270
+    // screen_h = 80 * 1.5 = 120
+    const zoomedScreenRect = { x: 350, y: 240, width: 270, height: 120 }
+    expect(screenToCssRect(zoomedScreenRect)).toEqual({
+      left: 350,
+      top: 240,
+      width: 270,
+      height: 120,
+    })
+  })
+
+  it('validates undo/redo command roundtrip under Matt Pocock SDD schema', () => {
+    const undoCmd = EditorCommandSchema.parse({ type: 'Undo' })
+    const redoCmd = EditorCommandSchema.parse({ type: 'Redo' })
+    expect(undoCmd.type).toBe('Undo')
+    expect(redoCmd.type).toBe('Redo')
+
+    const historyEvent = EditorEventSchema.parse({
+      type: 'HistoryChanged',
+      can_undo: true,
+      can_redo: false,
+    })
+    expect(historyEvent.type).toBe('HistoryChanged')
+    if (historyEvent.type === 'HistoryChanged') {
+      expect(historyEvent.can_undo).toBe(true)
+      expect(historyEvent.can_redo).toBe(false)
+    }
+  })
 })

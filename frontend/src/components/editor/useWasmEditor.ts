@@ -32,6 +32,9 @@ export function useWasmEditor({
 }: UseWasmEditorOptions) {
   const editorRef = useRef<WasmEditor | null>(null)
   const [labels, setLabels] = useState<LabelLayout[]>([])
+  const [zoom, setZoom] = useState<number>(1.0)
+  const [canUndo, setCanUndo] = useState<boolean>(false)
+  const [canRedo, setCanRedo] = useState<boolean>(false)
   const [gpuStatus, setGpuStatus] = useState<GpuStatus>('initializing')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [engineError, setEngineError] = useState<string | null>(null)
@@ -54,6 +57,13 @@ export function useWasmEditor({
           break
         case 'LabelsUpdated':
           setLabels(event.labels)
+          break
+        case 'CameraChanged':
+          setZoom(event.zoom)
+          break
+        case 'HistoryChanged':
+          setCanUndo(event.can_undo)
+          setCanRedo(event.can_redo)
           break
         case 'GpuError':
           setGpuStatus('error')
@@ -214,11 +224,20 @@ export function useWasmEditor({
     return () => observer.disconnect()
   }, [containerRef, canvasRef, dispatch])
 
-  // Canvas pointer down handler
+  // Canvas pointer handlers with pointer capture for dragging
+  const isPointerDownRef = useRef(false)
+
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       const canvas = canvasRef.current
       if (!canvas || !editorRef.current) return
+
+      isPointerDownRef.current = true
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId)
+      } catch {
+        // ignore in test or unsupported environments
+      }
 
       const rect = canvas.getBoundingClientRect()
       const logicalPt = cssToLogicalPoint(e.clientX, e.clientY, rect)
@@ -232,13 +251,174 @@ export function useWasmEditor({
     [canvasRef, dispatch]
   )
 
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (!isPointerDownRef.current) return
+      const canvas = canvasRef.current
+      if (!canvas || !editorRef.current) return
+
+      const rect = canvas.getBoundingClientRect()
+      const logicalPt = cssToLogicalPoint(e.clientX, e.clientY, rect)
+
+      dispatch({
+        type: 'PointerMove',
+        screen_x: logicalPt.x,
+        screen_y: logicalPt.y,
+      })
+    },
+    [canvasRef, dispatch]
+  )
+
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (!isPointerDownRef.current) return
+      isPointerDownRef.current = false
+      const canvas = canvasRef.current
+      if (!canvas || !editorRef.current) return
+
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId)
+      } catch {
+        // ignore
+      }
+
+      const rect = canvas.getBoundingClientRect()
+      const logicalPt = cssToLogicalPoint(e.clientX, e.clientY, rect)
+
+      dispatch({
+        type: 'PointerUp',
+        screen_x: logicalPt.x,
+        screen_y: logicalPt.y,
+      })
+    },
+    [canvasRef, dispatch]
+  )
+
+  // Native non-passive wheel listener for cursor-anchored zoom & trackpad pan
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      if (!editorRef.current) return
+
+      const rect = canvas.getBoundingClientRect()
+      const logicalPt = cssToLogicalPoint(e.clientX, e.clientY, rect)
+
+      if (e.ctrlKey || e.metaKey) {
+        // Cursor-anchored zoom via pinch-to-zoom or Ctrl+wheel
+        const factor = Math.exp(-e.deltaY * 0.005)
+        dispatch({
+          type: 'ZoomAt',
+          screen_x: logicalPt.x,
+          screen_y: logicalPt.y,
+          factor,
+        })
+      } else {
+        // Trackpad 2-finger scroll or wheel pan
+        const deltaX = e.shiftKey ? -e.deltaY : -e.deltaX
+        const deltaY = e.shiftKey ? 0 : -e.deltaY
+        if (Math.abs(deltaX) > 0 || Math.abs(deltaY) > 0) {
+          dispatch({
+            type: 'PanCamera',
+            delta_x: deltaX,
+            delta_y: deltaY,
+          })
+        }
+      }
+    }
+
+    canvas.addEventListener('wheel', onWheel, { passive: false })
+    return () => canvas.removeEventListener('wheel', onWheel)
+  }, [canvasRef, dispatch])
+
+  // Keyboard shortcuts for Undo and Redo
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
+        return
+      }
+
+      const isMac = typeof navigator !== 'undefined' && /Mac|iPod|iPhone|iPad/.test(navigator.platform)
+      const modKey = isMac ? e.metaKey : e.ctrlKey
+
+      if (modKey && !e.altKey) {
+        if (e.key === 'z' || e.key === 'Z') {
+          if (e.shiftKey) {
+            e.preventDefault()
+            dispatch({ type: 'Redo' })
+          } else {
+            e.preventDefault()
+            dispatch({ type: 'Undo' })
+          }
+        } else if (e.key === 'y' || e.key === 'Y') {
+          e.preventDefault()
+          dispatch({ type: 'Redo' })
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [dispatch])
+
+  const undo = useCallback(() => dispatch({ type: 'Undo' }), [dispatch])
+  const redo = useCallback(() => dispatch({ type: 'Redo' }), [dispatch])
+
+  const zoomIn = useCallback(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    dispatch({
+      type: 'ZoomAt',
+      screen_x: rect.width / 2,
+      screen_y: rect.height / 2,
+      factor: 1.25,
+    })
+  }, [canvasRef, dispatch])
+
+  const zoomOut = useCallback(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const rect = canvas.getBoundingClientRect()
+    dispatch({
+      type: 'ZoomAt',
+      screen_x: rect.width / 2,
+      screen_y: rect.height / 2,
+      factor: 0.8,
+    })
+  }, [canvasRef, dispatch])
+
+  const resetZoom = useCallback(() => {
+    const canvas = canvasRef.current
+    if (!canvas || zoom === 0) return
+    const rect = canvas.getBoundingClientRect()
+    dispatch({
+      type: 'ZoomAt',
+      screen_x: rect.width / 2,
+      screen_y: rect.height / 2,
+      factor: 1.0 / zoom,
+    })
+  }, [canvasRef, dispatch, zoom])
+
   return {
     labels,
+    zoom,
+    canUndo,
+    canRedo,
     gpuStatus,
     errorMessage,
     engineError,
     clearEngineError: () => setEngineError(null),
     dispatch,
     handlePointerDown,
+    handlePointerMove,
+    handlePointerUp,
+    undo,
+    redo,
+    zoomIn,
+    zoomOut,
+    resetZoom,
   }
 }

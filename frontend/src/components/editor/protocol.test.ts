@@ -85,6 +85,68 @@ describe('Editor Protocol Schemas (Matt Pocock SDD)', () => {
       })
     })
 
+    it('validates PointerMove command', () => {
+      const move = EditorCommandSchema.parse({
+        type: 'PointerMove',
+        screen_x: 200,
+        screen_y: 350,
+      })
+      expect(move).toEqual({
+        type: 'PointerMove',
+        screen_x: 200,
+        screen_y: 350,
+      })
+    })
+
+    it('validates PointerUp command', () => {
+      const up = EditorCommandSchema.parse({
+        type: 'PointerUp',
+        screen_x: 200,
+        screen_y: 350,
+      })
+      expect(up).toEqual({
+        type: 'PointerUp',
+        screen_x: 200,
+        screen_y: 350,
+      })
+    })
+
+    it('validates PanCamera command', () => {
+      const pan = EditorCommandSchema.parse({
+        type: 'PanCamera',
+        delta_x: -25.5,
+        delta_y: 40.0,
+      })
+      expect(pan).toEqual({
+        type: 'PanCamera',
+        delta_x: -25.5,
+        delta_y: 40.0,
+      })
+    })
+
+    it('validates ZoomAt command', () => {
+      const zoomAt = EditorCommandSchema.parse({
+        type: 'ZoomAt',
+        screen_x: 400,
+        screen_y: 300,
+        factor: 1.25,
+      })
+      expect(zoomAt).toEqual({
+        type: 'ZoomAt',
+        screen_x: 400,
+        screen_y: 300,
+        factor: 1.25,
+      })
+    })
+
+    it('validates Undo and Redo commands', () => {
+      const undo = EditorCommandSchema.parse({ type: 'Undo' })
+      expect(undo).toEqual({ type: 'Undo' })
+
+      const redo = EditorCommandSchema.parse({ type: 'Redo' })
+      expect(redo).toEqual({ type: 'Redo' })
+    })
+
     it('validates ResizeViewport command', () => {
       const resize = EditorCommandSchema.parse({
         type: 'ResizeViewport',
@@ -188,6 +250,47 @@ describe('Editor Protocol Schemas (Matt Pocock SDD)', () => {
       expect(errEvent).toEqual({
         type: 'Error',
         message: 'Card with id already exists',
+      })
+    })
+
+    it('validates CardMoved event', () => {
+      const moved = EditorEventSchema.parse({
+        type: 'CardMoved',
+        card_id: 'skill-1',
+        position: { x: 220, y: 310 },
+      })
+      expect(moved).toEqual({
+        type: 'CardMoved',
+        card_id: 'skill-1',
+        position: { x: 220, y: 310 },
+      })
+    })
+
+    it('validates CameraChanged event', () => {
+      const camChanged = EditorEventSchema.parse({
+        type: 'CameraChanged',
+        offset_x: 150.5,
+        offset_y: -40.2,
+        zoom: 1.5,
+      })
+      expect(camChanged).toEqual({
+        type: 'CameraChanged',
+        offset_x: 150.5,
+        offset_y: -40.2,
+        zoom: 1.5,
+      })
+    })
+
+    it('validates HistoryChanged event', () => {
+      const hist = EditorEventSchema.parse({
+        type: 'HistoryChanged',
+        can_undo: true,
+        can_redo: false,
+      })
+      expect(hist).toEqual({
+        type: 'HistoryChanged',
+        can_undo: true,
+        can_redo: false,
       })
     })
 
