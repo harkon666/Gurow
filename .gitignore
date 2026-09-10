@@ -11,3 +11,7 @@ dist-ssr/
 .tanstack/
 *.log
 .DS_Store
+
+# Local agent run state and Python cache
+.harness/
+__pycache__/

@@ -55,6 +55,12 @@ bun run smoke-check
 ```
 Validation artifacts and reports are saved to `docs/validation/`.
 
+### Agent implementation harness
+
+Use [the harness guide](docs/HARNESS.md) to pin a GitHub ticket, map its acceptance
+criteria to tests, run quick/full checks, and prepare an independent review packet.
+Run `python3 scripts/harness.py --help` from the repository root.
+
 ### T01 scope and evidence
 
 T01 proves card rendering and selection. ADR-0017 remains the required P1/MVP

@@ -11,3 +11,7 @@ Use the canonical triage labels, including `ready-for-agent` for agreed specs. R
 ### Domain docs
 
 This project uses one domain context. Before domain exploration, specification, or implementation, read [the domain documentation rules](docs/agents/domain.md), the glossary, and relevant ADRs.
+
+### Implementation and review harness
+
+When implementing a ticket, fixing review findings, or preparing a review handoff, follow [the harness workflow](docs/agents/harness.md). Resume `.harness/task.json` for the same ticket; pin the ticket/base once, map every acceptance criterion to observable assertions, and run current full checks before claiming readiness for independent review.

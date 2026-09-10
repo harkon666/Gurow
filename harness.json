@@ -1,0 +1,17 @@
+{
+  "checks": {
+    "harness-tests": {"cwd": ".", "argv": ["python3", "-B", "-m", "unittest", "discover", "-s", "scripts", "-p", "test_harness.py"], "timeout": 120},
+    "frontend-types": {"cwd": "frontend", "argv": ["bun", "run", "typecheck"], "timeout": 120},
+    "frontend-tests": {"cwd": "frontend", "argv": ["bun", "test"], "timeout": 120},
+    "rust-tests": {"cwd": ".", "argv": ["cargo", "test", "--manifest-path", "editor/Cargo.toml"], "timeout": 300},
+    "build": {"cwd": "frontend", "argv": ["bun", "run", "build"], "timeout": 600},
+    "t04-browser": {"cwd": "frontend", "argv": ["bun", "run", "scripts/t04-smoke-check.ts", "--check-only"], "timeout": 180}
+  },
+  "profiles": {
+    "quick": ["harness-tests", "frontend-types", "frontend-tests", "rust-tests"],
+    "full": ["harness-tests", "frontend-types", "frontend-tests", "rust-tests", "build", "t04-browser"]
+  },
+  "tickets": {
+    "T04": ["t04-browser"]
+  }
+}
