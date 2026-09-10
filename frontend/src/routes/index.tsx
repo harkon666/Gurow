@@ -1,86 +1,65 @@
 import { createFileRoute } from '@tanstack/react-router'
+import { useState, useEffect } from 'react'
+import { WebGpuEditor } from '../components/editor/WebGpuEditor'
+import { SkillDetailPanel } from '../components/editor/SkillDetailPanel'
+import type { SelectedSkillInfo } from '../components/editor/types'
+import { INITIAL_LEARNING_PATH_FIXTURE } from '../fixtures/learningPath'
 
-export const Route = createFileRoute('/')({ component: App })
 
-function App() {
+export const Route = createFileRoute('/')({ component: LearningPathEditorPage })
+
+function LearningPathEditorPage() {
+  const [mounted, setMounted] = useState(false)
+  const [selectedSkill, setSelectedSkill] = useState<SelectedSkillInfo | null>(null)
+
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+
   return (
-    <main className="page-wrap px-4 pb-8 pt-14">
-      <section className="island-shell rise-in relative overflow-hidden rounded-[2rem] px-6 py-10 sm:px-10 sm:py-14">
-        <div className="pointer-events-none absolute -left-20 -top-24 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(79,184,178,0.32),transparent_66%)]" />
-        <div className="pointer-events-none absolute -bottom-20 -right-20 h-56 w-56 rounded-full bg-[radial-gradient(circle,rgba(47,106,74,0.18),transparent_66%)]" />
-        <p className="island-kicker mb-3">TanStack Start Base Template</p>
-        <h1 className="display-title mb-5 max-w-3xl text-4xl leading-[1.02] font-bold tracking-tight text-[var(--sea-ink)] sm:text-6xl">
-          Start simple, ship quickly.
-        </h1>
-        <p className="mb-8 max-w-2xl text-base text-[var(--sea-ink-soft)] sm:text-lg">
-          This base starter intentionally keeps things light: two routes, clean
-          structure, and the essentials you need to build from scratch.
-        </p>
-        <div className="flex flex-wrap gap-3">
-          <a
-            href="/about"
-            className="rounded-full border border-[rgba(50,143,151,0.3)] bg-[rgba(79,184,178,0.14)] px-5 py-2.5 text-sm font-semibold text-[var(--lagoon-deep)] no-underline transition hover:-translate-y-0.5 hover:bg-[rgba(79,184,178,0.24)]"
-          >
-            About This Starter
-          </a>
-          <a
-            href="https://tanstack.com/router"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-full border border-[rgba(23,58,64,0.2)] bg-white/50 px-5 py-2.5 text-sm font-semibold text-[var(--sea-ink)] no-underline transition hover:-translate-y-0.5 hover:border-[rgba(23,58,64,0.35)]"
-          >
-            Router Guide
-          </a>
+    <main className="px-4 py-6 max-w-7xl mx-auto flex flex-col gap-5">
+      {/* Learning Path Header Info */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/50 p-5 rounded-2xl border border-slate-800/80 backdrop-blur-sm">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              P1 Slice: WebGPU Editor
+            </span>
+            <span className="text-xs text-slate-500 font-mono">US68 • US73 • US80</span>
+          </div>
+          <h1 className="text-2xl font-bold text-slate-100 tracking-tight">
+            {INITIAL_LEARNING_PATH_FIXTURE.title}
+          </h1>
+          <p className="text-xs text-slate-400 mt-1 max-w-2xl">
+            {INITIAL_LEARNING_PATH_FIXTURE.description}
+          </p>
         </div>
-      </section>
 
-      <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {[
-          [
-            'Type-Safe Routing',
-            'Routes and links stay in sync across every page.',
-          ],
-          [
-            'Server Functions',
-            'Call server code from your UI without creating API boilerplate.',
-          ],
-          [
-            'Streaming by Default',
-            'Ship progressively rendered responses for faster experiences.',
-          ],
-          [
-            'Tailwind Native',
-            'Design quickly with utility-first styling and reusable tokens.',
-          ],
-        ].map(([title, desc], index) => (
-          <article
-            key={title}
-            className="island-shell feature-card rise-in rounded-2xl p-5"
-            style={{ animationDelay: `${index * 90 + 80}ms` }}
-          >
-            <h2 className="mb-2 text-base font-semibold text-[var(--sea-ink)]">
-              {title}
-            </h2>
-            <p className="m-0 text-sm text-[var(--sea-ink-soft)]">{desc}</p>
-          </article>
-        ))}
-      </section>
+        <div className="flex items-center gap-3">
+          <div className="text-right hidden sm:block">
+            <div className="text-xs font-medium text-slate-300">Editor State Authority</div>
+            <div className="text-[11px] text-slate-500 font-mono">Rust Engine (Wasm)</div>
+          </div>
+        </div>
+      </div>
 
-      <section className="island-shell mt-8 rounded-2xl p-6">
-        <p className="island-kicker mb-2">Quick Start</p>
-        <ul className="m-0 list-disc space-y-2 pl-5 text-sm text-[var(--sea-ink-soft)]">
-          <li>
-            Edit <code>src/routes/index.tsx</code> to customize the home page.
-          </li>
-          <li>
-            Update <code>src/components/Header.tsx</code> and{' '}
-            <code>src/components/Footer.tsx</code> for brand links.
-          </li>
-          <li>
-            Add routes in <code>src/routes</code> and tweak visual tokens in{' '}
-            <code>src/styles.css</code>.
-          </li>
-        </ul>
+      {/* Editor Main Canvas & Panel Container */}
+      <section
+        id="canvas-editor-container"
+        className="h-[640px] w-full rounded-2xl border border-slate-800 shadow-2xl overflow-hidden bg-slate-950 flex flex-col md:flex-row"
+      >
+        {mounted ? (
+          <>
+            <WebGpuEditor
+              onSelectSkill={setSelectedSkill}
+            />
+            <SkillDetailPanel selectedSkill={selectedSkill} />
+          </>
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">
+            Initializing Editor Environment...
+          </div>
+        )}
       </section>
     </main>
   )

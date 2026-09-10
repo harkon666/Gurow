@@ -7,10 +7,14 @@
   },
   "scripts": {
     "dev": "vite dev --port 3000",
+    "build:wasm": "bunx wasm-pack build ../editor/crates/editor-wasm --target web --out-dir ../../../frontend/src/pkg",
     "generate-routes": "tsr generate",
-    "build": "vite build",
+    "build": "bun run build:wasm && vite build",
+    "typecheck": "tsc --noEmit",
+    "smoke-check": "bun run scripts/smoke-check.ts",
     "preview": "vite preview"
   },
+
   "dependencies": {
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-devtools": "latest",
@@ -20,7 +24,8 @@
     "nitro": "3.0.260610-beta",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
-    "tailwindcss": "^4.1.18"
+    "tailwindcss": "^4.1.18",
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.16",
@@ -31,6 +36,8 @@
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "@vitejs/plugin-react": "^6.0.1",
+    "bun-types": "^1.4.2",
+    "puppeteer-core": "^25.10.0",
     "typescript": "^6.0.2",
     "vite": "^8.0.0"
   },

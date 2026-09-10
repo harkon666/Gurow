@@ -1,0 +1,10 @@
+[package]
+name = "renderer-wgpu"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+engine-core = { path = "../engine-core" }
+wgpu = { version = "24", default-features = false, features = ["wgsl", "webgpu"] }
+bytemuck = { version = "1.16", features = ["derive"] }
+log = "0.4"

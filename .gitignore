@@ -1,0 +1,13 @@
+# Rust build output
+target/
+editor/target/
+
+# Node & Bundlers
+node_modules/
+.output/
+.nitro/
+dist/
+dist-ssr/
+.tanstack/
+*.log
+.DS_Store

@@ -1,0 +1,231 @@
+import { describe, it, expect } from 'bun:test'
+import {
+  EditorCommandSchema,
+  EditorEventSchema,
+  EditorEventsSchema,
+} from './protocol'
+
+
+describe('Editor Protocol Schemas (Matt Pocock SDD)', () => {
+  describe('EditorCommandSchema validation & serialization', () => {
+    it('validates LoadDocument command with optional size', () => {
+      const raw = {
+        type: 'LoadDocument',
+        document: {
+          cards: [
+            {
+              id: 'skill-1',
+              title: 'Skill One',
+              position: { x: 10, y: 20 },
+            },
+            {
+              id: 'skill-2',
+              title: 'Skill Two',
+              position: { x: 30, y: 40 },
+              size: { width: 180, height: 80 },
+            },
+          ],
+        },
+      }
+      const parsed = EditorCommandSchema.parse(raw)
+      expect(parsed.type).toBe('LoadDocument')
+      if (parsed.type === 'LoadDocument') {
+        expect(parsed.document.cards.length).toBe(2)
+        expect(parsed.document.cards[0].size).toBeUndefined()
+        expect(parsed.document.cards[1].size).toEqual({ width: 180, height: 80 })
+      }
+    })
+
+    it('validates CreateCard command with and without size', () => {
+      const withoutSize = {
+        type: 'CreateCard' as const,
+        id: 'skill-custom-1',
+        title: 'Custom Skill',
+        position: { x: 100, y: 150 },
+      }
+      const parsedWithout = EditorCommandSchema.parse(withoutSize)
+      expect(parsedWithout).toEqual(withoutSize)
+
+      const withSize = {
+        type: 'CreateCard' as const,
+        id: 'skill-custom-2',
+        title: 'Custom Skill 2',
+        position: { x: 200, y: 250 },
+        size: { width: 200, height: 90 },
+      }
+      const parsedWith = EditorCommandSchema.parse(withSize)
+      expect(parsedWith).toEqual(withSize)
+    })
+
+
+    it('validates SelectCard command with string id and null', () => {
+      const selectOne = EditorCommandSchema.parse({
+        type: 'SelectCard',
+        id: 'skill-1',
+      })
+      expect(selectOne).toEqual({ type: 'SelectCard', id: 'skill-1' })
+
+      const deselect = EditorCommandSchema.parse({
+        type: 'SelectCard',
+        id: null,
+      })
+      expect(deselect).toEqual({ type: 'SelectCard', id: null })
+    })
+
+    it('validates PointerDown command', () => {
+      const pointerDown = EditorCommandSchema.parse({
+        type: 'PointerDown',
+        screen_x: 120.5,
+        screen_y: 340.2,
+      })
+      expect(pointerDown).toEqual({
+        type: 'PointerDown',
+        screen_x: 120.5,
+        screen_y: 340.2,
+      })
+    })
+
+    it('validates ResizeViewport command', () => {
+      const resize = EditorCommandSchema.parse({
+        type: 'ResizeViewport',
+        width: 1920,
+        height: 1080,
+      })
+      expect(resize).toEqual({
+        type: 'ResizeViewport',
+        width: 1920,
+        height: 1080,
+      })
+    })
+
+    it('rejects invalid or unknown commands', () => {
+      expect(() =>
+        EditorCommandSchema.parse({ type: 'UnknownCommand' })
+      ).toThrow()
+      expect(() =>
+        EditorCommandSchema.parse({ type: 'PointerDown', screen_x: 'invalid' })
+      ).toThrow()
+    })
+  })
+
+  describe('EditorEventSchema and EditorEventsSchema boundary validation', () => {
+    it('validates DocumentLoaded event', () => {
+      const parsed = EditorEventSchema.parse({ type: 'DocumentLoaded' })
+      expect(parsed).toEqual({ type: 'DocumentLoaded' })
+    })
+
+    it('validates CardCreated event', () => {
+      const event = {
+        type: 'CardCreated' as const,
+        card: {
+          id: 'skill-custom-1',
+          title: 'Custom Skill',
+          position: { x: 50, y: 60 },
+          size: { width: 180, height: 80 },
+        },
+      }
+      const parsed = EditorEventSchema.parse(event)
+      expect(parsed).toEqual(event)
+    })
+
+    it('validates SelectionChanged event with id/title and with nulls', () => {
+      const selChanged = EditorEventSchema.parse({
+        type: 'SelectionChanged',
+        selected_id: 'skill-1',
+        title: 'Skill One',
+      })
+      expect(selChanged).toEqual({
+        type: 'SelectionChanged',
+        selected_id: 'skill-1',
+        title: 'Skill One',
+      })
+
+      const deselected = EditorEventSchema.parse({
+        type: 'SelectionChanged',
+        selected_id: null,
+        title: null,
+      })
+      expect(deselected).toEqual({
+        type: 'SelectionChanged',
+        selected_id: null,
+        title: null,
+      })
+    })
+
+    it('validates LabelsUpdated event', () => {
+      const event = {
+        type: 'LabelsUpdated' as const,
+        labels: [
+          {
+            card_id: 'skill-1',
+            title: 'Skill One',
+            screen_rect: { x: 10, y: 20, width: 180, height: 80 },
+            selected: true,
+          },
+        ],
+      }
+      const parsed = EditorEventSchema.parse(event)
+      expect(parsed).toEqual(event)
+    })
+
+
+    it('validates GpuError event', () => {
+      const gpuErrEvent = EditorEventSchema.parse({
+        type: 'GpuError',
+        message: 'Renderer error: Surface texture lost',
+      })
+      expect(gpuErrEvent).toEqual({
+        type: 'GpuError',
+        message: 'Renderer error: Surface texture lost',
+      })
+    })
+
+    it('validates Error event', () => {
+      const errEvent = EditorEventSchema.parse({
+        type: 'Error',
+        message: 'Card with id already exists',
+      })
+      expect(errEvent).toEqual({
+        type: 'Error',
+        message: 'Card with id already exists',
+      })
+    })
+
+
+    it('validates array of serialized events (wire format from Rust serde)', () => {
+      const wireJson = JSON.stringify([
+        {
+          type: 'CardCreated',
+          card: {
+            id: 'skill-new',
+            title: 'New Skill',
+            position: { x: 0, y: 0 },
+            size: { width: 180, height: 80 },
+          },
+        },
+        {
+          type: 'LabelsUpdated',
+          labels: [
+            {
+              card_id: 'skill-new',
+              title: 'New Skill',
+              screen_rect: { x: 0, y: 0, width: 180, height: 80 },
+              selected: false,
+            },
+          ],
+        },
+      ])
+
+      const parsedEvents = EditorEventsSchema.parse(JSON.parse(wireJson))
+      expect(parsedEvents.length).toBe(2)
+      expect(parsedEvents[0].type).toBe('CardCreated')
+      expect(parsedEvents[1].type).toBe('LabelsUpdated')
+    })
+
+    it('rejects malformed event array', () => {
+      expect(() =>
+        EditorEventsSchema.parse([{ type: 'BogusEvent' }])
+      ).toThrow()
+    })
+  })
+})
