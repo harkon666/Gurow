@@ -15,6 +15,7 @@
     "smoke-check:t02": "bun run scripts/t02-smoke-check.ts",
     "smoke-check:t03": "bun run scripts/t03-smoke-check.ts",
     "smoke-check:t04": "bun run scripts/t04-smoke-check.ts",
+    "smoke-check:t05": "bun run scripts/t05-smoke-check.ts",
     "preview": "vite preview"
   },
 

@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { WebGpuEditor, type WebGpuEditorActions } from '../components/editor/WebGpuEditor'
 import { SkillDetailPanel } from '../components/editor/SkillDetailPanel'
+import { SkillPrerequisiteList } from '../components/editor/SkillPrerequisiteList'
 import type { SelectedSkillInfo } from '../components/editor/types'
 import type {
   PrerequisiteConnection,
@@ -264,6 +265,15 @@ function LearningPathEditorPage() {
     }
   }, [])
 
+  const handleSelectListSkill = useCallback((skill: SelectedSkillInfo | null) => {
+    setSelectedSkill(skill)
+    if (skill) {
+      actionsRef.current?.selectCard(skill.id)
+    } else {
+      actionsRef.current?.selectCard(null)
+    }
+  }, [])
+
   // Resolve active skill's learning payload from application state
   const currentSkillPayload = applicationSkills.find((s) => s.id === selectedSkill?.id)
 
@@ -281,7 +291,7 @@ function LearningPathEditorPage() {
               P1 Slice: WebGPU Editor
             </span>
             <span className="text-xs text-slate-500 font-mono">
-              US08 • US73 • US76 • US78 • US83
+              US08 • US73 • US76 • US78 • US81 • US82 • US83
             </span>
           </div>
           <h1 className="text-2xl font-bold text-slate-100 tracking-tight">
@@ -358,6 +368,13 @@ function LearningPathEditorPage() {
       >
         {mounted ? (
           <>
+            <SkillPrerequisiteList
+              skills={applicationSkills}
+              connections={connections}
+              selectedSkillId={selectedSkill?.id ?? null}
+              onSelectSkill={handleSelectListSkill}
+              className="w-full md:w-64 lg:w-72 md:shrink-0"
+            />
             <WebGpuEditor
               onSelectSkill={setSelectedSkill}
               onConnectionsChange={setConnections}

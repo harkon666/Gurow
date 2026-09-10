@@ -13,6 +13,7 @@ interface EditorToolbarProps {
   onZoomOut?: () => void
   onResetZoom?: () => void
   onCreateSkill?: () => void
+  onSimulateFailure?: () => void
 }
 
 export const EditorToolbar: React.FC<EditorToolbarProps> = ({
@@ -27,6 +28,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   onZoomOut,
   onResetZoom,
   onCreateSkill,
+  onSimulateFailure,
 }) => {
   return (
     <div className="h-12 border-b border-slate-800/80 bg-slate-900/60 px-4 flex items-center justify-between backdrop-blur-sm z-20">
@@ -145,10 +147,21 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             1:1
           </button>
         </div>
+
+        {onSimulateFailure && gpuStatus === 'ready' && (
+          <button
+            id="btn-simulate-gpu-failure"
+            onClick={onSimulateFailure}
+            title="Simulate WebGPU Device Loss (AC3 / Testing)"
+            className="text-[10px] font-mono px-2 py-1 rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 cursor-pointer transition-colors"
+          >
+            Simulate GPU Failure
+          </button>
+        )}
       </div>
 
       <div className="flex items-center gap-2 text-xs text-slate-400">
-        <span className="text-[11px] text-slate-500 font-mono">P1/T03 • Prerequisite DAG & Connections</span>
+        <span className="text-[11px] text-slate-500 font-mono">P1/T05 • Renderer Recovery & Prerequisite List</span>
       </div>
     </div>
   )

@@ -1,6 +1,6 @@
 import React, { useRef, useMemo, useEffect } from 'react'
 import { INITIAL_LEARNING_PATH_FIXTURE } from '../../fixtures/learningPath'
-import type { SelectedSkillInfo } from './types'
+import type { SelectedSkillInfo, GpuStatus } from './types'
 import type {
   PrerequisiteConnection,
   SkillCard,
@@ -21,6 +21,9 @@ export interface WebGpuEditorActions {
     connections: PrerequisiteConnection[]
   } | null
   setCamera: (offset_x: number, offset_y: number, zoom: number) => void
+  selectCard: (id: string | null) => void
+  recreateRenderer: () => Promise<boolean>
+  simulateDeviceLoss: () => void
 }
 
 interface WebGpuEditorProps {
@@ -39,6 +42,7 @@ interface WebGpuEditorProps {
   initialCamera?: CameraState | null
   onOperationCompleted?: () => void
   onCameraChanged?: (camera: CameraState) => void
+  onGpuStatusChange?: (status: GpuStatus) => void
 }
 
 export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
@@ -52,6 +56,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
   initialCamera,
   onOperationCompleted,
   onCameraChanged,
+  onGpuStatusChange,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -77,6 +82,8 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
     canRedo,
     gpuStatus,
     errorMessage,
+    recoveryError,
+    isRecovering,
     engineError,
     clearEngineError,
     createCard,
@@ -84,6 +91,9 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
     disconnectSkills,
     exportSnapshot,
     setCamera,
+    selectCard,
+    simulateDeviceLoss,
+    recreateRenderer,
     handlePointerDown,
     handlePointerMove,
     handlePointerUp,
@@ -112,14 +122,31 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
   }, [connectionRejection, onRejection])
 
   useEffect(() => {
+    onGpuStatusChange?.(gpuStatus)
+  }, [gpuStatus, onGpuStatusChange])
+
+  useEffect(() => {
     onActionsReady?.({
       createCard,
       connectSkills,
       disconnectSkills,
       exportSnapshot,
       setCamera,
+      selectCard,
+      recreateRenderer,
+      simulateDeviceLoss,
     })
-  }, [createCard, connectSkills, disconnectSkills, exportSnapshot, setCamera, onActionsReady])
+  }, [
+    createCard,
+    connectSkills,
+    disconnectSkills,
+    exportSnapshot,
+    setCamera,
+    selectCard,
+    recreateRenderer,
+    simulateDeviceLoss,
+    onActionsReady,
+  ])
 
   return (
     <div className="relative flex-1 flex flex-col h-full overflow-hidden bg-slate-950">
@@ -136,6 +163,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
         onZoomOut={zoomOut}
         onResetZoom={resetZoom}
         onCreateSkill={onCreateSkill}
+        onSimulateFailure={simulateDeviceLoss}
       />
 
       {/* Engine Error Toast Banner */}
@@ -156,8 +184,8 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
         ref={containerRef}
         className="relative flex-1 w-full h-full overflow-hidden"
       >
-        {/* Notice when WebGPU is unavailable or in error */}
-        {(gpuStatus === 'unsupported' || gpuStatus === 'error') && (
+        {/* Notice when WebGPU is unsupported */}
+        {gpuStatus === 'unsupported' && (
           <div
             id="editor-gpu-notice"
             className="absolute inset-0 z-30 flex flex-col items-center justify-center p-8 text-center bg-slate-950/95"
@@ -169,10 +197,64 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
                 </svg>
               </div>
               <h3 className="text-base font-semibold text-slate-100 mb-2">
-                WebGPU Canvas Required
+                WebGPU Canvas Unavailable
               </h3>
               <p className="text-xs text-slate-400 leading-relaxed">
-                {errorMessage || 'A browser with WebGPU support is required to render and interact with the canvas editor.'}
+                {errorMessage || 'WebGPU is not supported by your current browser environment.'}
+              </p>
+              <div
+                id="canvas-availability-explanation"
+                className="text-[11px] text-amber-300 mt-4 bg-amber-500/10 p-2.5 rounded-xl border border-amber-500/20 text-left leading-relaxed"
+              >
+                <strong>Canvas Availability:</strong> Card positioning remains a canvas operation requiring WebGPU. You can continue navigating all Skills and editing associated Tasks via the keyboard-accessible list.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Notice when WebGPU renderer encounters an error / device loss */}
+        {gpuStatus === 'error' && (
+          <div
+            id="editor-gpu-error-notice"
+            className="absolute inset-0 z-30 flex flex-col items-center justify-center p-8 text-center bg-slate-950/95 backdrop-blur-sm"
+          >
+            <div className="max-w-md bg-slate-900 border border-red-800/80 rounded-2xl p-6 shadow-2xl">
+              <div className="w-12 h-12 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20 flex items-center justify-center mx-auto mb-4">
+                <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <h3 className="text-base font-semibold text-red-200 mb-2">
+                Renderer Failure / Device Lost
+              </h3>
+              <p className="text-xs text-slate-300 leading-relaxed mb-4">
+                {errorMessage || 'Renderer failure detected. Active document and task edits have been preserved.'}
+              </p>
+
+              {recoveryError && (
+                <div
+                  id="recovery-error-banner"
+                  className="mb-4 p-2.5 rounded-xl bg-red-950/80 border border-red-800 text-xs text-red-300 text-left"
+                >
+                  <span className="font-semibold">Recovery Failed:</span> {recoveryError}
+                </div>
+              )}
+
+              <div className="flex flex-col gap-2">
+                <button
+                  id="btn-retry-renderer"
+                  disabled={isRecovering}
+                  onClick={() => recreateRenderer()}
+                  className="w-full px-4 py-2.5 text-xs font-semibold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg cursor-pointer transition-colors flex items-center justify-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>{isRecovering ? 'Recovering Renderer…' : 'Retry Renderer Recreation'}</span>
+                </button>
+              </div>
+              <p className="text-[10px] text-slate-500 mt-3">
+                List navigation and Task editing remain available during renderer interruption.
               </p>
             </div>
           </div>
