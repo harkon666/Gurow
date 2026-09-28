@@ -1,4 +1,17 @@
-import puppeteer from 'puppeteer-core'
+/**
+ * T06-L3-01 qualification driver.
+ *
+ * Drives one controlled pan, zoom and drag through real browser input on the
+ * headed reference browser, derives a trace/page clock mapping, and reports
+ * whichever verdict the evidence supports. The verdict is never predetermined:
+ * an UNSUPPORTED result is a finding, and `--expect-verdict` turns an already
+ * established finding into a regression check the harness can fail on.
+ *
+ * Artefact writing lives in `artifacts.ts`, the AC5 rejection fixtures in
+ * `negativeCases.ts`, and the AC4 phase reducers in `phases.ts`; what remains
+ * here is the observation sequence itself.
+ */
+import puppeteer, { type Page, type CDPSession } from 'puppeteer-core'
 import { spawn, execSync } from 'child_process'
 import path from 'path'
 import fs from 'fs'
@@ -9,60 +22,96 @@ import {
   deriveClockMapping,
   parseTraceEvidence,
   verifyControlledDelayShift,
-  generateQualificationReport,
   getOpticalAcquisitionRequirements,
-  UNKNOWN,
+  validateReferenceEnvironment,
   isSoftwareAdapter,
+  GUROW_INPUT_COALESCING,
+  UNKNOWN,
   type CanvasGeometry,
   type CollectorProfile,
-  type DelayCheckResult,
-  type InputPresentationChain,
-  type TraceEvent,
   type CorrelationEvent,
+  type DelayCheckResult,
+  type FaultInjectionConfig,
+  type GeometryClass,
   type HostEnvironmentInfo,
   type SourceIdentity,
+  type TraceEvent,
 } from './collector'
 import { finalizeQualification } from './qualification'
 import { computeSourceFingerprint } from './sourceFingerprint'
-import { validateReferenceEnvironment } from './collector'
+import { phaseDiagnosticCpu, phaseLabelCommitMs, phaseLatency, type PhaseWindow } from './phases'
+import { runNegativeCases } from './negativeCases'
+import {
+  traceConfiguration,
+  writeObservedLimitations,
+  writePreflightFailureArtifacts,
+  writePreflightPass,
+  writeRunArtifacts,
+  COLLECTOR_VERSION,
+  CONTRACT_ID,
+  type ScenarioWindows,
+} from './artifacts'
+import {
+  SCENARIOS,
+  type BenchmarkHooks,
+  type DispatchRecord,
+  type LabelCommitRecord,
+  type Scenario,
+} from '../../src/components/editor/benchmarkHooks'
 
-/**
- * T06-L3-01 qualification driver.
- *
- * Drives one controlled pan, zoom and drag through real browser input on the
- * headed reference browser, derives a trace/page clock mapping, and reports
- * whichever verdict the evidence supports. The verdict is never predetermined:
- * an UNSUPPORTED result is a finding, and `--expect-verdict` turns that finding
- * into a regression check the harness can fail on.
- */
+declare global {
+  interface Window {
+    __gurowBenchmarkHooks: BenchmarkHooks
+  }
+}
 
 const REPO_ROOT = path.resolve(__dirname, '../../..')
 const FRONTEND_DIR = path.resolve(REPO_ROOT, 'frontend')
 
-const args = process.argv.slice(2)
-let contractPath = path.resolve(REPO_ROOT, 'docs/benchmarks/p1/protocol.json')
-let outDir = path.resolve(REPO_ROOT, '.harness/t06/qualification')
-let port = 3465
-let headless = false
-let expectVerdict: string | null = null
-
-for (let i = 0; i < args.length; i++) {
-  if (args[i] === '--contract' && args[i + 1]) {
-    contractPath = path.resolve(process.cwd(), args[i + 1])
-    i++
-  } else if (args[i] === '--out' && args[i + 1]) {
-    outDir = path.resolve(process.cwd(), args[i + 1])
-    i++
-  } else if (args[i] === '--port' && args[i + 1]) {
-    port = parseInt(args[i + 1], 10)
-    i++
-  } else if (args[i] === '--expect-verdict' && args[i + 1]) {
-    expectVerdict = args[i + 1]
-    i++
-  } else if (args[i] === '--headless') {
-    headless = true
-  }
+interface DriverOptions {
+  contractPath: string
+  outDir: string
+  port: number
+  headless: boolean
+  expectVerdict: string | null
+  mode: QualificationMode
 }
+
+/**
+ * What the run is trying to establish.
+ *
+ * `collector` qualifies the evidence chain on whatever window the desktop gives
+ * it; `acceptance` additionally demands the reference geometry of contract §3.
+ * Every other gate — hardware adapter, unobscured canvas, clock mapping,
+ * disabled injection — applies to both.
+ */
+type QualificationMode = 'collector' | 'acceptance'
+
+function parseArgs(argv: string[]): DriverOptions {
+  const options: DriverOptions = {
+    contractPath: path.resolve(REPO_ROOT, 'docs/benchmarks/p1/protocol.json'),
+    outDir: path.resolve(REPO_ROOT, '.harness/t06/qualification'),
+    port: 3465,
+    headless: false,
+    expectVerdict: null,
+    mode: 'collector',
+  }
+  for (let i = 0; i < argv.length; i++) {
+    const value = argv[i + 1]
+    if (argv[i] === '--contract' && value) { options.contractPath = path.resolve(process.cwd(), value); i++ }
+    else if (argv[i] === '--out' && value) { options.outDir = path.resolve(process.cwd(), value); i++ }
+    else if (argv[i] === '--port' && value) { options.port = parseInt(value, 10); i++ }
+    else if (argv[i] === '--expect-verdict' && value) { options.expectVerdict = value; i++ }
+    else if (argv[i] === '--headless') { options.headless = true }
+    else if (argv[i] === '--mode' && (value === 'collector' || value === 'acceptance')) {
+      options.mode = value
+      i++
+    }
+  }
+  return options
+}
+
+const options = parseArgs(process.argv.slice(2))
 
 function resolveChromiumExecutable(): string {
   if (process.env.PUPPETEER_EXECUTABLE_PATH) return process.env.PUPPETEER_EXECUTABLE_PATH
@@ -243,72 +292,533 @@ function getHostInfo(chromiumPath: string): HostEnvironmentInfo {
   }
 }
 
-/** One controlled phase of the run, bounded on the page clock. */
-interface PhaseWindow {
-  name: 'baseline' | 'app-delay' | 'label-delay'
-  scenario: 'pan' | 'zoom' | 'drag'
-  start_ms: number
-  end_ms: number
-}
-
-/** Median of a numeric sample, or null when the sample is empty. */
-function medianOrNull(values: number[]): number | null {
-  if (values.length === 0) return null
-  const sorted = [...values].sort((a, b) => a - b)
-  const mid = Math.floor(sorted.length / 2)
-  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
+/** Records what the browser reports about itself, from its own command line. */
+async function recordBrowserIdentity(host: HostEnvironmentInfo, cdp: CDPSession): Promise<void> {
+  const version = await cdp.send('Browser.getVersion')
+  const command = await cdp.send('Browser.getBrowserCommandLine')
+  host.browser_version = version.product
+  host.browser_command_line = command.arguments
+  host.browser_executable = command.arguments[0] ?? UNKNOWN
+  const ozone = [...command.arguments].reverse().find((arg) => arg.startsWith('--ozone-platform='))
+  host.browser_backend = ozone ? `${ozone.split('=')[1]} / Ozone (actual browser command line)` : UNKNOWN
 }
 
 /**
- * Median attributed latency of the chains whose input fell inside one phase.
+ * Records the adapter the browser actually selected, and refuses software.
  *
- * Returns null when no chain in the phase produced a real endpoint, which is
- * what makes the AC4 check report NOT_MEASURED instead of inventing a shift.
+ * The WebGPU fallback flag is not sufficient: Chromium leaves it unset for
+ * SwiftShader, which would otherwise be recorded as a hardware run (AC1).
  */
-function phaseLatency(chains: InputPresentationChain[], window: PhaseWindow): number | null {
-  const inPhase = chains.filter(
-    (c) =>
-      c.input_timestamp_ms !== null &&
-      c.input_timestamp_ms >= window.start_ms &&
-      c.input_timestamp_ms <= window.end_ms &&
-      c.latency_ms !== null
-  )
-  return medianOrNull(inPhase.map((c) => c.latency_ms as number))
+async function recordSelectedAdapter(host: HostEnvironmentInfo, page: Page): Promise<void> {
+  const adapterResult = await page.evaluate(async () => {
+    const gpu = (navigator as unknown as { gpu?: GPU }).gpu
+    if (!gpu) return { error: 'navigator.gpu not available' }
+    const adapter = await gpu.requestAdapter()
+    if (!adapter) return { error: 'WebGPU requestAdapter returned null' }
+    const info = (adapter as unknown as { info?: Record<string, string> }).info ?? {}
+    return {
+      vendor: info.vendor ?? null,
+      architecture: info.architecture ?? null,
+      device: info.device ?? null,
+      description: info.description ?? null,
+      isFallback: (adapter as unknown as { isFallbackAdapter?: boolean }).isFallbackAdapter ?? false,
+    }
+  })
+
+  console.log('Detected WebGPU Adapter:', JSON.stringify(adapterResult))
+  if ('error' in adapterResult && adapterResult.error) {
+    throw new Error(`WebGPU initialization failed: ${adapterResult.error}`)
+  }
+  const adapter = adapterResult as {
+    vendor: string | null
+    architecture: string | null
+    device: string | null
+    description: string | null
+    isFallback: boolean
+  }
+  if (adapter.isFallback) {
+    throw new Error('AC1 Violation: Software fallback WebGPU adapter detected. Must be real hardware.')
+  }
+
+  host.is_fallback = adapter.isFallback
+  const parts = [adapter.vendor, adapter.architecture, adapter.device, adapter.description]
+    .filter((part): part is string => typeof part === 'string' && part.length > 0)
+  host.gpu_adapter = parts.length > 0 ? parts.join(' / ') : UNKNOWN
+
+  if (isSoftwareAdapter(host.gpu_adapter)) {
+    throw new Error(
+      `AC1 Violation: software renderer '${host.gpu_adapter}' selected. ` +
+        'Launch with Vulkan plus NVIDIA PRIME offload so a hardware adapter is used.'
+    )
+  }
+  if (host.gpu_adapter === UNKNOWN) {
+    console.warn(
+      'WebGPU adapter reported no identifying fields; AC1 requires escalation for an unknown adapter.'
+    )
+  }
 }
 
-/** Median CPU-side dispatch duration in a phase, used for diagnostics only. */
-function phaseDiagnosticCpu(
-  chains: InputPresentationChain[],
-  window: PhaseWindow
-): number | null {
-  const inPhase = chains.filter(
-    (c) =>
-      c.input_timestamp_ms !== null &&
-      c.input_timestamp_ms >= window.start_ms &&
-      c.input_timestamp_ms <= window.end_ms &&
-      c.diagnostics.cpu_duration_ms !== null
-  )
-  return medianOrNull(inPhase.map((c) => c.diagnostics.cpu_duration_ms as number))
+/** The CSS viewport contract §3 fixes for the reference environment. */
+const REFERENCE_VIEWPORT = { width: 1200, height: 720 }
+
+async function readViewport(page: Page) {
+  return page.evaluate(() => ({
+    width: innerWidth, height: innerHeight, outerWidth, outerHeight,
+  }))
+}
+
+/** One window as the compositor itself reports it. */
+interface CompositorWindow {
+  address: string
+  floating: boolean
+  at: [number, number]
+  size: [number, number]
+}
+
+/** Finds our own browser window in the compositor's client list, by pid. */
+function compositorWindow(browserPid: number | undefined): CompositorWindow | null {
+  if (browserPid === undefined) return null
+  const clients = JSON.parse(tryExec('hyprctl clients -j') ?? '[]') as Array<
+    CompositorWindow & { pid: number }
+  >
+  const client = clients.find((entry) => entry.pid === browserPid)
+  return client ? { address: client.address, floating: client.floating, at: client.at, size: client.size } : null
+}
+
+/** The monitor the reference run must fit inside, in logical pixels. */
+interface CompositorMonitor {
+  name: string
+  logical_width: number
+  logical_height: number
+  reserved: [number, number, number, number]
+}
+
+function compositorMonitor(name: string | null): CompositorMonitor | null {
+  const monitors = JSON.parse(tryExec('hyprctl monitors -j') ?? '[]') as Array<{
+    name: string; width: number; height: number; scale: number; reserved: number[]
+  }>
+  const monitor = monitors.find((entry) => entry.name === name) ?? monitors[0]
+  if (!monitor) return null
+  return {
+    name: monitor.name,
+    logical_width: monitor.width / monitor.scale,
+    logical_height: monitor.height / monitor.scale,
+    reserved: [monitor.reserved[0], monitor.reserved[1], monitor.reserved[2], monitor.reserved[3]],
+  }
 }
 
 /**
- * Median label-commit duration inside a phase window.
+ * Reports whether the reference headed configuration can fit this desktop.
  *
- * This proves whether an injected label delay actually executed, so a failing
- * AC4 label check can be read as "the endpoint ignores labels" rather than
- * "the delay never ran".
+ * Contract §3 requires a geometry report rather than a measurement when it
+ * cannot, so the arithmetic is stated: the window surface the browser needs is
+ * the reference CSS viewport plus the app window's own measured chrome, and the
+ * space it has is the monitor's logical size minus the compositor's reserved
+ * area. The driver does not reconfigure the desktop to make room.
  */
-function phaseLabelCommitMs(
-  commits: { commit_ms: number; commit_duration_ms: number }[],
-  window: PhaseWindow
-): number | null {
-  const inPhase = commits.filter(
-    (c) => c.commit_ms >= window.start_ms && c.commit_ms <= window.end_ms
+async function assessWindowFeasibility(
+  page: Page,
+  browserPid: number | undefined,
+  displayOutput: string | null
+): Promise<string[]> {
+  const window = compositorWindow(browserPid)
+  const monitor = compositorMonitor(displayOutput)
+  if (!window || !monitor) return []
+
+  const view = await readViewport(page)
+  const inset = { width: window.size[0] - view.width, height: window.size[1] - view.height }
+  if (!(inset.width >= 0 && inset.height >= 0)) return []
+
+  const required = {
+    width: REFERENCE_VIEWPORT.width + inset.width,
+    height: REFERENCE_VIEWPORT.height + inset.height,
+  }
+  const available = {
+    width: monitor.logical_width - monitor.reserved[0] - monitor.reserved[2],
+    height: monitor.logical_height - monitor.reserved[1] - monitor.reserved[3],
+  }
+  console.log(
+    `  Window feasibility: needs ${required.width}×${required.height} logical ` +
+      `(viewport ${REFERENCE_VIEWPORT.width}×${REFERENCE_VIEWPORT.height} + chrome ${inset.width}×${inset.height}), ` +
+      `available ${available.width}×${available.height} on ${monitor.name}.`
   )
-  return medianOrNull(inPhase.map((c) => c.commit_duration_ms))
+  if (required.width <= available.width && required.height <= available.height) return []
+
+  return [
+    `Reference headed configuration cannot fit this desktop: a ${REFERENCE_VIEWPORT.width}×${REFERENCE_VIEWPORT.height} ` +
+      `CSS viewport needs a ${required.width}×${required.height} logical window surface (measured app chrome ` +
+      `${inset.width}×${inset.height}), but ${monitor.name} offers ${available.width}×${available.height} after its ` +
+      `reserved area [${monitor.reserved.join(', ')}] (contract §3). Escalate to measurement review; do not measure a ` +
+      'clipped canvas and do not reconfigure the desktop to make room.',
+  ]
+}
+
+/**
+ * Settles the headed window and reports the geometry it actually got.
+ *
+ * In `acceptance` mode the exact reference window is required, and the browser
+ * is asked to size itself. In `collector` mode the compositor's own layout is
+ * accepted: this proves the evidence chain exists on this stack, and the profile
+ * records `qualification_only` so it can never pass for an acceptance
+ * environment. `Browser.setWindowBounds` is deliberately not used there — it is
+ * a request, not a guarantee, and under a tiling compositor Chromium goes on
+ * reporting the CSS viewport it was asked for while its Wayland surface stays
+ * tiled, which would record a viewport the run never had.
+ */
+async function settleHeadedWindow(
+  page: Page,
+  cdp: CDPSession,
+  browserPid: number | undefined,
+  displayOutput: string | null,
+  mode: QualificationMode
+): Promise<string[]> {
+  const errors: string[] = []
+  const shortfall = await assessWindowFeasibility(page, browserPid, displayOutput)
+
+  if (mode === 'acceptance') {
+    errors.push(...shortfall)
+    const initial = await readViewport(page)
+    if (initial.width !== REFERENCE_VIEWPORT.width || initial.height !== REFERENCE_VIEWPORT.height) {
+      console.log(
+        `  Viewport ${initial.width}×${initial.height} as laid out; asking the browser to size its own window.`
+      )
+      const nativeWindow = await cdp.send('Browser.getWindowForTarget')
+      try {
+        await cdp.send('Browser.setWindowBounds', {
+          windowId: nativeWindow.windowId,
+          bounds: { windowState: 'normal' },
+        })
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const actual = await readViewport(page)
+          if (actual.width === REFERENCE_VIEWPORT.width && actual.height === REFERENCE_VIEWPORT.height) break
+          await cdp.send('Browser.setWindowBounds', {
+            windowId: nativeWindow.windowId,
+            bounds: {
+              width: actual.outerWidth + REFERENCE_VIEWPORT.width - actual.width,
+              height: actual.outerHeight + REFERENCE_VIEWPORT.height - actual.height,
+            },
+          })
+          await new Promise((resolve) => setTimeout(resolve, 500))
+        }
+      } catch (error) {
+        errors.push(`Native window sizing failed: ${String(error)}`)
+      }
+    }
+  } else if (shortfall.length > 0) {
+    console.log('  Collector qualification proceeds on the window the compositor laid out.')
+  }
+
+  await page.evaluate(() =>
+    document.querySelector('#canvas-editor-container')?.scrollIntoView({ block: 'center' })
+  )
+  await new Promise((resolve) => setTimeout(resolve, 500))
+  return errors
+}
+
+/** AC1: settled live geometry, visibility and backing sizes, read from the page. */
+async function observeLiveGeometry(page: Page) {
+  return page.evaluate(() => {
+    const canvas = document.querySelector('canvas#editor-canvas') as HTMLCanvasElement | null
+    const rect = canvas?.getBoundingClientRect()
+    const visible = (selector: string) => Array.from(document.querySelectorAll(selector)).some((element) => {
+      const bounds = element.getBoundingClientRect()
+      const style = getComputedStyle(element)
+      return style.visibility === 'visible' && style.display !== 'none' && Number(style.opacity) > 0 &&
+        bounds.width > 0 && bounds.height > 0 && bounds.right > 0 && bounds.bottom > 0 &&
+        bounds.left < innerWidth && bounds.top < innerHeight
+    })
+    const unobscured = !!canvas && !!rect && [0.01, 0.5, 0.99].every((fx) =>
+      [0.01, 0.5, 0.99].every((fy) => {
+        const hit = document.elementFromPoint(rect.x + rect.width * fx, rect.y + rect.height * fy)
+        return hit === canvas || !!hit?.closest('[id^="card-label-"]')
+      }))
+    return {
+      dpr: window.devicePixelRatio,
+      available: {
+        x: (screen as Screen & { availLeft: number }).availLeft,
+        y: (screen as Screen & { availTop: number }).availTop,
+        width: screen.availWidth,
+        height: screen.availHeight,
+      },
+      visualScale: window.visualViewport?.scale ?? 0,
+      documentVisible: document.visibilityState === 'visible', focused: document.hasFocus(),
+      unobscured, labelsVisible: visible('[id^="card-label-"]'),
+      listVisible: visible('[aria-label="Skill and Prerequisite List"]'),
+      taskPanelVisible: visible('#skill-detail-panel'),
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+      screenWidth: window.screen.width,
+      screenHeight: window.screen.height,
+      canvas: canvas && rect
+        ? {
+            css_bounds: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+            backing_size: { width: canvas.width, height: canvas.height },
+          }
+        : null,
+    }
+  })
+}
+
+/**
+ * Corrects window and screen facts with what the compositor itself reports.
+ *
+ * On Hyprland, Wayland's `screenX`/`availHeight` may omit native desktop detail
+ * such as position and reserved panel area.
+ */
+function observeNativeDesktop(host: HostEnvironmentInfo, browserPid: number | undefined): string[] {
+  const errors: string[] = []
+  try {
+    const client = compositorWindow(browserPid)
+    if (!client) {
+      errors.push('Compositor reported no window for this browser; native geometry is unconfirmed (AC1).')
+    }
+    const monitors = JSON.parse(tryExec('hyprctl monitors -j') ?? '[]') as Array<{
+      name: string; x: number; y: number; width: number; height: number; scale: number; reserved: number[]
+    }>
+    const monitor = monitors.find((entry) => entry.name === host.display_output)
+    if (client && host.native_window) {
+      Object.assign(host.native_window, {
+        x: client.at[0], y: client.at[1], width: client.size[0], height: client.size[1],
+      })
+    }
+    if (monitor && host.native_window) {
+      Object.assign(host.native_window, {
+        available_x: monitor.x + monitor.reserved[0],
+        available_y: monitor.y + monitor.reserved[1],
+        available_width: monitor.width / monitor.scale - monitor.reserved[0] - monitor.reserved[2],
+        available_height: monitor.height / monitor.scale - monitor.reserved[1] - monitor.reserved[3],
+      })
+    }
+  } catch (error) {
+    errors.push(`Native desktop geometry observation failed: ${String(error)}`)
+  }
+  return errors
+}
+
+interface CanvasRect { x: number; y: number; width: number; height: number }
+
+/** A label's id and centre, in CSS pixels. */
+interface LabelTarget { id: string; cx: number; cy: number }
+
+/**
+ * Selects, through real pointer input, the card nearest the canvas centre.
+ *
+ * Contract §5 drags the selected centre card. The camera has already moved by
+ * the time drag runs and `SetCamera` may not teleport it back, so the centre
+ * card is re-selected here — outside any timed window — instead of dragging at a
+ * coordinate the browser would discard.
+ */
+async function selectCentreCard(page: Page, canvas: CanvasRect): Promise<LabelTarget> {
+  const centreX = canvas.x + canvas.width / 2
+  const centreY = canvas.y + canvas.height / 2
+  const nearest = await page.evaluate((rect: CanvasRect) => {
+    const labels = Array.from(document.querySelectorAll<HTMLElement>('[id^="card-label-"]'))
+    const cx = rect.x + rect.width / 2
+    const cy = rect.y + rect.height / 2
+    const inside = labels
+      .map((element) => {
+        const bounds = element.getBoundingClientRect()
+        return { id: element.id, cx: bounds.x + bounds.width / 2, cy: bounds.y + bounds.height / 2 }
+      })
+      .filter((label) =>
+        label.cx >= rect.x && label.cx <= rect.x + rect.width &&
+        label.cy >= rect.y && label.cy <= rect.y + rect.height
+      )
+      .sort((a, b) => (a.cx - cx) ** 2 + (a.cy - cy) ** 2 - ((b.cx - cx) ** 2 + (b.cy - cy) ** 2))
+    return { inside, total: labels.length }
+  }, canvas)
+
+  if (nearest.inside.length === 0) {
+    throw new Error(
+      `Drag geometry failure: none of ${nearest.total} card labels lie inside the canvas rect ` +
+        `(x ${canvas.x.toFixed(1)}, y ${canvas.y.toFixed(1)}, ` +
+        `w ${canvas.width.toFixed(1)}, h ${canvas.height.toFixed(1)}).`
+    )
+  }
+
+  const target = nearest.inside[0]
+  await page.mouse.click(target.cx, target.cy)
+  await new Promise((resolve) => setTimeout(resolve, 250))
+
+  const selected = await page.evaluate(
+    (id: string) => document.getElementById(id)?.dataset.selected === 'true'
+  , target.id)
+  if (!selected) {
+    throw new Error(`Selection failure: clicking ${target.id} did not mark it selected.`)
+  }
+  console.log(
+    `  Selected centre card ${target.id} at (${target.cx.toFixed(1)}, ${target.cy.toFixed(1)}); ` +
+      `canvas centre (${centreX.toFixed(1)}, ${centreY.toFixed(1)})`
+  )
+  return target
+}
+
+/**
+ * Drives one scenario through real browser input only.
+ *
+ * Pan uses ordinary wheel input, zoom Ctrl+wheel at the canvas centre, and drag
+ * an actual pointer down/move/up on the selected card, moving horizontally out
+ * and back so the motion stays inside the clipped canvas rectangle (contract §5).
+ */
+async function driveScenario(
+  page: Page,
+  scenario: Scenario,
+  canvas: CanvasRect,
+  selectedCard: LabelTarget | null
+): Promise<void> {
+  await page.evaluate((active: Scenario | null) => {
+    window.__gurowBenchmarkHooks.active_scenario = active
+  }, scenario)
+
+  const centreX = canvas.x + canvas.width / 2
+  const centreY = canvas.y + canvas.height / 2
+
+  if (scenario === 'pan') {
+    await page.mouse.move(centreX, centreY)
+    await page.mouse.wheel({ deltaX: 25, deltaY: 0 })
+  } else if (scenario === 'zoom') {
+    await page.mouse.move(centreX, centreY)
+    await page.keyboard.down('Control')
+    await page.mouse.wheel({ deltaX: 0, deltaY: -20 })
+    await page.keyboard.up('Control')
+  } else {
+    if (!selectedCard) throw new Error('Drag requires the selected centre card, chosen before the window.')
+    const target = selectedCard
+    const excursion = Math.min(30, canvas.x + canvas.width - 2 - target.cx)
+    if (!(excursion > 0)) {
+      throw new Error(
+        `Drag geometry failure: selected card ${target.id} leaves no horizontal room inside the canvas.`
+      )
+    }
+    await page.mouse.move(target.cx, target.cy)
+    await page.mouse.down()
+    // Steps keep the intermediate pointermove events deliverable; out and back
+    // is the contract's horizontal ± excursion at qualification scale.
+    await page.mouse.move(target.cx + excursion, target.cy, { steps: 4 })
+    await page.mouse.move(target.cx, target.cy, { steps: 4 })
+    await page.mouse.up()
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, 250))
+  await page.evaluate(() => {
+    window.__gurowBenchmarkHooks.active_scenario = null
+  })
+}
+
+/** Emits paired clock-sync marks so the two clocks can be related. */
+async function emitClockSyncs(page: Page, count: number): Promise<void> {
+  await page.evaluate(async (n: number) => {
+    const hooks = window.__gurowBenchmarkHooks
+    for (let i = 0; i < n; i++) {
+      const index = hooks.clock_syncs.length
+      const pageNow = performance.now()
+      performance.mark(`gurow:clock_sync:${index}`)
+      hooks.clock_syncs.push({ index, page_now_ms: pageNow })
+      await new Promise((resolve) => setTimeout(resolve, 20))
+    }
+  }, count)
+}
+
+/**
+ * Waits until the application stops dispatching on its own.
+ *
+ * The route emits repeated ResizeViewport commands while the canvas backing size
+ * converges, and an input delivered during that churn can be lost.
+ */
+async function waitForDispatchQuiet(page: Page, quietFrames = 30): Promise<void> {
+  await page.evaluate(
+    (required: number) =>
+      new Promise<void>((resolve) => {
+        const hooks = window.__gurowBenchmarkHooks
+        let quiet = 0
+        let last = hooks.dispatches.length
+        const tick = () => {
+          const current = hooks.dispatches.length
+          quiet = current === last ? quiet + 1 : 0
+          last = current
+          if (quiet >= required) {
+            resolve()
+            return
+          }
+          requestAnimationFrame(tick)
+        }
+        requestAnimationFrame(tick)
+      }),
+    quietFrames
+  )
+}
+
+/** Samples rAF cadence once as a diagnostic, before the timed phases. */
+async function sampleRafCadence(page: Page): Promise<number | null> {
+  return page.evaluate(
+    () =>
+      new Promise<number | null>((resolve) => {
+        const stamps: number[] = []
+        const tick = (now: number) => {
+          stamps.push(now)
+          if (stamps.length < 20) {
+            requestAnimationFrame(tick)
+            return
+          }
+          const gaps = stamps.slice(1).map((stamp, i) => stamp - stamps[i])
+          gaps.sort((a, b) => a - b)
+          resolve(gaps.length > 0 ? gaps[Math.floor(gaps.length / 2)] : null)
+        }
+        requestAnimationFrame(tick)
+      })
+  )
+}
+
+async function setInjectedDelays(page: Page, appDelayMs: number, labelDelayMs: number): Promise<void> {
+  await page.evaluate(
+    ({ app, label }: { app: number; label: number }) => {
+      window.__gurowBenchmarkHooks.app_delay_ms = app
+      window.__gurowBenchmarkHooks.label_delay_ms = label
+    },
+    { app: appDelayMs, label: labelDelayMs }
+  )
+}
+
+/**
+ * Reads back the fault-injection state the page is actually in (AC4).
+ *
+ * Observed, never asserted: the acceptance gate can only reject injection that
+ * is still enabled if the profile records what the page reports.
+ */
+async function readFaultInjection(page: Page): Promise<FaultInjectionConfig> {
+  const observed = await page.evaluate(() => {
+    const hooks = window.__gurowBenchmarkHooks
+    return {
+      app_delay_ms: hooks.app_delay_ms,
+      label_delay_ms: hooks.label_delay_ms,
+      app_delays_applied: hooks.app_delays_applied,
+      label_delays_applied: hooks.label_delays_applied,
+    }
+  })
+  return {
+    ...observed,
+    enabled: observed.app_delay_ms > 0 || observed.label_delay_ms > 0,
+  }
+}
+
+/** Reads the correlation log the instrumentation accumulated in the page. */
+async function readRuntimeRecords(page: Page): Promise<{
+  dispatches: DispatchRecord[]
+  labelCommits: LabelCommitRecord[]
+  clockSyncs: { index: number; page_now_ms: number }[]
+}> {
+  return page.evaluate(() => {
+    const hooks = window.__gurowBenchmarkHooks
+    return {
+      dispatches: hooks.dispatches,
+      labelCommits: hooks.label_commits,
+      clockSyncs: hooks.clock_syncs,
+    }
+  })
 }
 
 async function main() {
+  const { contractPath, outDir, port, headless, expectVerdict, mode } = options
   console.log('=== Gurow P1/T06-L3-01: Qualify Presentation Evidence on Reference Browser ===')
   console.log(`Contract: ${contractPath}`)
   console.log(`Output:   ${outDir}`)
@@ -337,8 +847,7 @@ async function main() {
   console.log(
     `Display: ${hostInfo.display_output ?? 'unresolved'} @ ${hostInfo.display_refresh_hz ?? 'unresolved'} Hz`
   )
-  console.log(`Compositor: ${hostInfo.compositor} (${hostInfo.browser_backend})`)
-  console.log(`Chromium: ${hostInfo.browser_version}`)
+  console.log(`Compositor: ${hostInfo.compositor}`)
   console.log(`Source: ${identity.commit}${identity.tree_dirty ? ' (dirty)' : ''}`)
 
   console.log(`\nStarting local server on port ${port}...`)
@@ -395,13 +904,8 @@ async function main() {
     if (!page) throw new Error('No native app window was created.')
     await page.bringToFront()
     const windowCdp = await page.createCDPSession()
-    const actualVersion = await windowCdp.send('Browser.getVersion')
-    const actualCommand = await windowCdp.send('Browser.getBrowserCommandLine')
-    hostInfo.browser_version = actualVersion.product
-    hostInfo.browser_command_line = actualCommand.arguments
-    hostInfo.browser_executable = actualCommand.arguments[0] ?? UNKNOWN
-    const ozone = [...actualCommand.arguments].reverse().find((arg) => arg.startsWith('--ozone-platform='))
-    hostInfo.browser_backend = ozone ? `${ozone.split('=')[1]} / Ozone (actual browser command line)` : UNKNOWN
+    await recordBrowserIdentity(hostInfo, windowCdp)
+    console.log(`Chromium: ${hostInfo.browser_version} (${hostInfo.browser_backend})`)
 
     // Contract §3: record interruptions and memory pressure. A lost WebGPU
     // device or exhausted device memory invalidates the attempt, and must be
@@ -421,19 +925,20 @@ async function main() {
 
     // Install the opt-in instrumentation before any application code runs.
     await page.evaluateOnNewDocument(() => {
-      ;(window as unknown as { __gurowBenchmarkHooks: unknown }).__gurowBenchmarkHooks = {
+      window.__gurowBenchmarkHooks = {
         enabled: true,
         app_delay_ms: 0,
         label_delay_ms: 0,
         app_revision: 0,
         canvas_revision: 0,
         label_revision: 0,
-        pending_input: null,
+        pending_inputs: [],
         dispatches: [],
         label_commits: [],
         clock_syncs: [],
         active_scenario: null,
-        raf_intervals_ms: [],
+        app_delays_applied: 0,
+        label_delays_applied: 0,
       }
     })
 
@@ -445,117 +950,13 @@ async function main() {
       { timeout: 15000 }
     )
 
-    // AC1: record the adapter the browser actually selected.
-    const adapterResult = await page.evaluate(async () => {
-      const gpu = (navigator as unknown as { gpu?: GPU }).gpu
-      if (!gpu) return { error: 'navigator.gpu not available' }
-      const adapter = await gpu.requestAdapter()
-      if (!adapter) return { error: 'WebGPU requestAdapter returned null' }
-      const info = (adapter as unknown as { info?: Record<string, string> }).info ?? {}
-      return {
-        vendor: info.vendor ?? null,
-        architecture: info.architecture ?? null,
-        device: info.device ?? null,
-        description: info.description ?? null,
-        isFallback: (adapter as unknown as { isFallbackAdapter?: boolean }).isFallbackAdapter ?? false,
-      }
-    })
+    await recordSelectedAdapter(hostInfo, page)
 
-    console.log('Detected WebGPU Adapter:', JSON.stringify(adapterResult))
-    if ('error' in adapterResult && adapterResult.error) {
-      throw new Error(`WebGPU initialization failed: ${adapterResult.error}`)
-    }
-    const adapter = adapterResult as {
-      vendor: string | null
-      architecture: string | null
-      device: string | null
-      description: string | null
-      isFallback: boolean
-    }
-    if (adapter.isFallback) {
-      throw new Error('AC1 Violation: Software fallback WebGPU adapter detected. Must be real hardware.')
-    }
-
-    hostInfo.is_fallback = adapter.isFallback
-    const adapterParts = [adapter.vendor, adapter.architecture, adapter.device, adapter.description]
-      .filter((part): part is string => typeof part === 'string' && part.length > 0)
-    hostInfo.gpu_adapter = adapterParts.length > 0 ? adapterParts.join(' / ') : UNKNOWN
-
-    // The fallback flag is not sufficient: Chromium leaves it unset for
-    // SwiftShader, which would otherwise be recorded as a hardware run.
-    if (isSoftwareAdapter(hostInfo.gpu_adapter)) {
-      throw new Error(
-        `AC1 Violation: software renderer '${hostInfo.gpu_adapter}' selected. ` +
-          'Launch with Vulkan plus NVIDIA PRIME offload so a hardware adapter is used.'
-      )
-    }
-    if (hostInfo.gpu_adapter === UNKNOWN) {
-      console.warn(
-        'WebGPU adapter reported no identifying fields; AC1 requires escalation for an unknown adapter.'
-      )
-    }
-
-    // Resize only our own native app window; never emulate device metrics.
-    const nativeWindow = await windowCdp.send('Browser.getWindowForTarget')
-    const geometrySetupErrors: string[] = []
-    try {
-      await windowCdp.send('Browser.setWindowBounds', { windowId: nativeWindow.windowId, bounds: { windowState: 'normal' } })
-      for (let attempt = 0; attempt < 3; attempt++) {
-        const actual = await page.evaluate(() => ({ width: innerWidth, height: innerHeight, outerWidth, outerHeight }))
-        if (actual.width === 1200 && actual.height === 720) break
-        await windowCdp.send('Browser.setWindowBounds', {
-          windowId: nativeWindow.windowId,
-          bounds: { width: actual.outerWidth + 1200 - actual.width, height: actual.outerHeight + 720 - actual.height },
-        })
-        await new Promise((resolve) => setTimeout(resolve, 500))
-      }
-    } catch (error) { geometrySetupErrors.push(`Native window sizing failed: ${String(error)}`) }
-    await page.evaluate(() => document.querySelector('#canvas-editor-container')?.scrollIntoView({ block: 'center' }))
-    await new Promise((resolve) => setTimeout(resolve, 500))
+    const geometrySetupErrors = await settleHeadedWindow(
+      page, windowCdp, browser.process()?.pid, hostInfo.display_output, mode
+    )
     const settledWindow = await windowCdp.send('Browser.getWindowForTarget')
-
-    // AC1: read settled live geometry, visibility and backing sizes.
-    const liveGeometry = await page.evaluate(() => {
-      const canvas = document.querySelector('canvas#editor-canvas') as HTMLCanvasElement | null
-      const rect = canvas?.getBoundingClientRect()
-      const visible = (selector: string) => Array.from(document.querySelectorAll(selector)).some((element) => {
-        const bounds = element.getBoundingClientRect()
-        const style = getComputedStyle(element)
-        return style.visibility === 'visible' && style.display !== 'none' && Number(style.opacity) > 0 &&
-          bounds.width > 0 && bounds.height > 0 && bounds.right > 0 && bounds.bottom > 0 &&
-          bounds.left < innerWidth && bounds.top < innerHeight
-      })
-      const unobscured = !!canvas && !!rect && [0.01, 0.5, 0.99].every((fx) =>
-        [0.01, 0.5, 0.99].every((fy) => {
-          const hit = document.elementFromPoint(rect.x + rect.width * fx, rect.y + rect.height * fy)
-          return hit === canvas || !!hit?.closest('[id^="card-label-"]')
-        }))
-      return {
-        dpr: window.devicePixelRatio,
-        available: { x: (screen as Screen & { availLeft: number }).availLeft, y: (screen as Screen & { availTop: number }).availTop, width: screen.availWidth, height: screen.availHeight },
-        visualScale: window.visualViewport?.scale ?? 0,
-        documentVisible: document.visibilityState === 'visible', focused: document.hasFocus(),
-        unobscured, labelsVisible: visible('[id^="card-label-"]'),
-        listVisible: visible('[aria-label="Skill and Prerequisite List"]'),
-        taskPanelVisible: visible('#skill-detail-panel'),
-        innerWidth: window.innerWidth,
-        innerHeight: window.innerHeight,
-        screenWidth: window.screen.width,
-        screenHeight: window.screen.height,
-        canvas:
-          canvas && rect
-            ? {
-                css_bounds: {
-                  x: rect.x,
-                  y: rect.y,
-                  width: rect.width,
-                  height: rect.height,
-                },
-                backing_size: { width: canvas.width, height: canvas.height },
-              }
-            : null,
-      }
-    })
+    const liveGeometry = await observeLiveGeometry(page)
 
     hostInfo.device_pixel_ratio = liveGeometry.dpr
     hostInfo.viewport_css = [liveGeometry.innerWidth, liveGeometry.innerHeight]
@@ -572,73 +973,41 @@ async function main() {
       labels_visible: liveGeometry.labelsVisible, skill_list_visible: liveGeometry.listVisible,
       task_panel_visible: liveGeometry.taskPanelVisible,
     }
-    // On Hyprland, verify compositor-observed position/size and reserved panel
-    // area: Wayland's screenX/availHeight may omit that native desktop detail.
-    try {
-      const clients = JSON.parse(tryExec('hyprctl clients -j') ?? '[]') as Array<{ pid: number; at: number[]; size: number[] }>
-      const client = clients.find((entry) => entry.pid === browser?.process()?.pid)
-      const monitors = JSON.parse(tryExec('hyprctl monitors -j') ?? '[]') as Array<{
-        name: string; x: number; y: number; width: number; height: number; scale: number; reserved: number[]
-      }>
-      const monitor = monitors.find((entry) => entry.name === hostInfo.display_output)
-      if (client) Object.assign(hostInfo.native_window!, { x: client.at[0], y: client.at[1], width: client.size[0], height: client.size[1] })
-      if (monitor) Object.assign(hostInfo.native_window!, {
-        available_x: monitor.x + monitor.reserved[0], available_y: monitor.y + monitor.reserved[1],
-        available_width: monitor.width / monitor.scale - monitor.reserved[0] - monitor.reserved[2],
-        available_height: monitor.height / monitor.scale - monitor.reserved[1] - monitor.reserved[3],
-      })
-    } catch (error) { geometrySetupErrors.push(`Native desktop geometry observation failed: ${String(error)}`) }
-    const environmentErrors = [...geometrySetupErrors, ...validateReferenceEnvironment(hostInfo)]
-    fs.writeFileSync(path.resolve(outDir, 'environment-preflight.json'), JSON.stringify({
-      status: environmentErrors.length ? 'NOT_MEASURED' : 'PASS', identity, host: hostInfo,
-      browser_window: settledWindow, reasons: environmentErrors,
-    }, null, 2))
-    if (environmentErrors.length) {
-      const base: Omit<CollectorProfile, 'hash'> = {
-        version: 'gurow-collector-v3', contract_id: 'gurow-p1-v1', status: 'NOT_MEASURED',
-        unsupported_reason: environmentErrors.join(' '), identity, host: hostInfo,
-        trace_configuration: { categories: [], parser_version: '3.0.0', clock_origin: 'chromium_trace_monotonic',
-          clock_units: 'us', timestamp_scale_to_ms: 0.001, clock_mapping: deriveClockMapping([], [], 'us') },
-        fault_injection: { enabled: false, app_delay_ms: 0, label_delay_ms: 0 },
-        optical_requirements: getOpticalAcquisitionRequirements(),
-      }
-      const failedProfile = { ...base, hash: computeProfileHash(base) }
-      fs.writeFileSync(path.resolve(outDir, 'collector-profile.json'), JSON.stringify(failedProfile, null, 2))
-      fs.writeFileSync(path.resolve(outDir, 'qualification-report.json'), JSON.stringify({
-        verdict: 'NOT_MEASURED', stage: 'environment-preflight-before-capture', reasons: environmentErrors,
-        identity, host: hostInfo, profile_hash: failedProfile.hash,
-        app_delay_check: verifyControlledDelayShift(null, null, 80),
-        label_delay_check: verifyControlledDelayShift(null, null, 80),
-      }, null, 2))
-      fs.writeFileSync(path.resolve(outDir, 'qualification-report.md'), generateQualificationReport(failedProfile, environmentErrors, {
-        scenariosTested: [], chains: [], gpuAdapter: hostInfo.gpu_adapter, browserVersion: hostInfo.browser_version,
-        appDelayCheck: verifyControlledDelayShift(null, null, 80), labelDelayCheck: verifyControlledDelayShift(null, null, 80),
-        diagnosticShifts: { appDispatchShiftMs: null, labelCommitShiftMs: null },
-      }))
-      throw new Error(`Reference environment preflight failed before capture: ${environmentErrors.join(' ')}`)
+    geometrySetupErrors.push(...observeNativeDesktop(hostInfo, browser.process()?.pid))
+
+    // Derived from what was observed, never claimed: a run only carries
+    // reference geometry when the window it actually got was the reference one.
+    const geometryClass: GeometryClass =
+      hostInfo.viewport_css?.[0] === REFERENCE_VIEWPORT.width &&
+      hostInfo.viewport_css?.[1] === REFERENCE_VIEWPORT.height &&
+      hostInfo.device_pixel_ratio === 1.5
+        ? 'reference'
+        : 'qualification_only'
+    console.log(`Window geometry class: ${geometryClass}`)
+    if (geometryClass === 'qualification_only' && mode === 'collector') {
+      console.log(
+        '  Collector qualification only: this evidence cannot serve as an acceptance environment.'
+      )
     }
+
+    const environmentErrors = [
+      ...geometrySetupErrors,
+      ...validateReferenceEnvironment(hostInfo, { requireReferenceGeometry: mode === 'acceptance' }),
+    ]
+    if (environmentErrors.length) {
+      const failedProfile = writePreflightFailureArtifacts({
+        outDir, identity, host: hostInfo, geometryClass,
+        browserWindow: settledWindow, reasons: environmentErrors,
+      })
+      console.log(`Preflight profile hash: ${failedProfile.hash}`)
+      throw new Error(`Headed environment preflight failed before capture: ${environmentErrors.join(' ')}`)
+    }
+    writePreflightPass({ outDir, identity, host: hostInfo, browserWindow: settledWindow })
     console.log(
       `Live geometry: ${liveGeometry.innerWidth}×${liveGeometry.innerHeight} CSS @ DPR ${liveGeometry.dpr}`
     )
 
-    // Sample rAF cadence once as a diagnostic, before the timed phases.
-    const rafCadenceMs = await page.evaluate(
-      () =>
-        new Promise<number | null>((resolve) => {
-          const stamps: number[] = []
-          const tick = (now: number) => {
-            stamps.push(now)
-            if (stamps.length < 20) {
-              requestAnimationFrame(tick)
-              return
-            }
-            const gaps = stamps.slice(1).map((s, i) => s - stamps[i])
-            gaps.sort((a, b) => a - b)
-            resolve(gaps.length > 0 ? gaps[Math.floor(gaps.length / 2)] : null)
-          }
-          requestAnimationFrame(tick)
-        })
-    )
+    const rafCadenceMs = await sampleRafCadence(page)
     console.log(`Sampled rAF cadence: ${rafCadenceMs === null ? 'unavailable' : `${rafCadenceMs.toFixed(2)} ms`}`)
 
     const traceCategories = [
@@ -653,52 +1022,11 @@ async function main() {
 
     const cdp = await page.createCDPSession()
     const traceEvents: TraceEvent[] = []
-    cdp.on('Tracing.dataCollected', (data: { value: TraceEvent[] }) =>
-      traceEvents.push(...data.value)
-    )
-
+    cdp.on('Tracing.dataCollected', (data: { value: TraceEvent[] }) => traceEvents.push(...data.value))
     await cdp.send('Tracing.start', { traceConfig: { includedCategories: traceCategories } })
 
-    /** Emits paired clock-sync marks so the two clocks can be related. */
-    const emitClockSyncs = async (count: number) => {
-      await page.evaluate(async (n: number) => {
-        const hooks = (window as unknown as { __gurowBenchmarkHooks: { clock_syncs: unknown[] } })
-          .__gurowBenchmarkHooks
-        for (let i = 0; i < n; i++) {
-          const index = hooks.clock_syncs.length
-          const pageNow = performance.now()
-          performance.mark(`gurow:clock_sync:${index}`)
-          hooks.clock_syncs.push({ index, page_now_ms: pageNow })
-          await new Promise((r) => setTimeout(r, 20))
-        }
-      }, count)
-    }
-
-    await emitClockSyncs(5)
-
-    // Let startup layout settle: the route emits repeated ResizeViewport
-    // commands while the canvas backing size converges, and an input delivered
-    // during that churn can be lost.
-    await page.evaluate(
-      () =>
-        new Promise<void>((resolve) => {
-          let quietFrames = 0
-          const hooks = (window as unknown as { __gurowBenchmarkHooks: { dispatches: unknown[] } })
-            .__gurowBenchmarkHooks
-          let last = hooks.dispatches.length
-          const tick = () => {
-            const current = hooks.dispatches.length
-            quietFrames = current === last ? quietFrames + 1 : 0
-            last = current
-            if (quietFrames >= 30) {
-              resolve()
-              return
-            }
-            requestAnimationFrame(tick)
-          }
-          requestAnimationFrame(tick)
-        })
-    )
+    await emitClockSyncs(page, 5)
+    await waitForDispatchQuiet(page)
 
     const canvasElement = await page.$('canvas#editor-canvas')
     const canvasBox = canvasElement ? await canvasElement.boundingBox() : null
@@ -706,116 +1034,35 @@ async function main() {
     console.log(
       `Canvas rect: x ${canvasBox.x.toFixed(1)}, y ${canvasBox.y.toFixed(1)}, ${canvasBox.width.toFixed(1)}×${canvasBox.height.toFixed(1)}`
     )
-    const centerX = canvasBox.x + canvasBox.width / 2
-    const centerY = canvasBox.y + canvasBox.height / 2
 
-    const setScenario = async (scenario: 'pan' | 'zoom' | 'drag' | null) => {
-      await page.evaluate((s: string | null) => {
-        const hooks = (window as unknown as {
-          __gurowBenchmarkHooks: { active_scenario: string | null }
-        }).__gurowBenchmarkHooks
-        hooks.active_scenario = s
-      }, scenario)
-    }
+    // Selection and settling are setup, not measurement: the dispatches they
+    // produce are retained as evidence but never presented as timed inputs.
+    console.log('\nSelecting the centre card through real pointer input...')
+    await selectCentreCard(page, canvasBox)
+    const setupRecords = await readRuntimeRecords(page)
+    const setupDispatchCount = setupRecords.dispatches.length
 
+    const scenarioWindows = {} as ScenarioWindows
     const pageNow = () => page.evaluate(() => performance.now())
-
-    /** Drives one scenario through real browser input only. */
-    const driveScenario = async (scenario: 'pan' | 'zoom' | 'drag') => {
-      await setScenario(scenario)
-      if (scenario === 'pan') {
-        await page.mouse.move(centerX, centerY)
-        await page.mouse.wheel({ deltaX: 25, deltaY: 0 })
-      } else if (scenario === 'zoom') {
-        await page.mouse.move(centerX, centerY)
-        await page.keyboard.down('Control')
-        await page.mouse.wheel({ deltaX: 0, deltaY: -20 })
-        await page.keyboard.up('Control')
-      } else {
-        // Contract §3: drag a card that actually lies inside the clipped canvas
-        // rectangle. The preceding pan and zoom move the camera, so the fixture
-        // card is not reliably on screen by the time drag runs; pick whichever
-        // card is currently visible instead of dragging at a coordinate the
-        // browser would discard. No visible card is a real geometry failure.
-        const target = await page.evaluate(
-          (rect: { x: number; y: number; width: number; height: number }) => {
-            const labels = Array.from(
-              document.querySelectorAll<HTMLElement>('[id^="card-label-"]')
-            )
-            const candidates = labels.map((el) => {
-              const r = el.getBoundingClientRect()
-              return { id: el.id, cx: r.x + r.width / 2, cy: r.y + r.height / 2 }
-            })
-            const inside = candidates.filter(
-              (c) =>
-                c.cx >= rect.x &&
-                c.cx <= rect.x + rect.width &&
-                c.cy >= rect.y &&
-                c.cy <= rect.y + rect.height
-            )
-            return { inside, total: candidates.length }
-          },
-          { x: canvasBox.x, y: canvasBox.y, width: canvasBox.width, height: canvasBox.height }
-        )
-
-        if (target.inside.length === 0) {
-          throw new Error(
-            `Drag geometry failure: none of ${target.total} card labels lie inside the canvas rect ` +
-              `(x ${canvasBox.x.toFixed(1)}, y ${canvasBox.y.toFixed(1)}, ` +
-              `w ${canvasBox.width.toFixed(1)}, h ${canvasBox.height.toFixed(1)}).`
-          )
-        }
-
-        const chosen = target.inside[0]
-        console.log(`  Dragging ${chosen.id} at (${chosen.cx.toFixed(1)}, ${chosen.cy.toFixed(1)})`)
-        const dragX = chosen.cx
-        const dragY = chosen.cy
-        await page.mouse.move(dragX, dragY)
-        await page.mouse.down()
-        // Keep the whole motion inside the canvas and move in steps so the
-        // intermediate pointermove events are actually delivered.
-        const dragEndX = Math.min(dragX + 30, canvasBox.x + canvasBox.width - 2)
-        await page.mouse.move(dragEndX, dragY, { steps: 4 })
-        await page.mouse.up()
-      }
-      await new Promise((r) => setTimeout(r, 250))
-      await setScenario(null)
-    }
-
-    const scenarioWindows: Record<string, { start_ms: number; end_ms: number }> = {}
-    for (const scenario of ['pan', 'zoom', 'drag'] as const) {
+    for (const scenario of SCENARIOS) {
       console.log(`\nExecuting controlled ${scenario} interaction through browser input...`)
+      // Re-selecting happens outside the window: pan and zoom have moved the
+      // camera, and the selection click must not be timed as an interaction.
+      const selectedCard = scenario === 'drag' ? await selectCentreCard(page, canvasBox) : null
       const start = await pageNow()
-      await driveScenario(scenario)
+      await driveScenario(page, scenario, canvasBox, selectedCard)
       scenarioWindows[scenario] = { start_ms: start, end_ms: await pageNow() }
     }
 
     // AC4: controlled delay phases, driven through browser input so the timed
     // interaction never bypasses the real event path.
     console.log('\nRunning controlled delay phases (AC4)...')
-    const setDelays = async (appDelayMs: number, labelDelayMs: number) => {
-      await page.evaluate(
-        ({ appDelayMs: a, labelDelayMs: l }: { appDelayMs: number; labelDelayMs: number }) => {
-          const hooks = (window as unknown as {
-            __gurowBenchmarkHooks: { app_delay_ms: number; label_delay_ms: number }
-          }).__gurowBenchmarkHooks
-          hooks.app_delay_ms = a
-          hooks.label_delay_ms = l
-        },
-        { appDelayMs, labelDelayMs }
-      )
-    }
-
     const phases: PhaseWindow[] = []
-    const runPhase = async (
-      name: PhaseWindow['name'],
-      appDelayMs: number,
-      labelDelayMs: number
-    ) => {
-      await setDelays(appDelayMs, labelDelayMs)
+    const runPhase = async (name: PhaseWindow['name'], appDelayMs: number, labelDelayMs: number) => {
+      await setInjectedDelays(page, appDelayMs, labelDelayMs)
       const start = await pageNow()
-      await driveScenario('pan')
-      await driveScenario('pan')
+      await driveScenario(page, 'pan', canvasBox, null)
+      await driveScenario(page, 'pan', canvasBox, null)
       phases.push({ name, scenario: 'pan', start_ms: start, end_ms: await pageNow() })
       console.log(`  Phase ${name} complete (app=${appDelayMs} ms, label=${labelDelayMs} ms).`)
     }
@@ -825,8 +1072,14 @@ async function main() {
     await runPhase('label-delay', 0, 80)
 
     // Fault injection must be off before the profile is built for acceptance.
-    await setDelays(0, 0)
-    await emitClockSyncs(5)
+    await setInjectedDelays(page, 0, 0)
+    await emitClockSyncs(page, 5)
+    const faultInjection = await readFaultInjection(page)
+    console.log(
+      `Fault injection read back: enabled=${faultInjection.enabled}, ` +
+        `app delays executed=${faultInjection.app_delays_applied}, ` +
+        `label delays executed=${faultInjection.label_delays_applied}`
+    )
 
     console.log('\nStopping trace and collecting performance events...')
     const traceComplete = new Promise((resolve) => cdp.once('Tracing.tracingComplete', resolve))
@@ -834,44 +1087,14 @@ async function main() {
     await traceComplete
     console.log(`Captured ${traceEvents.length} raw trace events from Chromium.`)
 
-    const runtime = await page.evaluate(() => {
-      const hooks = (window as unknown as {
-        __gurowBenchmarkHooks: {
-          dispatches: unknown[]
-          label_commits: unknown[]
-          clock_syncs: unknown[]
-        }
-      }).__gurowBenchmarkHooks
-      return {
-        dispatches: hooks.dispatches,
-        labelCommits: hooks.label_commits,
-        clockSyncs: hooks.clock_syncs,
-      }
-    })
-
-    type RuntimeDispatch = {
-      input_id: string
-      command_type: string
-      scenario: 'pan' | 'zoom' | 'drag' | null
-      input_origin_ms: number | null
-      app_revision: number
-      canvas_revision: number
-      label_revision_at_dispatch: number
-      label_revision: number | null
-      label_commit_app_revision: number | null
-      label_commit_ms: number | null
-      cpu_work_ms: number
-    }
-    const dispatches = runtime.dispatches as RuntimeDispatch[]
-    const labelCommits = runtime.labelCommits as {
-      label_revision: number
-      app_revision: number
-      commit_ms: number
-      commit_duration_ms: number
-    }[]
-    const clockSyncs = runtime.clockSyncs as { index: number; page_now_ms: number }[]
+    const runtime = await readRuntimeRecords(page)
+    const setupDispatches = runtime.dispatches.slice(0, setupDispatchCount)
+    const timedDispatches = runtime.dispatches.slice(setupDispatchCount)
+    const labelCommits = runtime.labelCommits
+    const clockSyncs = runtime.clockSyncs
     console.log(
-      `Captured ${dispatches.length} dispatches, ${runtime.labelCommits.length} label commits, ${clockSyncs.length} clock syncs.`
+      `Captured ${timedDispatches.length} timed dispatches (${setupDispatches.length} setup), ` +
+        `${labelCommits.length} label commits, ${clockSyncs.length} clock syncs.`
     )
 
     const clockMapping = deriveClockMapping(traceEvents, clockSyncs, 'us')
@@ -879,28 +1102,28 @@ async function main() {
       `Clock mapping: offset ${clockMapping.trace_to_page_offset_ms ?? 'unresolved'} ms over ${clockMapping.sample_count} samples (spread ${clockMapping.offset_spread_ms ?? 'n/a'} ms).`
     )
 
-    // Diagnostics stay null unless the run actually measured them. GPU submit
-    // completion is not sampled per input here, so it is recorded as absent
-    // rather than filled with a constant.
     // Only dispatches caused by an observed browser input are measurement
     // inputs. Application-internal dispatches (document load, camera restore,
     // persistence) are retained in the artefact but must not be presented as
-    // inputs that failed to produce a presentation.
-    const inputDispatches = dispatches.filter((d) => d.input_origin_ms !== null)
-    const nonInputDispatches = dispatches.filter((d) => d.input_origin_ms === null)
+    // inputs that failed to produce a presentation. GPU submit completion is
+    // not sampled per input here, so it is recorded as absent rather than
+    // filled with a constant.
+    const inputDispatches = timedDispatches.filter((d) => d.input_origin_ms !== null)
+    const nonInputDispatches = timedDispatches.filter((d) => d.input_origin_ms === null)
     console.log(
       `Input-originated dispatches: ${inputDispatches.length}; application-internal: ${nonInputDispatches.length}.`
     )
 
     // AC2 requires evidence for each of pan, zoom and drag. A scenario that
     // produced no observed input is a load-generation failure, not a result.
-    const scenariosWithoutInput = (['pan', 'zoom', 'drag'] as const).filter(
+    const scenariosWithoutInput = SCENARIOS.filter(
       (scenario) => !inputDispatches.some((d) => d.scenario === scenario)
     )
 
     const correlationEvents: CorrelationEvent[] = inputDispatches.map((d) => ({
       input_id: d.input_id,
       scenario: d.scenario,
+      coalesced_input_ids: d.coalesced_inputs.map((input) => input.input_id),
       input_origin_ms: d.input_origin_ms,
       app_revision: d.app_revision,
       canvas_revision: d.canvas_revision,
@@ -914,29 +1137,21 @@ async function main() {
     }))
 
     const baseProfile: Omit<CollectorProfile, 'hash'> = {
-      version: 'gurow-collector-v3',
-      contract_id: 'gurow-p1-v1',
+      version: COLLECTOR_VERSION,
+      contract_id: CONTRACT_ID,
       // Placeholder only; replaced below by the parsed verdict before hashing.
       status: 'NOT_MEASURED',
       identity,
       host: hostInfo,
-      trace_configuration: {
-        categories: traceCategories,
-        parser_version: '3.0.0',
-        clock_origin: 'chromium_trace_monotonic',
-        clock_units: 'us',
-        timestamp_scale_to_ms: 0.001,
-        clock_mapping: clockMapping,
-      },
-      fault_injection: { enabled: false, app_delay_ms: 0, label_delay_ms: 0 },
+      geometry_class: geometryClass,
+      trace_configuration: traceConfiguration(traceCategories, clockMapping),
+      fault_injection: faultInjection,
+      input_coalescing: GUROW_INPUT_COALESCING,
       optical_requirements: getOpticalAcquisitionRequirements(),
     }
 
     // Parse first so the verdict comes from the evidence, then seal the profile.
-    const provisional: CollectorProfile = {
-      ...baseProfile,
-      hash: computeProfileHash(baseProfile),
-    }
+    const provisional: CollectorProfile = { ...baseProfile, hash: computeProfileHash(baseProfile) }
     const parseResult = parseTraceEvidence(traceEvents, correlationEvents, provisional)
     console.log(`\nParser verdict: ${parseResult.verdict}`)
     if (parseResult.errors.length > 0) console.log('Parser errors:', parseResult.errors)
@@ -945,8 +1160,7 @@ async function main() {
     }
 
     // AC4: compare the attributed endpoint across phases.
-    const findPhase = (name: PhaseWindow['name']) =>
-      phases.find((p) => p.name === name) as PhaseWindow
+    const findPhase = (name: PhaseWindow['name']) => phases.find((p) => p.name === name) as PhaseWindow
     const baselinePhase = findPhase('baseline')
     const appPhase = findPhase('app-delay')
     const labelPhase = findPhase('label-delay')
@@ -980,285 +1194,67 @@ async function main() {
       delayedLabelCommitMs: labelPhaseCommitMs,
     }
     console.log(
-      `  Label commit duration: baseline ${baselineCommitMs?.toFixed(2) ?? 'n/a'} ms -> delayed ${labelPhaseCommitMs?.toFixed(2) ?? 'n/a'} ms (proves whether the injected delay ran)`
+      `  Dispatch CPU duration: baseline ${baselineCpu?.toFixed(2) ?? 'n/a'} ms -> delayed ${appCpu?.toFixed(2) ?? 'n/a'} ms (proves whether the injected app delay ran)`
+    )
+    console.log(
+      `  Label commit duration: baseline ${baselineCommitMs?.toFixed(2) ?? 'n/a'} ms -> delayed ${labelPhaseCommitMs?.toFixed(2) ?? 'n/a'} ms (proves whether the injected label delay ran)`
     )
 
-    // AC5: retain the parser's actual rejection output for each negative case,
-    // rather than writing stubs that were never run through the parser.
-    // Self-contained fixtures: these must exercise the parser deterministically
-    // and must not depend on what the live run happened to capture, otherwise an
-    // empty run would silently turn every negative case into a pass.
-    const negativeBase: CorrelationEvent = {
-      input_id: 'neg-1',
-      scenario: 'pan',
-      input_origin_ms: 1000,
-      app_revision: 1,
-      canvas_revision: 1,
-      label_revision_at_dispatch: 0,
-      label_revision: 1,
-      label_commit_app_revision: 1,
-      label_commit_ms: 1002,
-      cpu_work_duration_ms: 2,
-      gpu_submit_duration_ms: null,
-      raf_cadence_ms: null,
-    }
-    const okTrace: TraceEvent[] = [
-      { cat: 'viz', name: 'DrawFrame', ts: 1_000_000, ph: 'X', pid: 1, tid: 1 },
-    ]
-
-    // Explicit synthetic qualification-schema examples, never browser evidence.
-    const coherentTrace: TraceEvent[] = [
-      { name: 'gurow:app_dispatch:neg-1:1', ts: 1_000_000, ph: 'R', pid: 1, tid: 1 },
-      { name: 'PresentationFeedback', ts: 1_016_000, ph: 'I', pid: 1, tid: 2, id: 'frame-1',
-        args: { flags: 0x06, canvas_revision: 1, label_revision: 1,
-          label_commit_app_revision: 1, presentation_timestamp: 1_016_000 } },
-    ]
-    const negativeProfile: CollectorProfile = {
-      ...provisional,
-      trace_configuration: { ...provisional.trace_configuration,
-        clock_mapping: { ...clockMapping, trace_to_page_offset_ms: 0, offset_spread_ms: 0, sample_count: 5 } },
-    }
-    const negativeCases: {
-      name: string; trace: TraceEvent[]; correlation: CorrelationEvent[]; unsupported?: boolean
-    }[] = [
-      { name: 'empty-trace', trace: [], correlation: [negativeBase] },
-      {
-        name: 'negative-timestamp',
-        trace: [{ cat: 'input', name: 'MouseEvent', ts: -12345, ph: 'X', pid: 1, tid: 1 }],
-        correlation: [negativeBase],
+    // AC5: run every rejection fixture through the real parser and finalizer.
+    // The parser profile carries a resolved mapping so each case fails for its
+    // own reason rather than for a missing clock mapping.
+    const negativeCasesWronglyAccepted = runNegativeCases({
+      parserProfile: {
+        ...provisional,
+        trace_configuration: {
+          ...provisional.trace_configuration,
+          clock_mapping: { ...clockMapping, trace_to_page_offset_ms: 0, offset_spread_ms: 0, sample_count: 5 },
+        },
       },
-      {
-        name: 'misordered-timestamps',
-        trace: [
-          { cat: 'viz', name: 'DrawFrame', ts: 2_000_000, ph: 'X', pid: 1, tid: 1 },
-          { cat: 'viz', name: 'DrawFrame', ts: 1_000_000, ph: 'X', pid: 1, tid: 1 },
-        ],
-        correlation: [negativeBase],
-      },
-      {
-        name: 'duplicate-ids',
-        trace: okTrace,
-        correlation: [negativeBase, { ...negativeBase }],
-      },
-      {
-        // Incoherent because the closing label commit never observed the
-        // dispatched revision. A label revision merely ahead of the canvas
-        // revision is legitimate and must not be rejected.
-        name: 'revision-mismatch',
-        trace: okTrace,
-        correlation: [
-          { ...negativeBase, app_revision: 5, canvas_revision: 5, label_commit_app_revision: 4 },
-        ],
-      },
-      {
-        name: 'label-revision-backwards',
-        trace: okTrace,
-        correlation: [{ ...negativeBase, label_revision_at_dispatch: 7, label_revision: 3 }],
-      },
-      {
-        name: 'label-never-committed',
-        trace: okTrace,
-        correlation: [{ ...negativeBase, label_revision: null, label_commit_app_revision: null }],
-      },
-      { name: 'wrong-clock-units', trace: okTrace, correlation: [negativeBase] },
-      { name: 'no-clock-mapping', trace: okTrace, correlation: [negativeBase] },
-    ]
-
-    for (const name of ['canvas-only', 'missing-frame', 'late-label', 'unrelated-paint',
-      'fabricated-feedback', 'submission-only', 'new-labels-old-canvas']) {
-      const trace = structuredClone(coherentTrace)
-      const correlation = { ...negativeBase }
-      if (name === 'canvas-only') delete trace[1].args!.label_revision
-      if (name === 'missing-frame') delete trace[1].id
-      if (name === 'late-label') correlation.label_commit_ms = 1017
-      if (name === 'unrelated-paint') trace[1].args!.canvas_revision = 99
-      if (name === 'fabricated-feedback') trace[1].args!.fabricated = true
-      if (name === 'submission-only') trace[1].name = 'DisplayScheduler::DrawAndSwap'
-      if (name === 'new-labels-old-canvas') correlation.label_commit_app_revision = 2
-      negativeCases.push({ name, trace, correlation: [correlation], unsupported: true })
-    }
-    const acceptedNegativeCases: string[] = []
-    for (const negative of negativeCases) {
-      let caseProfile = negativeProfile
-      if (negative.name === 'wrong-clock-units') {
-        caseProfile = {
-          ...negativeProfile,
-          trace_configuration: { ...negativeProfile.trace_configuration, timestamp_scale_to_ms: 1 },
-        }
-      } else if (negative.name === 'no-clock-mapping') {
-        caseProfile = {
-          ...negativeProfile,
-          trace_configuration: {
-            ...negativeProfile.trace_configuration,
-            clock_mapping: { ...negativeProfile.trace_configuration.clock_mapping, trace_to_page_offset_ms: null },
-          },
-        }
-      }
-      const result = parseTraceEvidence(negative.trace, negative.correlation, caseProfile)
-      fs.writeFileSync(
-        path.resolve(failedExamplesDir, `${negative.name}.json`),
-        JSON.stringify(
-          {
-            case: negative.name,
-            input: { trace: negative.trace, correlation: negative.correlation },
-            parser_result: {
-              valid: result.valid,
-              verdict: result.verdict,
-              errors: result.errors,
-              reasons: [...new Set(result.reasons)],
-              chains: result.chains,
-            },
-          },
-          null,
-          2
-        )
-      )
-      const leakedEndpoint = result.chains.some((chain) =>
-        chain.latency_ms !== null || chain.presentation_timestamp_ms !== null || chain.presented_frame_id !== null)
-      if (negative.unsupported
-        ? result.verdict !== 'UNSUPPORTED' || leakedEndpoint
-        : result.valid) {
-        acceptedNegativeCases.push(negative.name)
-      }
-    }
-
-    for (const name of ['invalid-final-gate', 'invalid-profile-gate', 'app-delay-gate', 'label-delay-gate']) {
-      const input = {
-        profile: name === 'invalid-profile-gate' ? { ...provisional, hash: 'tampered' } : provisional,
-        parsed: parseResult,
-        appDelayCheck: name === 'app-delay-gate' ? verifyControlledDelayShift(16, 16, 80) : appDelayCheck,
-        labelDelayCheck: name === 'label-delay-gate' ? verifyControlledDelayShift(16, 16, 80) : labelDelayCheck,
-        invalidRunReasons: name === 'invalid-final-gate'
-          ? ['Synthetic invalid-run finalization regression example.'] : [],
-      }
-      const result = finalizeQualification(input)
-      fs.writeFileSync(path.resolve(failedExamplesDir, `${name}.json`), JSON.stringify({
-        note: 'Fault-injected finalization example, not a separate browser attempt.', input, result,
-      }, null, 2))
-      if (result.profile.status !== 'NOT_MEASURED' || result.failures.length === 0) {
-        acceptedNegativeCases.push(name)
-      }
-    }
+      runProfile: provisional,
+      parseResult,
+      appDelayCheck,
+      labelDelayCheck,
+      failedExamplesDir,
+    })
 
     // Every validity/causality gate runs BEFORE publication or hashing.
     const invalidRunReasons = [
       ...deviceLossEvents.map((event) => `WebGPU device loss: ${event}`),
       ...pageErrors.map((error) => `Browser page error: ${error}`),
-      ...acceptedNegativeCases.map((name) => `Negative case wrongly accepted: ${name}`),
+      ...negativeCasesWronglyAccepted.map((name) => `Negative case wrongly accepted: ${name}`),
       ...scenariosWithoutInput.map((scenario) => `No browser input observed for ${scenario}.`),
       ...(headless ? ['Headless execution is diagnostic only, not reference qualification.'] : []),
     ]
     const finalization = finalizeQualification({
-      profile: provisional, parsed: parseResult, appDelayCheck, labelDelayCheck, invalidRunReasons,
+      profile: provisional, parsed: parseResult, appDelayCheck, labelDelayCheck, invalidRunReasons, mode,
     })
     const { profile, profileValidation } = finalization
 
-    // Retain the real run's rejections alongside the constructed cases.
-    if (parseResult.errors.length > 0 || parseResult.reasons.length > 0) {
-      fs.writeFileSync(
-        path.resolve(failedExamplesDir, 'observed-run-limitations.json'),
-        JSON.stringify(
-          {
-            verdict: parseResult.verdict,
-            errors: parseResult.errors,
-            reasons: [...new Set(parseResult.reasons)],
-          },
-          null,
-          2
-        )
-      )
-    }
-
-    // Raw traces: the full buffer, plus per-scenario slices cut by the real
-    // scenario time windows rather than arbitrary indices.
-    fs.writeFileSync(path.resolve(outDir, 'raw-trace.json'), JSON.stringify(traceEvents, null, 2))
-
-    const offsetMs = clockMapping.trace_to_page_offset_ms
-    for (const scenario of ['pan', 'zoom', 'drag'] as const) {
-      const window = scenarioWindows[scenario]
-      const slice =
-        offsetMs === null
-          ? []
-          : traceEvents.filter((e) => {
-              const pageMs = e.ts * 0.001 - offsetMs
-              return pageMs >= window.start_ms && pageMs <= window.end_ms
-            })
-      fs.writeFileSync(
-        path.resolve(outDir, `raw-trace-${scenario}.json`),
-        JSON.stringify(
-          {
-            scenario,
-            window_page_ms: window,
-            clock_offset_ms: offsetMs,
-            note:
-              offsetMs === null
-                ? 'Clock mapping unresolved; per-scenario slicing is not possible. See raw-trace.json.'
-                : 'Events selected by mapped page-clock time inside the scenario window.',
-            event_count: slice.length,
-            events: slice,
-          },
-          null,
-          2
-        )
-      )
-    }
-
-    fs.writeFileSync(
-      path.resolve(outDir, 'collector-profile.json'),
-      JSON.stringify(profile, null, 2)
-    )
-
-    const report = generateQualificationReport(profile, finalization.reasons, {
-      scenariosTested: ['pan', 'zoom', 'drag'],
-      chains: parseResult.chains,
-      gpuAdapter: hostInfo.gpu_adapter,
-      browserVersion: hostInfo.browser_version,
+    writeObservedLimitations(failedExamplesDir, parseResult)
+    writeRunArtifacts({
+      outDir,
+      profile,
+      parseResult,
+      reasons: finalization.reasons,
+      failures: finalization.failures,
+      profileValidation,
+      traceEvents,
+      clockMapping,
+      scenarioWindows,
+      phases,
       appDelayCheck,
       labelDelayCheck,
       diagnosticShifts,
+      faultInjection,
+      setupDispatches,
+      inputDispatchCount: inputDispatches.length,
+      nonInputDispatches,
+      scenariosWithoutInput: [...scenariosWithoutInput],
+      deviceLossEvents,
+      pageErrors,
+      negativeCasesWronglyAccepted,
     })
-    fs.writeFileSync(path.resolve(outDir, 'qualification-report.md'), report)
-
-    fs.writeFileSync(
-      path.resolve(outDir, 'qualification-report.json'),
-      JSON.stringify(
-        {
-          contract_id: profile.contract_id,
-          collector_version: profile.version,
-          profile_hash: profile.hash,
-          identity: profile.identity,
-          verdict: profile.status,
-          parser_errors: parseResult.errors,
-          reasons: finalization.reasons,
-          qualification_failures: finalization.failures,
-          input_dispatch_count: inputDispatches.length,
-          non_input_dispatch_count: nonInputDispatches.length,
-          non_input_dispatches: nonInputDispatches,
-          scenarios_without_observed_input: scenariosWithoutInput,
-          device_loss_events: deviceLossEvents.slice(0, 20),
-          device_loss_event_count: deviceLossEvents.length,
-          page_errors: pageErrors.slice(0, 20),
-          negative_cases_wrongly_accepted: acceptedNegativeCases,
-          chains_count: parseResult.chains.length,
-          chains_revision_matched: parseResult.chains.filter(
-            (c) => c.frame_link === 'revision_matched'
-          ).length,
-          chains_with_latency: parseResult.chains.filter((c) => c.latency_ms !== null).length,
-          clock_mapping: clockMapping,
-          acceptance_profile_validation: profileValidation,
-          scenario_windows: scenarioWindows,
-          phases,
-          controlled_delays: {
-            app_delay_check: appDelayCheck,
-            label_delay_check: labelDelayCheck,
-            diagnostic_only_shifts: diagnosticShifts,
-          },
-          optical_requirements: profile.optical_requirements,
-        },
-        null,
-        2
-      )
-    )
 
     console.log(`\nQualification report: ${path.resolve(outDir, 'qualification-report.md')}`)
     console.log(`Collector profile:    ${path.resolve(outDir, 'collector-profile.json')}`)

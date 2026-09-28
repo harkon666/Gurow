@@ -9,7 +9,7 @@
     "t05-browser": {"cwd": "frontend", "argv": ["bun", "run", "scripts/t05-smoke-check.ts", "--check-only"], "timeout": 180},
     "collector-tests": {"cwd": "frontend", "argv": ["bun", "test", "scripts/benchmark"], "timeout": 120},
     "editor-lifecycle": {"cwd": "frontend", "argv": ["bun", "run", "scripts/editor-lifecycle-check.ts"], "timeout": 180},
-    "t06-l3-01-qualify": {"cwd": "frontend", "argv": ["bun", "run", "scripts/benchmark/qualify.ts", "--contract", "../docs/benchmarks/p1/protocol.json", "--out", "../.harness/t06/qualification", "--expect-verdict", "UNSUPPORTED"], "timeout": 600}
+    "t06-l3-01-qualify": {"cwd": "frontend", "argv": ["bun", "run", "scripts/benchmark/qualify.ts", "--contract", "../docs/benchmarks/p1/protocol.json", "--out", "../.harness/t06/qualification"], "timeout": 600}
   },
   "profiles": {
     "quick": ["harness-tests", "frontend-types", "frontend-tests", "rust-tests", "collector-tests"],

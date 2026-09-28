@@ -62,6 +62,7 @@ EXCLUDED_PARTS = {
     "target", ".output", "dist", "build", "coverage", "vendor", "__pycache__",
 }
 EXCLUDED_NAMES = {"AGENTS.md", "GEMINI.md", "GRILL_WITH_DOCS_PROMPT.md", "Cargo.lock"}
+COMPAT_LINKS = ("sources", "metadata", "graphify-out")
 SECRET_RE = re.compile(r"(^|[._-])(secret|credential|credentials|token|private[-_]?key)([._-]|$)", re.I)
 
 
@@ -163,6 +164,24 @@ def inventory(repo: Path) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
             "kind": "semantic" if PurePosixPath(relative).suffix.lower() in DOC_SUFFIXES or relative in NORMATIVE_JSON else "structural",
         })
     return records, excluded
+
+
+def live_corpus_fingerprint(repo: Path) -> str:
+    """Fingerprints the repository corpus as it stands right now.
+
+    Both build and status compare this against the staged snapshot, so drift is
+    decided by one definition rather than two that could diverge.
+    """
+    records, _ = inventory(repo.resolve())
+    return sha256_bytes(canonical_json(records))
+
+
+def assert_compat_links(brain: Path) -> None:
+    """Requires every compatibility path to be a symlink into the current generation."""
+    for name in COMPAT_LINKS:
+        link = brain / name
+        if not link.is_symlink() or link.resolve() != (brain / "current" / name).resolve():
+            raise PipelineError(f"compatibility path is not linked to current/{name}")
 
 
 def generation_id(records: list[dict[str, Any]]) -> str:
@@ -447,9 +466,7 @@ def artifact_manifest(root: Path) -> dict[str, Any]:
 def build(repo: Path, brain: Path, generation: str | None, fragments: list[Path]) -> dict[str, Any]:
     brain = brain.resolve(); staging = selected_staging(brain, generation)
     snapshot = read_json(staging / "metadata/snapshot.json")
-    live_records, _ = inventory(repo.resolve())
-    live_fingerprint = sha256_bytes(canonical_json(live_records))
-    if live_fingerprint != snapshot["fingerprint"]:
+    if live_corpus_fingerprint(repo) != snapshot["fingerprint"]:
         raise PipelineError("repository corpus drifted since prepare; prepare a new generation")
     # Recheck the immutable snapshot itself before any extraction.
     for record in snapshot["files"]:
@@ -625,7 +642,7 @@ def publish(brain: Path, staging: Path) -> Path:
     backup = brain / "backups" / datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     originals: dict[str, tuple[str, str | Path] | None] = {}
     try:
-        for name in ("sources", "metadata", "graphify-out"):
+        for name in COMPAT_LINKS:
             legacy = brain / name
             if legacy.is_symlink():
                 originals[name] = ("symlink", os.readlink(legacy)); legacy.unlink()
@@ -643,9 +660,7 @@ def publish(brain: Path, staging: Path) -> Path:
         temporary.symlink_to(Path("generations") / destination.name, target_is_directory=True)
         os.replace(temporary, current)
         verify_generation(current.resolve(), require_queries=True)
-        for name in ("sources", "metadata", "graphify-out"):
-            if (brain / name).resolve() != (current / name).resolve():
-                raise PipelineError(f"compatibility link does not reference current/{name}")
+        assert_compat_links(brain)
     except Exception:
         if prior_current is not None:
             rollback = brain / ".current.rollback"
@@ -677,13 +692,9 @@ def status(repo: Path, brain: Path, generation: str | None) -> dict[str, Any]:
         raise PipelineError(f"generation not found: {root}")
     result = verify_generation(root.resolve(), require_queries=True)
     snapshot = read_json(root.resolve() / "metadata/snapshot.json")
-    live_records, _ = inventory(repo.resolve())
-    live_fingerprint = sha256_bytes(canonical_json(live_records))
-    drift = live_fingerprint != snapshot["fingerprint"]
+    drift = live_corpus_fingerprint(repo) != snapshot["fingerprint"]
     needs = (brain / "graphify-out/.needs_update").exists()
-    for name in ("sources", "metadata", "graphify-out"):
-        if not (brain / name).is_symlink() or (brain / name).resolve() != (brain / "current" / name).resolve():
-            raise PipelineError(f"compatibility path is not linked to current/{name}")
+    assert_compat_links(brain)
     result.update({"status": "needs-update" if needs or drift else "ready", "needs_update": needs, "repository_drift": drift, "current": str(root.resolve())})
     print(json.dumps(result, indent=2))
     if needs or drift:

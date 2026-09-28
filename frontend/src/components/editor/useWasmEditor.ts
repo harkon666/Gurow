@@ -231,8 +231,10 @@ export function useWasmEditor({
   // Single consolidated command dispatch helper (Matt Pocock SDD)
   const dispatchInternal = useCallback(
     (editor: WasmEditor, cmd: EditorCommand) => {
-      applyAppDelay()
+      // The injected delay must sit inside the measured interval, so it runs
+      // after t0: cpu_work_ms then shows that the injection actually executed.
       const t0 = performance.now()
+      applyAppDelay()
       const validatedCmd = EditorCommandSchema.parse(cmd)
       const eventsJson = editor.dispatch_command(JSON.stringify(validatedCmd))
       const parsedEvents = EditorEventsSchema.parse(JSON.parse(eventsJson))

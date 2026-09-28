@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, spyOn } from 'bun:test'
 import {
-  recordDispatch, recordLabelUpdate, recordLabelCommit, type BenchmarkHooks,
+  applyAppDelay, beginInput, recordDispatch, recordLabelUpdate, recordLabelCommit,
+  type BenchmarkHooks,
 } from './benchmarkHooks'
 
 const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
@@ -16,9 +17,9 @@ afterEach(() => {
 function install(enabled = true): BenchmarkHooks {
   const hooks: BenchmarkHooks = {
     enabled, app_delay_ms: 0, label_delay_ms: 80, app_revision: 0,
-    canvas_revision: 0, label_revision: 0, pending_input: null,
+    canvas_revision: 0, label_revision: 0, pending_inputs: [],
     dispatches: [], label_commits: [], clock_syncs: [], active_scenario: null,
-    raf_intervals_ms: [],
+    app_delays_applied: 0, label_delays_applied: 0,
   }
   Object.defineProperty(globalThis, 'window', {
     configurable: true, value: { __gurowBenchmarkHooks: hooks },
@@ -81,5 +82,63 @@ describe('benchmark DOM commit evidence', () => {
     recordLabelCommit(undefined)
     expect(hooks.dispatches).toEqual([])
     expect(hooks.label_commits).toEqual([])
+  })
+})
+
+// Contract §6 fixes the coalescing rule in the collector, so a superseded input
+// must keep its own origin instead of vanishing behind the one that replaced it.
+describe('input coalescing evidence', () => {
+  it('attributes a coalesced dispatch to the oldest input and retains the rest', () => {
+    const hooks = install()
+    const first = beginInput({ timeStamp: 100 }, 'pan')!
+    const second = beginInput({ timeStamp: 116 }, 'pan')!
+    expect(hooks.pending_inputs).toHaveLength(2)
+
+    recordDispatch('PanCamera', 1)
+    const dispatch = hooks.dispatches[0]
+    expect(dispatch.input_id).toBe(first)
+    expect(dispatch.input_origin_ms).toBe(100)
+    expect(dispatch.coalesced_inputs.map(input => input.input_id)).toEqual([second])
+    expect(dispatch.coalesced_inputs[0].origin_ms).toBe(116)
+    // The queue is drained, so the next dispatch cannot reuse a consumed input.
+    expect(hooks.pending_inputs).toEqual([])
+  })
+
+  it('distinguishes an input-caused dispatch from an application-internal one', () => {
+    const hooks = install()
+    beginInput({ timeStamp: 50 }, 'zoom')
+    recordDispatch('ZoomAt', 1)
+    recordDispatch('ResizeViewport', 1)
+    expect(hooks.dispatches.map(d => d.input_origin_ms)).toEqual([50, null])
+    expect(hooks.dispatches.map(d => d.scenario)).toEqual(['zoom', null])
+  })
+})
+
+describe('injected application delay', () => {
+  it('delays only a dispatch caused by an observed browser input (AC4)', () => {
+    const hooks = install()
+    hooks.app_delay_ms = 80
+    clock = spyOn(performance, 'now').mockImplementation(() => {
+      throw new Error('untimed dispatch must not busy-wait')
+    })
+    // No pending input: a viewport resize or persistence write is not the
+    // interaction under test and must not be slowed down.
+    applyAppDelay()
+    expect(hooks.app_delays_applied).toBe(0)
+  })
+
+  it('records that the delay actually executed inside the dispatch', () => {
+    const hooks = install()
+    hooks.app_delay_ms = 80
+    beginInput({ timeStamp: 10 }, 'pan')
+    const times = [0, 0, 80]
+    clock = spyOn(performance, 'now').mockImplementation(() => {
+      const time = times.shift()
+      if (time === undefined) throw new Error('unexpected clock read')
+      return time
+    })
+    applyAppDelay()
+    expect(hooks.app_delays_applied).toBe(1)
+    expect(times).toEqual([])
   })
 })

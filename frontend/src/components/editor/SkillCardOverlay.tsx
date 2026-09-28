@@ -30,6 +30,9 @@ export const SkillCardOverlay: React.FC<SkillCardOverlayProps> = ({
           <div
             key={label.card_id}
             id={`card-label-${label.card_id}`}
+            // Contract §5 drags the selected centre card, so a driver must be
+            // able to find it without reading style classes.
+            data-selected={label.selected ? 'true' : 'false'}
             style={{
               position: 'absolute',
               left: `${cssRect.left}px`,

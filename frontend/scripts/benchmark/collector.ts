@@ -1,4 +1,5 @@
 import { createHash } from 'crypto'
+import type { Scenario } from '../../src/components/editor/benchmarkHooks'
 
 /**
  * Collector profile, trace parser and qualification reporting for the P1/T06
@@ -89,6 +90,31 @@ export interface FaultInjectionConfig {
   enabled: boolean
   app_delay_ms: number
   label_delay_ms: number
+  /** Times the injected application delay was observed to execute. */
+  app_delays_applied: number
+  /** Times the injected label delay was observed to execute. */
+  label_delays_applied: number
+}
+
+/**
+ * The coalescing rule the collector itself fixes, per contract §6.
+ *
+ * The rule is part of the hashed profile so a report reducer inherits it instead
+ * of inventing its own grouping after seeing the numbers.
+ */
+export interface InputCoalescingRule {
+  rule_id: string
+  attributed_origin: string
+  description: string
+}
+
+/** Rule implemented by `recordDispatch` in the application instrumentation. */
+export const GUROW_INPUT_COALESCING: InputCoalescingRule = {
+  rule_id: 'gurow-coalescing-v1',
+  attributed_origin: 'oldest_unconsumed_input',
+  description:
+    'A dispatch is attributed to the oldest input it incorporated. Every superseded input is ' +
+    'retained with its own origin and carries the same conservative oldest-to-presentation latency.',
 }
 
 export interface OpticalAcquisitionRequirements {
@@ -108,6 +134,15 @@ export interface OpticalAcquisitionRequirements {
   }
 }
 
+/**
+ * Whether the run stood on the reference window geometry of contract §3.
+ *
+ * `qualification_only` is an honest, self-limiting record: the collector may be
+ * qualified on it, but no acceptance series can be, so an L3-03 run cannot
+ * inherit this profile's geometry as if it were the reference environment.
+ */
+export type GeometryClass = 'reference' | 'qualification_only'
+
 /** Identity of the source the qualification ran against, per contract §4. */
 export interface SourceIdentity {
   commit: string
@@ -124,8 +159,11 @@ export interface CollectorProfile {
   unsupported_reason?: string
   identity: SourceIdentity
   host: HostEnvironmentInfo
+  /** Derived from the observed window, never claimed independently of it. */
+  geometry_class: GeometryClass
   trace_configuration: TraceConfiguration
   fault_injection: FaultInjectionConfig
+  input_coalescing: InputCoalescingRule
   optical_requirements?: OpticalAcquisitionRequirements
 }
 
@@ -145,7 +183,9 @@ export interface TraceEvent {
 
 export interface CorrelationEvent {
   input_id: string
-  scenario: 'pan' | 'zoom' | 'drag' | null
+  scenario: Scenario | null
+  /** Superseded inputs incorporated into this dispatch, oldest first. */
+  coalesced_input_ids: string[]
   /** Pre-dispatch browser input time on the page clock; null when unobserved. */
   input_origin_ms: number | null
   app_revision: number
@@ -177,7 +217,13 @@ export type PresentationProvenance =
 
 export interface InputPresentationChain {
   input_id: string
-  scenario: 'pan' | 'zoom' | 'drag' | null
+  scenario: Scenario | null
+  /**
+   * Inputs that coalesced into this chain, oldest first. Each member inherits
+   * this chain's latency under `gurow-coalescing-v1`; the group is never
+   * counted as one acceptance sample.
+   */
+  coalesced_input_ids: string[]
   /** Pre-dispatch origin on the page clock; null when unobserved. */
   input_timestamp_ms: number | null
   app_revision: number
@@ -228,8 +274,9 @@ export function computeProfileHash(profile: Omit<CollectorProfile, 'hash'>): str
   return createHash('sha256').update(canonical).digest('hex')
 }
 
-/** Median of a non-empty numeric sample. */
-function median(values: number[]): number {
+/** Median of a numeric sample, or null when the sample is empty. */
+export function medianOrNull(values: number[]): number | null {
+  if (values.length === 0) return null
   const sorted = [...values].sort((a, b) => a - b)
   const mid = Math.floor(sorted.length / 2)
   return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid]
@@ -272,7 +319,7 @@ export function deriveClockMapping(
 
   return {
     ...base,
-    trace_to_page_offset_ms: median(offsets),
+    trace_to_page_offset_ms: medianOrNull(offsets),
     offset_spread_ms: Math.max(...offsets) - Math.min(...offsets),
   }
 }
@@ -304,15 +351,40 @@ export function isSoftwareAdapter(adapterDescription: string): boolean {
 }
 
 /**
- * Validates a CollectorProfile against AC1, AC4, and integrity rules.
+ * Errors specific to the reference *window* geometry of contract §3.
  *
- * In acceptance mode every host field the contract requires must be a real
- * observation: an `unknown` adapter or a null refresh rate is an escalation,
- * not a recordable result.
+ * Separated because these two facts are what an acceptance series needs fixed —
+ * the workload's visible-card band and the p95 thresholds are defined against
+ * them. Demonstrating that an input reaches a coherent presentation does not
+ * depend on the window being one particular size.
  */
-/** Pre-capture gate, also rechecked at the final publication boundary. */
-export function validateReferenceEnvironment(host: HostEnvironmentInfo): string[] {
+function referenceGeometryErrors(host: HostEnvironmentInfo): string[] {
   const errors: string[] = []
+  if (host.viewport_css?.[0] !== 1200 || host.viewport_css?.[1] !== 720) {
+    errors.push('Actual headed viewport must be 1200×720 CSS pixels (contract §3).')
+  }
+  if (host.device_pixel_ratio !== 1.5) errors.push('Actual native DPR must be 1.5 (contract §3).')
+  return errors
+}
+
+export interface EnvironmentGateOptions {
+  /**
+   * Require the exact reference viewport and DPR (contract §3).
+   *
+   * An acceptance run must be on the reference geometry. A collector
+   * qualification need not be: it proves the evidence chain exists on this
+   * stack, whatever size the compositor laid the window out at.
+   */
+  requireReferenceGeometry?: boolean
+}
+
+/** Pre-capture gate, also rechecked at the final publication boundary. */
+export function validateReferenceEnvironment(
+  host: HostEnvironmentInfo,
+  options: EnvironmentGateOptions = {}
+): string[] {
+  const errors: string[] = []
+  if (options.requireReferenceGeometry) errors.push(...referenceGeometryErrors(host))
   for (const field of ['browser_version', 'browser_backend', 'browser_executable', 'compositor'] as const) {
     if (!host[field]?.trim() || host[field] === UNKNOWN) errors.push(`Actual ${field} is unknown (AC1).`)
   }
@@ -320,10 +392,10 @@ export function validateReferenceEnvironment(host: HostEnvironmentInfo): string[
     errors.push('Compositor identity and version are required; a Wayland socket is not an identity (AC1).')
   }
   if (!host.browser_command_line?.length) errors.push('Actual browser command line was not recorded (AC1).')
-  if (host.viewport_css?.[0] !== 1200 || host.viewport_css?.[1] !== 720) {
-    errors.push('Actual headed viewport must be 1200×720 CSS pixels (contract §3).')
+  if (host.viewport_css === null) errors.push('Actual headed viewport was not recorded (AC1).')
+  if (host.device_pixel_ratio === null) {
+    errors.push('Device pixel ratio was not read from the live page (AC1).')
   }
-  if (host.device_pixel_ratio !== 1.5) errors.push('Actual native DPR must be 1.5 (contract §3).')
   const canvas = host.canvas_geometry
   if (!canvas) errors.push('Canvas CSS and backing geometry were not recorded (AC1).')
   else {
@@ -365,14 +437,35 @@ export function validateReferenceEnvironment(host: HostEnvironmentInfo): string[
   return errors
 }
 
+/**
+ * Validates a CollectorProfile against AC1, AC4, and integrity rules.
+ *
+ * In acceptance mode every host field the contract requires must be a real
+ * observation: an `unknown` adapter or a null refresh rate is an escalation,
+ * not a recordable result.
+ *
+ * Reference geometry is required for acceptance and optional for a collector
+ * qualification, but a profile that *claims* `reference` is always held to it,
+ * so the weaker mode cannot be used to smuggle in a reference-looking profile.
+ */
 export function validateCollectorProfile(
   profile: CollectorProfile,
-  options: { requireAcceptanceMode?: boolean } = {}
+  options: { requireAcceptanceMode?: boolean } & EnvironmentGateOptions = {}
 ): { valid: boolean; errors: string[] } {
   const errors: string[] = []
+  const requireReferenceGeometry =
+    options.requireReferenceGeometry ?? options.requireAcceptanceMode ?? false
 
   if (!profile.version) {
     errors.push('Profile version is missing.')
+  }
+
+  if (profile.geometry_class === 'reference') {
+    errors.push(...referenceGeometryErrors(profile.host))
+  } else if (requireReferenceGeometry) {
+    errors.push(
+      'Acceptance requires the reference window geometry; this profile is qualification-only (contract §3).'
+    )
   }
 
   // AC1: no fallback/software result is marked qualified
@@ -398,11 +491,24 @@ export function validateCollectorProfile(
   if (options.requireAcceptanceMode && profile.fault_injection.enabled) {
     errors.push('Acceptance mode rejects profiles with fault injection enabled (AC4 violation).')
   }
+  if (
+    options.requireAcceptanceMode &&
+    (profile.fault_injection.app_delay_ms > 0 || profile.fault_injection.label_delay_ms > 0)
+  ) {
+    errors.push('Acceptance mode rejects a profile still carrying injected delays (AC4 violation).')
+  }
+
+  // Contract §6: the collector, not a downstream reducer, fixes the grouping.
+  if (profile.input_coalescing?.rule_id !== GUROW_INPUT_COALESCING.rule_id) {
+    errors.push(
+      `Profile must declare coalescing rule '${GUROW_INPUT_COALESCING.rule_id}' (contract §6).`
+    )
+  }
 
   // AC1: acceptance mode cannot record an unresolved host fact.
   if (options.requireAcceptanceMode) {
     const { host } = profile
-    errors.push(...validateReferenceEnvironment(host))
+    errors.push(...validateReferenceEnvironment(host, { requireReferenceGeometry }))
     if (profile.identity.tree_dirty && !/^[a-f0-9]{64}$/i.test(profile.identity.source_fingerprint ?? '')) {
       errors.push('Dirty source requires a valid 64-hex source fingerprint (AC1).')
     }
@@ -491,6 +597,26 @@ export function verifyControlledDelayShift(
     shiftMs,
     details: `Observed shift: ${shiftMs.toFixed(2)} ms (expected ~${expectedDelayMs} ms, diff: ${diff.toFixed(2)} ms, tolerance: ${toleranceMs} ms). ${pass ? 'PASS' : 'FAIL'}`,
   }
+}
+
+/**
+ * Reports whether one chain is qualification-grade evidence.
+ *
+ * The single predicate both the parser verdict and the final publication gate
+ * use, so the two cannot drift into disagreeing definitions of "coherent".
+ */
+export function isQualifiedChain(chain: InputPresentationChain): boolean {
+  return (
+    chain.presentation_provenance === 'platform_presentation_feedback' &&
+    chain.frame_link === 'revision_matched' &&
+    typeof chain.presented_frame_id === 'string' &&
+    chain.presented_frame_id.trim().length > 0 &&
+    chain.presentation_timestamp_ms !== null &&
+    Number.isFinite(chain.presentation_timestamp_ms) &&
+    chain.latency_ms !== null &&
+    Number.isFinite(chain.latency_ms) &&
+    chain.latency_ms >= 0
+  )
 }
 
 /**
@@ -670,16 +796,21 @@ export function parseTraceEvidence(
       e.name === `gurow:app_dispatch:${c.input_id}:${c.app_revision}`
     )
 
+    // The dispatch itself must describe one coherent state before any frame can
+    // be said to present it: the closing label commit observed exactly the
+    // canvas revision this dispatch rendered.
+    const dispatchStateCoherent =
+      c.label_commit_app_revision === c.canvas_revision && c.app_revision === c.canvas_revision
+
     // Qualification schema, not invented Chromium args: a future acquisition
     // join must demonstrate BOTH revisions on this same frame. Raw Chromium
     // currently provides no such join, so remains honestly unsupported.
-    const coherentRevision = (pe: TraceEvent) =>
+    const presentsThisState = (pe: TraceEvent) =>
+      dispatchStateCoherent &&
       (readNumberArg(pe.args, 'canvas_revision') ??
         readNumberArg(pe.args, 'gurow_canvas_revision')) === c.canvas_revision &&
       readNumberArg(pe.args, 'label_revision') === c.label_revision &&
-      readNumberArg(pe.args, 'label_commit_app_revision') === c.canvas_revision &&
-      c.label_commit_app_revision === c.canvas_revision &&
-      c.app_revision === c.canvas_revision
+      readNumberArg(pe.args, 'label_commit_app_revision') === c.canvas_revision
     const dispatchTs = dispatchMark?.ts
     const dispatchMs = dispatchTs === undefined ? null : toPageMs(dispatchTs)
     const assessPresentation = (event: TraceEvent | undefined) => {
@@ -707,7 +838,7 @@ export function parseTraceEvidence(
         isPresentation, eligible: !declaredFallback && hasHardwareFeedback && hasFrame &&
           chronologyValid && isPresentation }
     }
-    const coherentCandidates = presentationEvents.filter(coherentRevision)
+    const coherentCandidates = presentationEvents.filter(presentsThisState)
     // Choose the first actual coherent presentation, not the first receipt or
     // submission with matching revision args. Invalid candidates remain useful
     // for diagnostics only when no genuinely eligible endpoint exists.
@@ -783,6 +914,7 @@ export function parseTraceEvidence(
     chains.push({
       input_id: c.input_id,
       scenario: c.scenario,
+      coalesced_input_ids: c.coalesced_input_ids,
       input_timestamp_ms: c.input_origin_ms,
       app_revision: c.app_revision,
       canvas_revision: c.canvas_revision,
@@ -800,14 +932,7 @@ export function parseTraceEvidence(
     })
   }
 
-  const allQualified =
-    chains.length > 0 &&
-    chains.every(
-      (ch) =>
-        ch.presentation_provenance === 'platform_presentation_feedback' &&
-        ch.frame_link === 'revision_matched' &&
-        ch.latency_ms !== null
-    )
+  const allQualified = chains.length > 0 && chains.every(isQualifiedChain)
 
   let verdict: 'QUALIFIED' | 'UNSUPPORTED' | 'NOT_MEASURED'
   if (chains.length === 0) {
@@ -903,6 +1028,11 @@ export function generateQualificationReport(
 **Collector Version:** ${profile.version}
 **Profile Hash:** \`${profile.hash}\`
 **Verdict:** **${profile.status}**
+**Window geometry:** ${profile.geometry_class}${
+    profile.geometry_class === 'reference'
+      ? ''
+      : ' — the collector may be qualified on this window, but no acceptance series may be'
+  }
 **Source Commit:** \`${profile.identity.commit}\`${profile.identity.tree_dirty ? ' (working tree dirty)' : ''}
 **Build Hash:** \`${profile.identity.build_hash}\`
 **Source Fingerprint:** \`${profile.identity.source_fingerprint}\`
@@ -938,7 +1068,15 @@ ${
 | **Compositor / Backend** | ${host.compositor} (${host.browser_backend}) | Recorded as observed |
 | **Browser Version** | ${host.browser_version} | Recorded as observed |
 | **Display & Refresh** | ${formatValue(host.display_output)} @ ${formatValue(host.display_refresh_hz)} Hz (DPR ${formatValue(host.device_pixel_ratio)}) | ${complianceCell(host.display_refresh_hz !== null && host.device_pixel_ratio !== null, 'Read from host and live page', 'Not fully observed')} |
-| **Viewport CSS** | ${host.viewport_css ? `${host.viewport_css[0]}×${host.viewport_css[1]}` : '_not observed_'} | ${complianceCell(host.viewport_css?.[0] === 1200 && host.viewport_css?.[1] === 720, 'Matches 1200×720 reference', 'Does not match reference viewport')} |
+| **Viewport CSS** | ${host.viewport_css ? `${host.viewport_css[0]}×${host.viewport_css[1]}` : '_not observed_'} | ${
+    profile.geometry_class === 'reference'
+      ? complianceCell(
+          host.viewport_css?.[0] === 1200 && host.viewport_css?.[1] === 720,
+          'Matches 1200×720 reference',
+          'Does not match reference viewport'
+        )
+      : 'Qualification-only geometry: **not** an acceptance environment'
+  } |
 | **Canvas Geometry** | ${host.canvas_geometry ? `${host.canvas_geometry.css_bounds.width}×${host.canvas_geometry.css_bounds.height} CSS, ${host.canvas_geometry.backing_size.width}×${host.canvas_geometry.backing_size.height} backing` : '_not observed_'} | ${complianceCell(host.canvas_geometry !== null, 'Recorded', 'Not recorded')} |
 | **Trace Categories** | \`${profile.trace_configuration.categories.join(', ')}\` | Supported by Chrome CDP |
 | **Clock Mapping** | offset ${formatValue(profile.trace_configuration.clock_mapping.trace_to_page_offset_ms)} ms over ${profile.trace_configuration.clock_mapping.sample_count} samples (spread ${formatValue(profile.trace_configuration.clock_mapping.offset_spread_ms)} ms) | ${complianceCell(profile.trace_configuration.clock_mapping.trace_to_page_offset_ms !== null, 'Derived from paired sync marks', 'Not established')} |
@@ -975,6 +1113,18 @@ Diagnostic-only shifts (CPU-side, **not** presentation evidence): app dispatch $
       ? null
       : Number(evidence.diagnosticShifts.labelCommitShiftMs.toFixed(2))
   )} ms.
+
+### Structural Limitation of Browser-Internal Evidence
+
+A chain qualifies only when one presentation event carries this canvas revision,
+its matching label revision and an actual hardware presentation timestamp. Raw
+Chromium emits no such canvas/label join for a custom WebGPU canvas, so on an
+unmodified browser stack this collector can only report \`UNSUPPORTED\` or
+\`NOT_MEASURED\`; a \`QUALIFIED\` verdict requires an acquisition path that
+supplies the join. That is a property of the platform, not of this parser.
+
+Input grouping is fixed by the collector as \`${profile.input_coalescing.rule_id}\`
+(${profile.input_coalescing.attributed_origin}), never by a report reducer.
 
 ### Specific Limitations Identified
 ${reasons.length === 0 ? '_None recorded._' : [...new Set(reasons)].map((r) => `- **Finding:** ${r}`).join('\n')}

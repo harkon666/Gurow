@@ -80,6 +80,8 @@ L3-01 must demonstrate the mapping separately for ordinary wheel pan, Ctrl+wheel
 
 Keep raw traces and a hand-auditable example for each interaction. Validate the chain with controlled 80 ms application delay and independent 80 ms HTML-label delay; the affected latency and delayed component must appear in the trace-derived endpoint. Injection must be disabled in acceptance runs. Also reject fabricated, missing, negative, misordered, duplicate and mismatched clock/revision/frame records. Delaying tests is a falsification check, not a replacement for real presentation provenance.
 
+Collector qualification runs on the headed window the desktop actually provides; the reference window geometry of §3 remains required for an acceptance series only. Approved 2026-09-28 as a versioned protocol change: the evidence chain does not depend on window size, while the acceptance visibility band and thresholds do. A qualification profile records its `geometry_class`, derived from the observed viewport and DPR, and a `qualification_only` profile is rejected wherever reference geometry is required. Current outcome: [qualification status](qualification-status.md).
+
 If the installed stack cannot expose this chain, L3-01 delivers a documented `UNSUPPORTED` collector result. L3-02 and L3-04 may still progress. L3-03 cannot fabricate primary metrics. Use the optical path below or escalate measurement feasibility; #7 stays open. This is an explicit runtime qualification outcome, not an undecided metric definition.
 
 ### Optical acquisition alternative

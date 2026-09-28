@@ -8,6 +8,7 @@ import {
   generateQualificationReport,
   getOpticalAcquisitionRequirements,
   UNKNOWN,
+  GUROW_INPUT_COALESCING,
   isSoftwareAdapter,
   type ClockMapping,
   type CollectorProfile,
@@ -82,7 +83,11 @@ function createSampleProfile(overrides: Partial<CollectorProfile> = {}): Collect
       enabled: false,
       app_delay_ms: 0,
       label_delay_ms: 0,
+      app_delays_applied: 4,
+      label_delays_applied: 2,
     },
+    input_coalescing: GUROW_INPUT_COALESCING,
+    geometry_class: 'reference',
     ...overrides,
   }
 
@@ -94,6 +99,7 @@ function createCorrelation(overrides: Partial<CorrelationEvent> = {}): Correlati
   return {
     input_id: 'in-1',
     scenario: 'pan',
+    coalesced_input_ids: [],
     input_origin_ms: 1000,
     app_revision: 1,
     canvas_revision: 1,
@@ -161,7 +167,10 @@ describe('Collector Profile Validation (AC1, AC4, AC6)', () => {
 
   it('rejects acceptance mode when fault injection is enabled (AC4)', () => {
     const faultProfile = createSampleProfile({
-      fault_injection: { enabled: true, app_delay_ms: 80, label_delay_ms: 0 },
+      fault_injection: {
+        enabled: true, app_delay_ms: 80, label_delay_ms: 0,
+        app_delays_applied: 6, label_delays_applied: 0,
+      },
     })
 
     expect(validateCollectorProfile(faultProfile, { requireAcceptanceMode: false }).valid).toBe(true)
@@ -171,6 +180,81 @@ describe('Collector Profile Validation (AC1, AC4, AC6)', () => {
     expect(acceptanceResult.errors).toContain(
       'Acceptance mode rejects profiles with fault injection enabled (AC4 violation).'
     )
+  })
+
+  it('rejects a profile still carrying injected delays in acceptance mode (AC4)', () => {
+    // A profile can claim `enabled: false` while the page was read back with a
+    // delay still set; the recorded delays themselves must fail acceptance.
+    const stillInjecting = createSampleProfile({
+      fault_injection: {
+        enabled: false, app_delay_ms: 80, label_delay_ms: 0,
+        app_delays_applied: 6, label_delays_applied: 0,
+      },
+    })
+
+    expect(validateCollectorProfile(stillInjecting).valid).toBe(true)
+    const acceptance = validateCollectorProfile(stillInjecting, { requireAcceptanceMode: true })
+    expect(acceptance.valid).toBe(false)
+    expect(acceptance.errors).toContain(
+      'Acceptance mode rejects a profile still carrying injected delays (AC4 violation).'
+    )
+  })
+
+  it('qualifies a collector on a non-reference window but refuses acceptance on it', () => {
+    // The tiling desktop lays the window out; the evidence chain does not depend
+    // on its size, but an acceptance series does (contract §3).
+    const tiled = createSampleProfile({ geometry_class: 'qualification_only' })
+    tiled.host.viewport_css = [621, 694]
+    tiled.host.canvas_geometry = {
+      css_bounds: { x: 0, y: 48, width: 621, height: 646 },
+      backing_size: { width: 932, height: 969 },
+    }
+    tiled.host.native_window!.width = 621
+    tiled.host.native_window!.height = 750
+    const { hash: _hash, ...base } = tiled
+    tiled.hash = computeProfileHash(base)
+
+    // Collector mode: every other publication gate still applies.
+    expect(validateCollectorProfile(tiled, {
+      requireAcceptanceMode: true, requireReferenceGeometry: false,
+    })).toEqual({ valid: true, errors: [] })
+
+    const acceptance = validateCollectorProfile(tiled, {
+      requireAcceptanceMode: true, requireReferenceGeometry: true,
+    })
+    expect(acceptance.valid).toBe(false)
+    expect(acceptance.errors).toContain(
+      'Acceptance requires the reference window geometry; this profile is qualification-only (contract §3).'
+    )
+  })
+
+  it('holds a profile claiming reference geometry to it in every mode', () => {
+    // The weaker mode must not become a way to publish a reference-looking
+    // profile that never stood on the reference window.
+    const claimed = createSampleProfile({ geometry_class: 'reference' })
+    claimed.host.viewport_css = [621, 694]
+    const { hash: _hash, ...base } = claimed
+    claimed.hash = computeProfileHash(base)
+
+    for (const options of [{}, { requireAcceptanceMode: true }] as const) {
+      const result = validateCollectorProfile(claimed, options)
+      expect(result.valid).toBe(false)
+      expect(result.errors).toContain('Actual headed viewport must be 1200×720 CSS pixels (contract §3).')
+    }
+  })
+
+  it('requires the collector to declare its own coalescing rule (contract §6)', () => {
+    const invented = createSampleProfile({
+      input_coalescing: {
+        rule_id: 'reducer-invented-v0',
+        attributed_origin: 'newest_input',
+        description: 'Grouping decided after seeing the numbers.',
+      },
+    })
+
+    const result = validateCollectorProfile(invented)
+    expect(result.valid).toBe(false)
+    expect(result.errors.some((e) => e.includes(GUROW_INPUT_COALESCING.rule_id))).toBe(true)
   })
 
   it('rejects a software renderer even when the fallback flag is unset (AC1)', () => {
@@ -730,6 +814,18 @@ describe('Separation of Diagnostics and Presentation (AC2, AC3)', () => {
     )
     expect(result.chains[0].latency_ms).toBeNull()
     expect(result.reasons.some((r) => r.includes('negative interval'))).toBe(true)
+  })
+
+  it('carries the coalesced group through to the chain (contract §6)', () => {
+    const result = parseTraceEvidence(
+      hardwarePresentationTrace('in-1', 1),
+      [createCorrelation({ coalesced_input_ids: ['in-0', 'in-0b'] })],
+      profile
+    )
+    expect(result.verdict).toBe('QUALIFIED')
+    // Each superseded member inherits this latency; the group is never one sample.
+    expect(result.chains[0].coalesced_input_ids).toEqual(['in-0', 'in-0b'])
+    expect(result.chains[0].latency_ms).toBe(16)
   })
 
   it('returns NOT_MEASURED when there is nothing to correlate', () => {

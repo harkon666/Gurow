@@ -47,8 +47,9 @@ try {
           if (unsupported) Object.defineProperty(navigator, 'gpu', { value: undefined })
           window.__gurowBenchmarkHooks = {
             enabled: true, app_delay_ms: 0, label_delay_ms: 0, app_revision: 0,
-            canvas_revision: 0, label_revision: 0, pending_input: null, dispatches: [],
-            label_commits: [], clock_syncs: [], active_scenario: null, raf_intervals_ms: [],
+            canvas_revision: 0, label_revision: 0, pending_inputs: [], dispatches: [],
+            label_commits: [], clock_syncs: [], active_scenario: null,
+            app_delays_applied: 0, label_delays_applied: 0,
           }
           window.__labelFrames = []
           new MutationObserver(records => {

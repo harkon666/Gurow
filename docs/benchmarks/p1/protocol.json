@@ -5,6 +5,8 @@
   "source_commit_at_design": "0a3b9be96a8ef89ce74a22d011ce7e9ba49e996d",
   "design_status": "complete_approved",
   "collector_status": "not_qualified",
+  "collector_verdict": "UNSUPPORTED",
+  "collector_status_record": "docs/benchmarks/p1/qualification-status.md",
   "benchmark_status": "not_run",
   "thresholds_ms": {
     "frame_p95": 20,

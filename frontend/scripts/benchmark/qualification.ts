@@ -1,10 +1,12 @@
 import {
   computeProfileHash,
+  isQualifiedChain,
   validateCollectorProfile,
   type CollectorProfile,
   type DelayCheckResult,
   type TraceParseResult,
 } from './collector'
+import { SCENARIOS } from '../../src/components/editor/benchmarkHooks'
 
 export interface QualificationInput {
   profile: CollectorProfile
@@ -12,6 +14,15 @@ export interface QualificationInput {
   appDelayCheck: DelayCheckResult
   labelDelayCheck: DelayCheckResult
   invalidRunReasons: string[]
+  /**
+   * What this profile is being sealed for. Defaults to the stricter
+   * `acceptance`, so a caller cannot weaken the gate by omission.
+   *
+   * `collector` still requires a hardware adapter, observed host facts,
+   * disabled fault injection and a usable clock mapping — it only drops the
+   * reference window geometry, which belongs to an acceptance series.
+   */
+  mode?: 'collector' | 'acceptance'
 }
 
 /** Final publication boundary used by the driver before writing any verdict.
@@ -19,23 +30,20 @@ export interface QualificationInput {
  */
 export function finalizeQualification(input: QualificationInput) {
   const { parsed, appDelayCheck, labelDelayCheck } = input
-  const profileValidation = validateCollectorProfile(input.profile, { requireAcceptanceMode: true })
+  const profileValidation = validateCollectorProfile(input.profile, {
+    requireAcceptanceMode: true,
+    requireReferenceGeometry: (input.mode ?? 'acceptance') === 'acceptance',
+  })
   const failures = [...profileValidation.errors, ...input.invalidRunReasons]
   if (!parsed.valid || parsed.verdict === 'NOT_MEASURED' || parsed.errors.length > 0) {
     failures.push('Parser evidence is invalid or not measured.', ...parsed.errors)
   }
-  for (const scenario of ['pan', 'zoom', 'drag']) {
+  for (const scenario of SCENARIOS) {
     if (!parsed.chains.some((chain) => chain.scenario === scenario)) {
       failures.push(`No correlated browser input for ${scenario}; controlled replay is incomplete.`)
     }
   }
-  const coherent = parsed.chains.length > 0 && parsed.chains.every((chain) =>
-    chain.presentation_provenance === 'platform_presentation_feedback' &&
-    chain.frame_link === 'revision_matched' &&
-    typeof chain.presented_frame_id === 'string' && chain.presented_frame_id.trim().length > 0 &&
-    chain.presentation_timestamp_ms !== null && Number.isFinite(chain.presentation_timestamp_ms) &&
-    chain.latency_ms !== null && Number.isFinite(chain.latency_ms) && chain.latency_ms >= 0
-  )
+  const coherent = parsed.chains.length > 0 && parsed.chains.every(isQualifiedChain)
   for (const [name, check] of [['Application', appDelayCheck], ['Label', labelDelayCheck]] as const) {
     if (check.status === 'FAIL' || (coherent && (check.status !== 'PASS' || !check.pass))) {
       failures.push(`${name} delay gate ${check.status}: ${check.details}`)

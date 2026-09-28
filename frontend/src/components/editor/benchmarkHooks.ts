@@ -10,21 +10,36 @@
  * measurement at handler entry or after `dispatch_command`.
  */
 
+/** The three timed interactions the contract measures. */
+export type Scenario = 'pan' | 'zoom' | 'drag'
+
+/** Every scenario, in the order contract §5 runs them. */
+export const SCENARIOS = ['pan', 'zoom', 'drag'] as const satisfies readonly Scenario[]
+
 /** A browser input observed before any engine command was issued. */
 export interface PendingInput {
   input_id: string
   /** `event.timeStamp`, i.e. the `performance.now()` domain, before dispatch. */
   origin_ms: number
-  scenario: 'pan' | 'zoom' | 'drag'
+  scenario: Scenario
 }
 
 /** One engine dispatch correlated to the input that caused it. */
 export interface DispatchRecord {
   input_id: string
   command_type: string
-  scenario: 'pan' | 'zoom' | 'drag' | null
-  /** Null when this dispatch was not caused by an observed browser input. */
+  scenario: Scenario | null
+  /**
+   * Origin of the oldest input this dispatch incorporated, per the fixed
+   * coalescing rule; null when no observed browser input caused it.
+   */
   input_origin_ms: number | null
+  /**
+   * Inputs superseded into this dispatch, oldest first, excluding the
+   * attributed one. Retained so a coalesced input keeps its own origin instead
+   * of disappearing behind the input that replaced it (contract §6).
+   */
+  coalesced_inputs: PendingInput[]
   app_revision: number
   canvas_revision: number
   /** Label revision current when this dispatch ran, before any new commit. */
@@ -67,13 +82,22 @@ export interface BenchmarkHooks {
   app_revision: number
   canvas_revision: number
   label_revision: number
-  pending_input: PendingInput | null
+  /**
+   * Inputs observed but not yet incorporated into a dispatch, oldest first.
+   *
+   * A queue rather than a single slot: when several inputs coalesce into one
+   * dispatch, every superseded input must keep its own recorded origin.
+   */
+  pending_inputs: PendingInput[]
   dispatches: DispatchRecord[]
   label_commits: LabelCommitRecord[]
   clock_syncs: ClockSyncRecord[]
   /** Set by the driver to tag dispatches while a named scenario is active. */
-  active_scenario: 'pan' | 'zoom' | 'drag' | null
-  raf_intervals_ms: number[]
+  active_scenario: Scenario | null
+  /** Times the injected application delay actually executed. */
+  app_delays_applied: number
+  /** Times the injected label delay actually executed. */
+  label_delays_applied: number
 }
 
 /**
@@ -101,38 +125,45 @@ function mark(name: string): void {
  * `event.timeStamp` is read before any engine work so the recorded origin
  * precedes dispatch. The pending input is consumed by the next
  * {@link recordDispatch}; an input that never reaches a dispatch stays
- * unconsumed and is therefore visible as a dropped input in the raw log.
+ * queued and is therefore visible as a dropped input in the raw log.
  */
 export function beginInput(
   event: { timeStamp: number },
-  scenario: 'pan' | 'zoom' | 'drag'
+  scenario: Scenario
 ): string | undefined {
   const hooks = getBenchmarkHooks()
   if (!hooks) return undefined
 
-  const inputId = `input-${scenario}-${hooks.dispatches.length}-${Math.round(event.timeStamp * 1000)}`
-  hooks.pending_input = {
+  const inputId =
+    `input-${scenario}-${hooks.dispatches.length}-${hooks.pending_inputs.length}-` +
+    `${Math.round(event.timeStamp * 1000)}`
+  hooks.pending_inputs.push({
     input_id: inputId,
     origin_ms: event.timeStamp,
     scenario,
-  }
+  })
   mark(`gurow:input_observed:${inputId}`)
   return inputId
 }
 
 /**
- * Busy-waits the configured fault-injection delay before the engine runs.
+ * Busy-waits the configured fault-injection delay inside the dispatch.
  *
  * A busy loop is used deliberately: it must occupy the same task as the
  * dispatch so the injected delay lands inside the measured interval.
+ *
+ * Only a dispatch caused by an observed browser input is delayed. AC4 shifts the
+ * endpoint of the interaction under test; delaying viewport resizes, document
+ * loads or persistence would slow the whole application instead.
  */
 export function applyAppDelay(): void {
   const hooks = getBenchmarkHooks()
-  if (!hooks || !(hooks.app_delay_ms > 0)) return
+  if (!hooks || !(hooks.app_delay_ms > 0) || hooks.pending_inputs.length === 0) return
   const start = performance.now()
   while (performance.now() - start < hooks.app_delay_ms) {
     // Intentional busy wait; see doc comment.
   }
+  hooks.app_delays_applied += 1
 }
 
 /** Busy-waits the label fault-injection delay in the pre-paint layout phase. */
@@ -143,10 +174,16 @@ export function applyLabelDelay(): void {
   while (performance.now() - start < hooks.label_delay_ms) {
     // Intentional busy wait; see doc comment.
   }
+  hooks.label_delays_applied += 1
 }
 
 /**
- * Records one engine dispatch, consuming the pending input that caused it.
+ * Records one engine dispatch, consuming every input it incorporated.
+ *
+ * Coalescing rule `gurow-coalescing-v1`, fixed here in the collector rather
+ * than left to a report reducer (contract §6): the dispatch is attributed to the
+ * oldest unconsumed input, and every superseded input is retained so it can
+ * carry that same conservative oldest-to-presentation latency.
  *
  * The canvas revision equals the app revision because
  * `render_and_serialize_events` applies the document change and invokes the
@@ -160,15 +197,17 @@ export function recordDispatch(commandType: string, cpuWorkMs: number): number |
   hooks.app_revision += 1
   hooks.canvas_revision = hooks.app_revision
 
-  const pending = hooks.pending_input
-  hooks.pending_input = null
+  const pending = hooks.pending_inputs
+  hooks.pending_inputs = []
+  const attributed = pending[0]
 
-  const inputId = pending?.input_id ?? `dispatch-${hooks.app_revision}`
+  const inputId = attributed?.input_id ?? `dispatch-${hooks.app_revision}`
   hooks.dispatches.push({
     input_id: inputId,
     command_type: commandType,
-    scenario: pending?.scenario ?? hooks.active_scenario ?? null,
-    input_origin_ms: pending?.origin_ms ?? null,
+    scenario: attributed?.scenario ?? hooks.active_scenario ?? null,
+    input_origin_ms: attributed?.origin_ms ?? null,
+    coalesced_inputs: pending.slice(1),
     app_revision: hooks.app_revision,
     canvas_revision: hooks.canvas_revision,
     label_revision_at_dispatch: hooks.label_revision,

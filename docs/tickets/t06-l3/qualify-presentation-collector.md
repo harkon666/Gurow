@@ -1,6 +1,6 @@
 # T06-L3-01 — Qualify input-to-presentation evidence on the reference browser
 
-Status: approved execution packet, published as [#34](https://github.com/harkon666/Gurow/issues/34); implementation pending. Parent: [#7](https://github.com/harkon666/Gurow/issues/7). Contract: [gurow-p1-v1](../../benchmarks/p1/contract.md).
+Status: delivered as an explicit **`UNSUPPORTED`** collector result on the reference host, published as [#34](https://github.com/harkon666/Gurow/issues/34). The collector is **not qualified** and L3-03 stays blocked on optical acquisition — see [the qualification status record](../../benchmarks/p1/qualification-status.md) for the captured evidence, the AC4 falsification results and the geometry decision. Parent: [#7](https://github.com/harkon666/Gurow/issues/7). Contract: [gurow-p1-v1](../../benchmarks/p1/contract.md).
 
 Executor recommendation: **Strong model / measurement specialist**. Blocked by: **Task A contract pinned; no execution-task blocker**. Parent coverage: AC2, AC3, AC5. User stories: US80, US84.
 
