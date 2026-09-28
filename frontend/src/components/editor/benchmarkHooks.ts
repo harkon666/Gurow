@@ -33,6 +33,8 @@ export interface DispatchRecord {
   label_revision: number | null
   /** App revision that commit had observed, used to prove it saw this state. */
   label_commit_app_revision: number | null
+  /** Completion of the corresponding DOM geometry commit, not presentation. */
+  label_commit_ms: number | null
   cpu_work_ms: number
 }
 
@@ -46,6 +48,7 @@ export interface DispatchRecord {
 export interface LabelCommitRecord {
   label_revision: number
   app_revision: number
+  /** Pre-paint DOM commit completion, AFTER any injected label delay. */
   commit_ms: number
   /** Wall time spent inside the commit, including any injected label delay. */
   commit_duration_ms: number
@@ -132,7 +135,7 @@ export function applyAppDelay(): void {
   }
 }
 
-/** Busy-waits the configured label fault-injection delay during label paint. */
+/** Busy-waits the label fault-injection delay in the pre-paint layout phase. */
 export function applyLabelDelay(): void {
   const hooks = getBenchmarkHooks()
   if (!hooks || !(hooks.label_delay_ms > 0)) return
@@ -148,9 +151,9 @@ export function applyLabelDelay(): void {
  * The canvas revision equals the app revision because
  * `render_and_serialize_events` applies the document change and invokes the
  * renderer in the same synchronous call. Label revisions advance separately and
- * are attached later by {@link recordLabelPaint}.
+ * are attached later by {@link recordLabelCommit}.
  */
-export function recordDispatch(commandType: string, cpuWorkMs: number): void {
+export function recordDispatch(commandType: string, cpuWorkMs: number): number | undefined {
   const hooks = getBenchmarkHooks()
   if (!hooks) return
 
@@ -171,17 +174,26 @@ export function recordDispatch(commandType: string, cpuWorkMs: number): void {
     label_revision_at_dispatch: hooks.label_revision,
     label_revision: null,
     label_commit_app_revision: null,
+    label_commit_ms: null,
     cpu_work_ms: cpuWorkMs,
   })
   mark(`gurow:app_dispatch:${inputId}:${hooks.app_revision}`)
+  return hooks.app_revision
 }
 
-/** Advances the label revision when the engine emits new label geometry. */
-export function recordLabelUpdate(): void {
+/** Metadata travels atomically with the label geometry through React batching. */
+export interface LabelRevision {
+  label_revision: number
+  app_revision: number
+}
+
+/** Advances and captures the revision of this specific engine label output. */
+export function recordLabelUpdate(appRevision: number | undefined): LabelRevision | undefined {
   const hooks = getBenchmarkHooks()
-  if (!hooks) return
+  if (!hooks || appRevision === undefined) return
   hooks.label_revision += 1
   mark(`gurow:labels_updated:${hooks.label_revision}`)
+  return { label_revision: hooks.label_revision, app_revision: appRevision }
 }
 
 /**
@@ -190,24 +202,25 @@ export function recordLabelUpdate(): void {
  *
  * This is a commit, not a paint; see {@link LabelCommitRecord}.
  */
-export function recordLabelCommit(): void {
+export function recordLabelCommit(revision: LabelRevision | undefined): void {
   const hooks = getBenchmarkHooks()
-  if (!hooks) return
+  if (!hooks || !revision) return
 
   const commitStart = performance.now()
   applyLabelDelay()
+  const commitEnd = performance.now()
 
   const commit: LabelCommitRecord = {
-    label_revision: hooks.label_revision,
-    app_revision: hooks.app_revision,
-    commit_ms: commitStart,
-    commit_duration_ms: performance.now() - commitStart,
+    ...revision,
+    commit_ms: commitEnd,
+    commit_duration_ms: commitEnd - commitStart,
   }
   hooks.label_commits.push(commit)
   for (const dispatch of hooks.dispatches) {
     if (dispatch.label_revision === null && dispatch.app_revision <= commit.app_revision) {
       dispatch.label_revision = commit.label_revision
       dispatch.label_commit_app_revision = commit.app_revision
+      dispatch.label_commit_ms = commit.commit_ms
     }
   }
   mark(`gurow:labels_committed:${commit.label_revision}`)

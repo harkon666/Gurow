@@ -20,6 +20,14 @@ Use this workflow for ticket implementation, review fixes, and review handoff. T
    - **Recovery controls:** activate the actual UI button; assert its visible result and context isolation. Direct storage mutation is appropriate for fault injection, not proof that a reset button works.
 3. Keep assertions capable of failing when the behavior is broken. Preserve existing meaningful tests; explain changed expectations against the spec. Document untested cases instead of marking them passed.
 
+## Opt-in native qualification
+
+Routine `python3 scripts/harness.py check` does not launch the headed T06 native qualification. T06 keeps collector and editor-lifecycle regression checks in the routine full run; native qualification is deliberately excluded from both the full profile and the ticket's automatically appended checks.
+
+When the reference display/window layout is ready, run `cd frontend && bun run qualify:native`. This builds the current source and runs the existing qualification driver with all native geometry, hardware, presentation and delay gates unchanged. Evidence goes to `.harness/t06/qualification/`; previous evidence is not refreshed by routine checks.
+
+A routine full pass is code/regression evidence only. It does not satisfy T06 native qualification or P1 performance acceptance, unblock L3-03, or replace missing presentation/delay evidence. Report deferred native qualification separately in review handoffs and task notes.
+
 ## Finish and hand off
 
 1. Finish the AC mapping, then run `python3 scripts/harness.py check`. A nonzero exit, missing ticket checks, a timeout, or modified inputs leaves verification incomplete. Fix and rerun the relevant check; run full verification again after the final fix.

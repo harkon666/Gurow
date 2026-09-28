@@ -9,6 +9,23 @@ import tempfile
 import unittest
 
 
+class NativeQualificationConfigTests(unittest.TestCase):
+    def test_native_qualification_is_opt_in_not_automatically_appended(self):
+        root = Path(__file__).resolve().parents[1]
+        config = json.loads((root / 'harness.json').read_text())
+        native = 't06-l3-01-qualify'
+        for profile in ('quick', 'full'):
+            self.assertNotIn(native, config['profiles'][profile])
+        for checks in config['tickets'].values():
+            self.assertNotIn(native, checks)
+        for check in ('collector-tests', 'editor-lifecycle'):
+            self.assertIn(check, config['profiles']['full'])
+            self.assertIn(check, config['tickets']['T06-L3-01'])
+        package = json.loads((root / 'frontend/package.json').read_text())
+        self.assertEqual(package['scripts']['qualify:native'].split(),
+                         config['checks'][native]['argv'])
+
+
 class HarnessTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='gurow-harness-test-')

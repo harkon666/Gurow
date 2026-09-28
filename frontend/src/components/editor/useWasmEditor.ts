@@ -19,6 +19,7 @@ import {
   beginInput,
   recordDispatch,
   recordLabelUpdate,
+  type LabelRevision,
 } from './benchmarkHooks'
 
 // Install WebGPU device hook to observe real hardware/software device loss (ADR-0017 / Spec 2)
@@ -97,7 +98,10 @@ export function useWasmEditor({
   const recoveryInFlightRef = useRef(false)
   const recoverRef = useRef<(() => Promise<boolean>) | null>(null)
   const [isRecovering, setIsRecovering] = useState(false)
-  const [labels, setLabels] = useState<LabelLayout[]>([])
+  const [{ labels, benchmarkRevision }, setLabelState] = useState<{
+    labels: LabelLayout[]
+    benchmarkRevision?: LabelRevision
+  }>({ labels: [] })
   const [connections, setConnections] = useState<PrerequisiteConnection[]>([])
   const [connectionRejection, setConnectionRejection] = useState<string | null>(null)
   const [zoom, setZoom] = useState<number>(1.0)
@@ -160,7 +164,7 @@ export function useWasmEditor({
   const initialCameraRef = useRef(initialCamera)
   initialCameraRef.current = initialCamera
 
-  const handleEvents = useCallback((events: EditorEvent[]) => {
+  const handleEvents = useCallback((events: EditorEvent[], appRevision: number | undefined) => {
     for (const event of events) {
       switch (event.type) {
         case 'SelectionChanged':
@@ -177,8 +181,7 @@ export function useWasmEditor({
           onOperationCompletedRef.current?.()
           break
         case 'LabelsUpdated':
-          recordLabelUpdate()
-          setLabels(event.labels)
+          setLabelState({ labels: event.labels, benchmarkRevision: recordLabelUpdate(appRevision) })
           break
         case 'ConnectionsUpdated':
           setConnections(event.connections)
@@ -233,8 +236,8 @@ export function useWasmEditor({
       const validatedCmd = EditorCommandSchema.parse(cmd)
       const eventsJson = editor.dispatch_command(JSON.stringify(validatedCmd))
       const parsedEvents = EditorEventsSchema.parse(JSON.parse(eventsJson))
-      recordDispatch(cmd.type, performance.now() - t0)
-      handleEvents(parsedEvents)
+      const appRevision = recordDispatch(cmd.type, performance.now() - t0)
+      handleEvents(parsedEvents, appRevision)
       return parsedEvents
     },
     [handleEvents]
@@ -257,6 +260,45 @@ export function useWasmEditor({
     [dispatchInternal]
   )
 
+  // Mark only an actual successful application, and include engine identity:
+  // a remounted engine has not loaded anything, even with identical props.
+  const loadedDocumentRef = useRef<{
+    editor: WasmEditor
+    cards: typeof initialCards
+    connections: typeof initialConnections
+  } | null>(null)
+  const loadedCameraRef = useRef<{ editor: WasmEditor; camera: typeof initialCamera } | null>(null)
+
+  const applyInitialDocument = useCallback((editor: WasmEditor) => {
+    const cards = initialCardsRef.current
+    const connections = initialConnectionsRef.current
+    const previous = loadedDocumentRef.current
+    const changed = previous?.editor !== editor || previous.cards !== cards || previous.connections !== connections
+    if (changed) {
+      const events = dispatchInternal(editor, {
+        type: 'LoadDocument', document: { cards: cards ?? [], connections: connections ?? [] },
+      })
+      if (events.some(event => event.type === 'Error')) return
+      loadedDocumentRef.current = { editor, cards, connections }
+    }
+    const camera = initialCameraRef.current
+    if (camera && (changed || loadedCameraRef.current?.editor !== editor || loadedCameraRef.current.camera !== camera)) {
+      const events = dispatchInternal(editor, { type: 'SetCamera', ...camera })
+      if (!events.some(event => event.type === 'Error')) loadedCameraRef.current = { editor, camera }
+    }
+  }, [dispatchInternal])
+
+  const initializeEditor = useCallback((editor: WasmEditor) => {
+    editorRef.current = editor
+    // Establish the viewport before restoring camera, in GPU and CPU paths.
+    dispatchInternal(editor, {
+      type: 'ResizeViewport',
+      width: containerRef.current?.clientWidth || 800,
+      height: containerRef.current?.clientHeight || 600,
+    })
+    applyInitialDocument(editor)
+  }, [containerRef, dispatchInternal, applyInitialDocument])
+
   // Initialize WebGPU & Wasm
   useEffect(() => {
     let active = true
@@ -275,15 +317,7 @@ export function useWasmEditor({
           headlessEditor.free()
           return
         }
-        editorRef.current = headlessEditor
-
-        dispatchInternal(headlessEditor, {
-          type: 'LoadDocument',
-          document: {
-            cards: initialCardsRef.current ?? [],
-            connections: initialConnectionsRef.current ?? [],
-          },
-        })
+        initializeEditor(headlessEditor)
 
         setGpuStatus('unsupported')
         setErrorMessage(
@@ -310,33 +344,7 @@ export function useWasmEditor({
           return
         }
 
-        editorRef.current = editor
-
-        // Seed engine with initial or restored document; pure Rust EditorState owns positions (ADR-0015)
-        dispatchInternal(editor, {
-          type: 'LoadDocument',
-          document: {
-            cards: initialCardsRef.current ?? [],
-            connections: initialConnectionsRef.current ?? [],
-          },
-        })
-
-        // Configure engine viewport with logical CSS dimensions
-        dispatchInternal(editor, {
-          type: 'ResizeViewport',
-          width: cssWidth,
-          height: cssHeight,
-        })
-
-        // Restore camera state if provided
-        if (initialCameraRef.current) {
-          dispatchInternal(editor, {
-            type: 'SetCamera',
-            offset_x: initialCameraRef.current.offset_x,
-            offset_y: initialCameraRef.current.offset_y,
-            zoom: initialCameraRef.current.zoom,
-          })
-        }
+        initializeEditor(editor)
 
         setGpuStatus('ready')
         if (typeof window !== 'undefined') {
@@ -349,14 +357,7 @@ export function useWasmEditor({
           // Fallback to headless CPU editor state on WebGPU initialization failure
           try {
             const fallbackEditor = wasmModule.WasmEditor.create_headless()
-            editorRef.current = fallbackEditor
-            dispatchInternal(fallbackEditor, {
-              type: 'LoadDocument',
-              document: {
-                cards: initialCardsRef.current ?? [],
-                connections: initialConnectionsRef.current ?? [],
-              },
-            })
+            initializeEditor(fallbackEditor)
           } catch {
             // ignore fallback errors
           }
@@ -384,45 +385,20 @@ export function useWasmEditor({
     // wasm-bindgen reports as "FnOnce called more than once" and leaves the
     // editor dead with an empty canvas. The document is applied by the effect
     // below instead.
-  }, [canvasRef, containerRef, dispatchInternal])
+  }, [canvasRef, containerRef, initializeEditor])
 
-  // The initial document is usually fetched after this component mounts. Load
-  // it into the existing engine rather than recreating the engine, so the
-  // renderer and history survive and initialisation is never re-entered.
-  // Seeded with the mount-time values because the init effect already loads
-  // those, so this only fires for data that arrives later.
-  const loadedDocumentRef = useRef<{
-    cards: typeof initialCards
-    connections: typeof initialConnections
-  }>({ cards: initialCards, connections: initialConnections })
-
+  // Late data uses the same application path without recreating the renderer.
+  // LoadDocument clears Rust history; skipping already-applied identities is
+  // what preserves edits/undo, not LoadDocument itself.
   useEffect(() => {
     const editor = editorRef.current
     if (!editor) return
-
-    const previous = loadedDocumentRef.current
-    if (previous.cards === initialCards && previous.connections === initialConnections) {
-      return
+    try {
+      applyInitialDocument(editor)
+    } catch (err: unknown) {
+      setEngineError(err instanceof Error ? err.message : String(err))
     }
-    loadedDocumentRef.current = { cards: initialCards, connections: initialConnections }
-
-    dispatch({
-      type: 'LoadDocument',
-      document: {
-        cards: initialCards ?? [],
-        connections: initialConnections ?? [],
-      },
-    })
-
-    if (initialCameraRef.current) {
-      dispatch({
-        type: 'SetCamera',
-        offset_x: initialCameraRef.current.offset_x,
-        offset_y: initialCameraRef.current.offset_y,
-        zoom: initialCameraRef.current.zoom,
-      })
-    }
-  }, [initialCards, initialConnections, gpuStatus, dispatch])
+  }, [initialCards, initialConnections, initialCamera, gpuStatus, applyInitialDocument])
 
   // ResizeObserver: keeps canvas buffer and engine logical viewport synchronized
   useEffect(() => {
@@ -780,6 +756,7 @@ export function useWasmEditor({
 
   return {
     labels,
+    benchmarkRevision,
     connections,
     connectionRejection,
     clearConnectionRejection: () => setConnectionRejection(null),

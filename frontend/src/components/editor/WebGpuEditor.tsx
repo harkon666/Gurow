@@ -76,6 +76,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
 
   const {
     labels,
+    benchmarkRevision,
     connections,
     connectionRejection,
     zoom,
@@ -278,7 +279,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
         />
 
         {/* HTML Labels Overlay: positioned from engine output */}
-        <SkillCardOverlay labels={labels} />
+        <SkillCardOverlay labels={labels} benchmarkRevision={benchmarkRevision} />
       </div>
     </div>
   )

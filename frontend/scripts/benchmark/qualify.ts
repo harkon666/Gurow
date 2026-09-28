@@ -7,7 +7,6 @@ import { createHash } from 'crypto'
 import {
   computeProfileHash,
   deriveClockMapping,
-  validateCollectorProfile,
   parseTraceEvidence,
   verifyControlledDelayShift,
   generateQualificationReport,
@@ -23,6 +22,9 @@ import {
   type HostEnvironmentInfo,
   type SourceIdentity,
 } from './collector'
+import { finalizeQualification } from './qualification'
+import { computeSourceFingerprint } from './sourceFingerprint'
+import { validateReferenceEnvironment } from './collector'
 
 /**
  * T06-L3-01 qualification driver.
@@ -181,6 +183,7 @@ function getSourceIdentity(): SourceIdentity {
     commit,
     tree_dirty: status !== null && status.length > 0,
     build_hash: buildHash,
+    source_fingerprint: computeSourceFingerprint(REPO_ROOT),
   }
 }
 
@@ -207,9 +210,15 @@ function getHostInfo(chromiumPath: string): HostEnvironmentInfo {
     // keep the os module fallback
   }
 
-  const chromiumVersion = tryExec(`${chromiumPath} --version`) ?? UNKNOWN
   const display = probeDisplay()
-  const compositor = process.env.WAYLAND_DISPLAY || process.env.XDG_SESSION_TYPE || UNKNOWN
+  let compositor: string = UNKNOWN
+  const hyprland = tryExec('hyprctl version -j')
+  if (hyprland) {
+    try {
+      const version = JSON.parse(hyprland) as { version?: string; commit?: string }
+      if (version.version) compositor = `Hyprland ${version.version} (${version.commit ?? UNKNOWN})`
+    } catch { /* Unknown is rejected rather than guessed from WAYLAND_DISPLAY. */ }
+  }
 
   return {
     cpu: cpuModel,
@@ -227,8 +236,10 @@ function getHostInfo(chromiumPath: string): HostEnvironmentInfo {
     viewport_css: null,
     canvas_geometry: null,
     browser_executable: chromiumPath,
-    browser_version: chromiumVersion,
-    browser_backend: process.env.WAYLAND_DISPLAY ? 'Wayland / Ozone' : 'X11 / Ozone',
+    browser_version: UNKNOWN,
+    browser_backend: UNKNOWN,
+    browser_command_line: [],
+    native_window: null,
   }
 }
 
@@ -360,9 +371,11 @@ async function main() {
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--enable-unsafe-webgpu',
-        '--enable-features=Vulkan',
+        '--enable-features=Vulkan,WaylandPerSurfaceScale',
         '--use-gl=angle',
-        '--window-size=1200,820',
+        '--window-size=1200,776',
+        `--ozone-platform=${process.env.WAYLAND_DISPLAY ? 'wayland' : 'x11'}`,
+        `--app=${serverUrl}`,
       ],
       // PRIME offload pins Chromium to the discrete GPU. Without it this host
       // either selects SwiftShader (software, with the WebGPU fallback flag
@@ -374,11 +387,21 @@ async function main() {
         __GLX_VENDOR_LIBRARY_NAME: 'nvidia',
         __VK_LAYER_NV_optimus: 'NVIDIA_only',
       },
-      defaultViewport: { width: 1200, height: 720, deviceScaleFactor: 1.5 },
+      defaultViewport: null,
     })
 
-    const page = await browser.newPage()
-    await page.setViewport({ width: 1200, height: 720, deviceScaleFactor: 1.5 })
+    // Reuse the app window. newPage() would create a normal browser window.
+    const page = (await browser.pages())[0]
+    if (!page) throw new Error('No native app window was created.')
+    await page.bringToFront()
+    const windowCdp = await page.createCDPSession()
+    const actualVersion = await windowCdp.send('Browser.getVersion')
+    const actualCommand = await windowCdp.send('Browser.getBrowserCommandLine')
+    hostInfo.browser_version = actualVersion.product
+    hostInfo.browser_command_line = actualCommand.arguments
+    hostInfo.browser_executable = actualCommand.arguments[0] ?? UNKNOWN
+    const ozone = [...actualCommand.arguments].reverse().find((arg) => arg.startsWith('--ozone-platform='))
+    hostInfo.browser_backend = ozone ? `${ozone.split('=')[1]} / Ozone (actual browser command line)` : UNKNOWN
 
     // Contract §3: record interruptions and memory pressure. A lost WebGPU
     // device or exhausted device memory invalidates the attempt, and must be
@@ -472,12 +495,49 @@ async function main() {
       )
     }
 
-    // AC1: read live geometry rather than assuming the reference values.
+    // Resize only our own native app window; never emulate device metrics.
+    const nativeWindow = await windowCdp.send('Browser.getWindowForTarget')
+    const geometrySetupErrors: string[] = []
+    try {
+      await windowCdp.send('Browser.setWindowBounds', { windowId: nativeWindow.windowId, bounds: { windowState: 'normal' } })
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const actual = await page.evaluate(() => ({ width: innerWidth, height: innerHeight, outerWidth, outerHeight }))
+        if (actual.width === 1200 && actual.height === 720) break
+        await windowCdp.send('Browser.setWindowBounds', {
+          windowId: nativeWindow.windowId,
+          bounds: { width: actual.outerWidth + 1200 - actual.width, height: actual.outerHeight + 720 - actual.height },
+        })
+        await new Promise((resolve) => setTimeout(resolve, 500))
+      }
+    } catch (error) { geometrySetupErrors.push(`Native window sizing failed: ${String(error)}`) }
+    await page.evaluate(() => document.querySelector('#canvas-editor-container')?.scrollIntoView({ block: 'center' }))
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    const settledWindow = await windowCdp.send('Browser.getWindowForTarget')
+
+    // AC1: read settled live geometry, visibility and backing sizes.
     const liveGeometry = await page.evaluate(() => {
       const canvas = document.querySelector('canvas#editor-canvas') as HTMLCanvasElement | null
       const rect = canvas?.getBoundingClientRect()
+      const visible = (selector: string) => Array.from(document.querySelectorAll(selector)).some((element) => {
+        const bounds = element.getBoundingClientRect()
+        const style = getComputedStyle(element)
+        return style.visibility === 'visible' && style.display !== 'none' && Number(style.opacity) > 0 &&
+          bounds.width > 0 && bounds.height > 0 && bounds.right > 0 && bounds.bottom > 0 &&
+          bounds.left < innerWidth && bounds.top < innerHeight
+      })
+      const unobscured = !!canvas && !!rect && [0.01, 0.5, 0.99].every((fx) =>
+        [0.01, 0.5, 0.99].every((fy) => {
+          const hit = document.elementFromPoint(rect.x + rect.width * fx, rect.y + rect.height * fy)
+          return hit === canvas || !!hit?.closest('[id^="card-label-"]')
+        }))
       return {
         dpr: window.devicePixelRatio,
+        available: { x: (screen as Screen & { availLeft: number }).availLeft, y: (screen as Screen & { availTop: number }).availTop, width: screen.availWidth, height: screen.availHeight },
+        visualScale: window.visualViewport?.scale ?? 0,
+        documentVisible: document.visibilityState === 'visible', focused: document.hasFocus(),
+        unobscured, labelsVisible: visible('[id^="card-label-"]'),
+        listVisible: visible('[aria-label="Skill and Prerequisite List"]'),
+        taskPanelVisible: visible('#skill-detail-panel'),
         innerWidth: window.innerWidth,
         innerHeight: window.innerHeight,
         screenWidth: window.screen.width,
@@ -500,6 +560,63 @@ async function main() {
     hostInfo.device_pixel_ratio = liveGeometry.dpr
     hostInfo.viewport_css = [liveGeometry.innerWidth, liveGeometry.innerHeight]
     hostInfo.canvas_geometry = liveGeometry.canvas as CanvasGeometry | null
+    hostInfo.native_window = {
+      headed: !headless, device_metrics_emulated: false,
+      x: settledWindow.bounds.left ?? NaN, y: settledWindow.bounds.top ?? NaN,
+      width: settledWindow.bounds.width ?? NaN, height: settledWindow.bounds.height ?? NaN,
+      screen_width: liveGeometry.screenWidth, screen_height: liveGeometry.screenHeight,
+      available_x: liveGeometry.available.x, available_y: liveGeometry.available.y,
+      available_width: liveGeometry.available.width, available_height: liveGeometry.available.height,
+      visual_viewport_scale: liveGeometry.visualScale, document_visible: liveGeometry.documentVisible,
+      focused: liveGeometry.focused, canvas_unobscured: liveGeometry.unobscured,
+      labels_visible: liveGeometry.labelsVisible, skill_list_visible: liveGeometry.listVisible,
+      task_panel_visible: liveGeometry.taskPanelVisible,
+    }
+    // On Hyprland, verify compositor-observed position/size and reserved panel
+    // area: Wayland's screenX/availHeight may omit that native desktop detail.
+    try {
+      const clients = JSON.parse(tryExec('hyprctl clients -j') ?? '[]') as Array<{ pid: number; at: number[]; size: number[] }>
+      const client = clients.find((entry) => entry.pid === browser?.process()?.pid)
+      const monitors = JSON.parse(tryExec('hyprctl monitors -j') ?? '[]') as Array<{
+        name: string; x: number; y: number; width: number; height: number; scale: number; reserved: number[]
+      }>
+      const monitor = monitors.find((entry) => entry.name === hostInfo.display_output)
+      if (client) Object.assign(hostInfo.native_window!, { x: client.at[0], y: client.at[1], width: client.size[0], height: client.size[1] })
+      if (monitor) Object.assign(hostInfo.native_window!, {
+        available_x: monitor.x + monitor.reserved[0], available_y: monitor.y + monitor.reserved[1],
+        available_width: monitor.width / monitor.scale - monitor.reserved[0] - monitor.reserved[2],
+        available_height: monitor.height / monitor.scale - monitor.reserved[1] - monitor.reserved[3],
+      })
+    } catch (error) { geometrySetupErrors.push(`Native desktop geometry observation failed: ${String(error)}`) }
+    const environmentErrors = [...geometrySetupErrors, ...validateReferenceEnvironment(hostInfo)]
+    fs.writeFileSync(path.resolve(outDir, 'environment-preflight.json'), JSON.stringify({
+      status: environmentErrors.length ? 'NOT_MEASURED' : 'PASS', identity, host: hostInfo,
+      browser_window: settledWindow, reasons: environmentErrors,
+    }, null, 2))
+    if (environmentErrors.length) {
+      const base: Omit<CollectorProfile, 'hash'> = {
+        version: 'gurow-collector-v3', contract_id: 'gurow-p1-v1', status: 'NOT_MEASURED',
+        unsupported_reason: environmentErrors.join(' '), identity, host: hostInfo,
+        trace_configuration: { categories: [], parser_version: '3.0.0', clock_origin: 'chromium_trace_monotonic',
+          clock_units: 'us', timestamp_scale_to_ms: 0.001, clock_mapping: deriveClockMapping([], [], 'us') },
+        fault_injection: { enabled: false, app_delay_ms: 0, label_delay_ms: 0 },
+        optical_requirements: getOpticalAcquisitionRequirements(),
+      }
+      const failedProfile = { ...base, hash: computeProfileHash(base) }
+      fs.writeFileSync(path.resolve(outDir, 'collector-profile.json'), JSON.stringify(failedProfile, null, 2))
+      fs.writeFileSync(path.resolve(outDir, 'qualification-report.json'), JSON.stringify({
+        verdict: 'NOT_MEASURED', stage: 'environment-preflight-before-capture', reasons: environmentErrors,
+        identity, host: hostInfo, profile_hash: failedProfile.hash,
+        app_delay_check: verifyControlledDelayShift(null, null, 80),
+        label_delay_check: verifyControlledDelayShift(null, null, 80),
+      }, null, 2))
+      fs.writeFileSync(path.resolve(outDir, 'qualification-report.md'), generateQualificationReport(failedProfile, environmentErrors, {
+        scenariosTested: [], chains: [], gpuAdapter: hostInfo.gpu_adapter, browserVersion: hostInfo.browser_version,
+        appDelayCheck: verifyControlledDelayShift(null, null, 80), labelDelayCheck: verifyControlledDelayShift(null, null, 80),
+        diagnosticShifts: { appDispatchShiftMs: null, labelCommitShiftMs: null },
+      }))
+      throw new Error(`Reference environment preflight failed before capture: ${environmentErrors.join(' ')}`)
+    }
     console.log(
       `Live geometry: ${liveGeometry.innerWidth}×${liveGeometry.innerHeight} CSS @ DPR ${liveGeometry.dpr}`
     )
@@ -742,6 +859,7 @@ async function main() {
       label_revision_at_dispatch: number
       label_revision: number | null
       label_commit_app_revision: number | null
+      label_commit_ms: number | null
       cpu_work_ms: number
     }
     const dispatches = runtime.dispatches as RuntimeDispatch[]
@@ -789,13 +907,14 @@ async function main() {
       label_revision_at_dispatch: d.label_revision_at_dispatch,
       label_revision: d.label_revision,
       label_commit_app_revision: d.label_commit_app_revision,
+      label_commit_ms: d.label_commit_ms ?? null,
       cpu_work_duration_ms: d.cpu_work_ms,
       gpu_submit_duration_ms: null,
       raf_cadence_ms: rafCadenceMs,
     }))
 
     const baseProfile: Omit<CollectorProfile, 'hash'> = {
-      version: 'gurow-collector-v1',
+      version: 'gurow-collector-v3',
       contract_id: 'gurow-p1-v1',
       // Placeholder only; replaced below by the parsed verdict before hashing.
       status: 'NOT_MEASURED',
@@ -803,7 +922,7 @@ async function main() {
       host: hostInfo,
       trace_configuration: {
         categories: traceCategories,
-        parser_version: '2.0.0',
+        parser_version: '3.0.0',
         clock_origin: 'chromium_trace_monotonic',
         clock_units: 'us',
         timestamp_scale_to_ms: 0.001,
@@ -823,27 +942,6 @@ async function main() {
     if (parseResult.errors.length > 0) console.log('Parser errors:', parseResult.errors)
     if (parseResult.reasons.length > 0) {
       console.log('Parser findings:', [...new Set(parseResult.reasons)])
-    }
-
-    const unsupportedReason =
-      parseResult.verdict === 'QUALIFIED'
-        ? undefined
-        : [...new Set([...parseResult.errors, ...parseResult.reasons])].join(' ') ||
-          'Presentation evidence could not be qualified.'
-
-    const sealedBase: Omit<CollectorProfile, 'hash'> = {
-      ...baseProfile,
-      status: parseResult.verdict,
-      ...(unsupportedReason ? { unsupported_reason: unsupportedReason } : {}),
-    }
-    const profile: CollectorProfile = { ...sealedBase, hash: computeProfileHash(sealedBase) }
-
-    // AC4: acceptance mode must reject a profile with fault injection enabled,
-    // so the sealed profile is validated in that mode and must pass.
-    const profileValidation = validateCollectorProfile(profile, { requireAcceptanceMode: true })
-    if (!profileValidation.valid) {
-      console.warn('\nAcceptance-mode profile validation findings:')
-      for (const err of profileValidation.errors) console.warn(`  - ${err}`)
     }
 
     // AC4: compare the attributed endpoint across phases.
@@ -899,6 +997,7 @@ async function main() {
       label_revision_at_dispatch: 0,
       label_revision: 1,
       label_commit_app_revision: 1,
+      label_commit_ms: 1002,
       cpu_work_duration_ms: 2,
       gpu_submit_duration_ms: null,
       raf_cadence_ms: null,
@@ -907,7 +1006,21 @@ async function main() {
       { cat: 'viz', name: 'DrawFrame', ts: 1_000_000, ph: 'X', pid: 1, tid: 1 },
     ]
 
-    const negativeCases: { name: string; trace: TraceEvent[]; correlation: CorrelationEvent[] }[] = [
+    // Explicit synthetic qualification-schema examples, never browser evidence.
+    const coherentTrace: TraceEvent[] = [
+      { name: 'gurow:app_dispatch:neg-1:1', ts: 1_000_000, ph: 'R', pid: 1, tid: 1 },
+      { name: 'PresentationFeedback', ts: 1_016_000, ph: 'I', pid: 1, tid: 2, id: 'frame-1',
+        args: { flags: 0x06, canvas_revision: 1, label_revision: 1,
+          label_commit_app_revision: 1, presentation_timestamp: 1_016_000 } },
+    ]
+    const negativeProfile: CollectorProfile = {
+      ...provisional,
+      trace_configuration: { ...provisional.trace_configuration,
+        clock_mapping: { ...clockMapping, trace_to_page_offset_ms: 0, offset_spread_ms: 0, sample_count: 5 } },
+    }
+    const negativeCases: {
+      name: string; trace: TraceEvent[]; correlation: CorrelationEvent[]; unsupported?: boolean
+    }[] = [
       { name: 'empty-trace', trace: [], correlation: [negativeBase] },
       {
         name: 'negative-timestamp',
@@ -951,20 +1064,33 @@ async function main() {
       { name: 'no-clock-mapping', trace: okTrace, correlation: [negativeBase] },
     ]
 
+    for (const name of ['canvas-only', 'missing-frame', 'late-label', 'unrelated-paint',
+      'fabricated-feedback', 'submission-only', 'new-labels-old-canvas']) {
+      const trace = structuredClone(coherentTrace)
+      const correlation = { ...negativeBase }
+      if (name === 'canvas-only') delete trace[1].args!.label_revision
+      if (name === 'missing-frame') delete trace[1].id
+      if (name === 'late-label') correlation.label_commit_ms = 1017
+      if (name === 'unrelated-paint') trace[1].args!.canvas_revision = 99
+      if (name === 'fabricated-feedback') trace[1].args!.fabricated = true
+      if (name === 'submission-only') trace[1].name = 'DisplayScheduler::DrawAndSwap'
+      if (name === 'new-labels-old-canvas') correlation.label_commit_app_revision = 2
+      negativeCases.push({ name, trace, correlation: [correlation], unsupported: true })
+    }
     const acceptedNegativeCases: string[] = []
     for (const negative of negativeCases) {
-      let caseProfile = profile
+      let caseProfile = negativeProfile
       if (negative.name === 'wrong-clock-units') {
         caseProfile = {
-          ...profile,
-          trace_configuration: { ...profile.trace_configuration, timestamp_scale_to_ms: 1 },
+          ...negativeProfile,
+          trace_configuration: { ...negativeProfile.trace_configuration, timestamp_scale_to_ms: 1 },
         }
       } else if (negative.name === 'no-clock-mapping') {
         caseProfile = {
-          ...profile,
+          ...negativeProfile,
           trace_configuration: {
-            ...profile.trace_configuration,
-            clock_mapping: { ...profile.trace_configuration.clock_mapping, trace_to_page_offset_ms: null },
+            ...negativeProfile.trace_configuration,
+            clock_mapping: { ...negativeProfile.trace_configuration.clock_mapping, trace_to_page_offset_ms: null },
           },
         }
       }
@@ -980,16 +1106,52 @@ async function main() {
               verdict: result.verdict,
               errors: result.errors,
               reasons: [...new Set(result.reasons)],
+              chains: result.chains,
             },
           },
           null,
           2
         )
       )
-      if (result.valid) {
+      const leakedEndpoint = result.chains.some((chain) =>
+        chain.latency_ms !== null || chain.presentation_timestamp_ms !== null || chain.presented_frame_id !== null)
+      if (negative.unsupported
+        ? result.verdict !== 'UNSUPPORTED' || leakedEndpoint
+        : result.valid) {
         acceptedNegativeCases.push(negative.name)
       }
     }
+
+    for (const name of ['invalid-final-gate', 'invalid-profile-gate', 'app-delay-gate', 'label-delay-gate']) {
+      const input = {
+        profile: name === 'invalid-profile-gate' ? { ...provisional, hash: 'tampered' } : provisional,
+        parsed: parseResult,
+        appDelayCheck: name === 'app-delay-gate' ? verifyControlledDelayShift(16, 16, 80) : appDelayCheck,
+        labelDelayCheck: name === 'label-delay-gate' ? verifyControlledDelayShift(16, 16, 80) : labelDelayCheck,
+        invalidRunReasons: name === 'invalid-final-gate'
+          ? ['Synthetic invalid-run finalization regression example.'] : [],
+      }
+      const result = finalizeQualification(input)
+      fs.writeFileSync(path.resolve(failedExamplesDir, `${name}.json`), JSON.stringify({
+        note: 'Fault-injected finalization example, not a separate browser attempt.', input, result,
+      }, null, 2))
+      if (result.profile.status !== 'NOT_MEASURED' || result.failures.length === 0) {
+        acceptedNegativeCases.push(name)
+      }
+    }
+
+    // Every validity/causality gate runs BEFORE publication or hashing.
+    const invalidRunReasons = [
+      ...deviceLossEvents.map((event) => `WebGPU device loss: ${event}`),
+      ...pageErrors.map((error) => `Browser page error: ${error}`),
+      ...acceptedNegativeCases.map((name) => `Negative case wrongly accepted: ${name}`),
+      ...scenariosWithoutInput.map((scenario) => `No browser input observed for ${scenario}.`),
+      ...(headless ? ['Headless execution is diagnostic only, not reference qualification.'] : []),
+    ]
+    const finalization = finalizeQualification({
+      profile: provisional, parsed: parseResult, appDelayCheck, labelDelayCheck, invalidRunReasons,
+    })
+    const { profile, profileValidation } = finalization
 
     // Retain the real run's rejections alongside the constructed cases.
     if (parseResult.errors.length > 0 || parseResult.reasons.length > 0) {
@@ -1046,7 +1208,7 @@ async function main() {
       JSON.stringify(profile, null, 2)
     )
 
-    const report = generateQualificationReport(profile, [...parseResult.errors, ...parseResult.reasons], {
+    const report = generateQualificationReport(profile, finalization.reasons, {
       scenariosTested: ['pan', 'zoom', 'drag'],
       chains: parseResult.chains,
       gpuAdapter: hostInfo.gpu_adapter,
@@ -1067,7 +1229,8 @@ async function main() {
           identity: profile.identity,
           verdict: profile.status,
           parser_errors: parseResult.errors,
-          reasons: [...new Set(parseResult.reasons)],
+          reasons: finalization.reasons,
+          qualification_failures: finalization.failures,
           input_dispatch_count: inputDispatches.length,
           non_input_dispatch_count: nonInputDispatches.length,
           non_input_dispatches: nonInputDispatches,
@@ -1103,25 +1266,7 @@ async function main() {
     // Assertions run only after every artefact is on disk, so a failed run
     // still leaves complete evidence behind (contract: preserve all attempts
     // and the reasons for invalidation).
-    const failures: string[] = []
-    if (deviceLossEvents.length > 0) {
-      failures.push(
-        `Environment contention: the WebGPU device was lost ${deviceLossEvents.length} time(s) during the attempt ` +
-          `(first: ${deviceLossEvents[0]}). The run is invalid; free GPU device memory and retry. ` +
-          'Do not interpret any verdict or missing input from this attempt.'
-      )
-    }
-    if (acceptedNegativeCases.length > 0) {
-      failures.push(
-        `AC5 violation: negative cases accepted by the parser: ${acceptedNegativeCases.join(', ')}.`
-      )
-    }
-    if (scenariosWithoutInput.length > 0) {
-      failures.push(
-        `AC2 load-generation failure: no browser input was observed for ${scenariosWithoutInput.join(', ')}. ` +
-          'The driver did not deliver the controlled interaction, so no verdict can be interpreted.'
-      )
-    }
+    const failures = [...finalization.failures]
     if (expectVerdict && profile.status !== expectVerdict) {
       failures.push(
         `Verdict regression: expected ${expectVerdict} but the evidence produced ${profile.status}. ` +

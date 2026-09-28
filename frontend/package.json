@@ -16,8 +16,8 @@
     "smoke-check:t03": "bun run scripts/t03-smoke-check.ts",
     "smoke-check:t04": "bun run scripts/t04-smoke-check.ts",
     "smoke-check:t05": "bun run scripts/t05-smoke-check.ts",
-    "preview": "vite preview",
-    "dev:webgpu": "bash scripts/dev-webgpu.sh"
+    "qualify:native": "bun run scripts/benchmark/qualify.ts --contract ../docs/benchmarks/p1/protocol.json --out ../.harness/t06/qualification --expect-verdict UNSUPPORTED",
+    "preview": "vite preview"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.18",

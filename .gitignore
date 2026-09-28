@@ -16,5 +16,5 @@ dist-ssr/
 .harness/
 __pycache__/
 
-# Dedicated Chromium profile used by frontend/scripts/dev-webgpu.sh
+# Legacy local Chromium profile (keep browser data out of Git)
 frontend/.webgpu-profile/

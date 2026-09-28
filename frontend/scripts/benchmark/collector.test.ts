@@ -16,6 +16,8 @@ import {
   type TraceEvent,
 } from './collector'
 
+import { finalizeQualification } from './qualification'
+
 const RESOLVED_CLOCK_MAPPING: ClockMapping = {
   trace_clock: 'chromium_trace_monotonic',
   page_clock: 'performance_now_ms',
@@ -27,7 +29,7 @@ const RESOLVED_CLOCK_MAPPING: ClockMapping = {
 
 function createSampleProfile(overrides: Partial<CollectorProfile> = {}): CollectorProfile {
   const base: Omit<CollectorProfile, 'hash'> = {
-    version: 'gurow-collector-v1',
+    version: 'gurow-collector-v3',
     contract_id: 'gurow-p1-v1',
     status: 'UNSUPPORTED',
     unsupported_reason: 'Wayland presentation feedback uncalibrated',
@@ -35,6 +37,7 @@ function createSampleProfile(overrides: Partial<CollectorProfile> = {}): Collect
       commit: '32121f95feba7cfac3a5dd3e8c4ed066c618a227',
       tree_dirty: false,
       build_hash: 'a'.repeat(64),
+      source_fingerprint: 'b'.repeat(64),
     },
     host: {
       cpu: '13th Gen Intel Core i5-13500HX',
@@ -45,7 +48,16 @@ function createSampleProfile(overrides: Partial<CollectorProfile> = {}): Collect
       gpu_adapter: 'nvidia / lovelace',
       gpu_driver: '610.57.04',
       is_fallback: false,
-      compositor: 'wayland-1',
+      compositor: 'Hyprland 0.56.2',
+      browser_command_line: ['/usr/bin/chromium', '--ozone-platform=wayland'],
+      native_window: {
+        headed: true, device_metrics_emulated: false,
+        x: 0, y: 26, width: 1220, height: 750,
+        screen_width: 1280, screen_height: 800,
+        available_x: 0, available_y: 26, available_width: 1280, available_height: 774,
+        visual_viewport_scale: 1, document_visible: true, focused: true,
+        canvas_unobscured: true, labels_visible: true, skill_list_visible: true, task_panel_visible: true,
+      },
       display_output: 'eDP-2',
       display_refresh_hz: 165,
       device_pixel_ratio: 1.5,
@@ -60,7 +72,7 @@ function createSampleProfile(overrides: Partial<CollectorProfile> = {}): Collect
     },
     trace_configuration: {
       categories: ['cc', 'viz', 'input', 'benchmark', 'gpu', 'blink.user_timing'],
-      parser_version: '2.0.0',
+      parser_version: '3.0.0',
       clock_origin: 'chromium_trace_monotonic',
       clock_units: 'us',
       timestamp_scale_to_ms: 0.001,
@@ -88,6 +100,7 @@ function createCorrelation(overrides: Partial<CorrelationEvent> = {}): Correlati
     label_revision_at_dispatch: 0,
     label_revision: 1,
     label_commit_app_revision: 1,
+    label_commit_ms: 1002,
     cpu_work_duration_ms: 2,
     gpu_submit_duration_ms: null,
     raf_cadence_ms: 6.06,
@@ -95,7 +108,10 @@ function createCorrelation(overrides: Partial<CorrelationEvent> = {}): Correlati
   }
 }
 
-/** A dispatch mark plus a presentation event carrying hardware feedback. */
+/** Synthetic qualification-schema evidence, NOT fields emitted by Chromium.
+ * Contract §6 requires both rendered revisions in the same identified frame and
+ * an actual hardware presentation timestamp, not DrawAndSwap submission.
+ */
 function hardwarePresentationTrace(inputId: string, canvasRevision: number): TraceEvent[] {
   return [
     {
@@ -108,13 +124,17 @@ function hardwarePresentationTrace(inputId: string, canvasRevision: number): Tra
     },
     {
       cat: 'viz',
-      name: 'DisplayScheduler::DrawAndSwap',
+      name: 'PresentationFeedback',
       ts: 1_016_000,
       ph: 'X',
       pid: 1,
       tid: 2,
       id: 'swap-7',
-      args: { flags: 0x06, is_fallback: false, canvas_revision: canvasRevision },
+      args: {
+        flags: 0x06, is_fallback: false, canvas_revision: canvasRevision,
+        label_revision: 1, label_commit_app_revision: canvasRevision,
+        presentation_timestamp: 1_016_000,
+      },
     },
   ]
 }
@@ -240,6 +260,56 @@ describe('Collector Profile Validation (AC1, AC4, AC6)', () => {
     expect(result.valid).toBe(false)
     expect(result.errors.some((e) => e.includes('Profile hash mismatch'))).toBe(true)
   })
+})
+
+describe('Reference environment acceptance gates', () => {
+  it('allows one physical pixel of flooring plus DOMRect floating-point noise, not two', () => {
+    const profile = createSampleProfile()
+    // Actual native DPR-1.5 observation: ResizeObserver layout floors to 814×885,
+    // while getBoundingClientRect snaps to 815.000061×886.000031 physical pixels.
+    profile.host.canvas_geometry = {
+      css_bounds: { x: 304.66668701171875, y: 104.33333587646484, width: 543.3333740234375, height: 590.6666870117188 },
+      backing_size: { width: 814, height: 885 },
+    }
+    const { hash: _hash, ...hashInput } = profile
+    profile.hash = computeProfileHash(hashInput)
+    expect(validateCollectorProfile(profile, { requireAcceptanceMode: true })).toEqual({ valid: true, errors: [] })
+    profile.host.canvas_geometry.backing_size.width = 813
+    profile.hash = computeProfileHash(hashInput)
+    expect(validateCollectorProfile(profile, { requireAcceptanceMode: true }).errors).toContain(
+      'Canvas backing size does not match observed CSS size × native DPR (contract §3).'
+    )
+  })
+  for (const defect of ['clipped-canvas', 'wrong-dpr', 'wrong-viewport', 'backing-size',
+    'obscured', 'emulated', 'offscreen-window', 'missing-native', 'browser-version',
+    'browser-backend', 'compositor', 'socket-as-compositor', 'dirty-fingerprint'] as const) {
+    it(`rejects ${defect} before final qualification`, () => {
+      const profile = createSampleProfile()
+      if (defect === 'clipped-canvas') { profile.host.canvas_geometry!.css_bounds.y = 210.3333; profile.host.canvas_geometry!.css_bounds.height = 590.6667 }
+      if (defect === 'wrong-dpr') profile.host.device_pixel_ratio = 1
+      if (defect === 'wrong-viewport') profile.host.viewport_css![0] = 1199
+      if (defect === 'backing-size') profile.host.canvas_geometry!.backing_size.width = 1
+      if (defect === 'obscured') profile.host.native_window!.canvas_unobscured = false
+      if (defect === 'emulated') profile.host.native_window!.device_metrics_emulated = true
+      if (defect === 'offscreen-window') profile.host.native_window!.height = 900
+      if (defect === 'missing-native') profile.host.native_window = null
+      if (defect === 'browser-version') profile.host.browser_version = UNKNOWN
+      if (defect === 'browser-backend') profile.host.browser_backend = UNKNOWN
+      if (defect === 'compositor') profile.host.compositor = UNKNOWN
+      if (defect === 'socket-as-compositor') profile.host.compositor = 'wayland-1'
+      if (defect === 'dirty-fingerprint') { profile.identity.tree_dirty = true; profile.identity.source_fingerprint = UNKNOWN }
+      const { hash: _hash, ...base } = profile
+      profile.hash = computeProfileHash(base)
+      expect(validateCollectorProfile(profile, { requireAcceptanceMode: true }).valid).toBe(false)
+      const parsed = parseTraceEvidence(hardwarePresentationTrace('in-1', 1), [createCorrelation()], profile)
+      parsed.chains = (['pan', 'zoom', 'drag'] as const).map((scenario) => ({ ...parsed.chains[0], scenario }))
+      const result = finalizeQualification({ profile, parsed,
+        appDelayCheck: verifyControlledDelayShift(16, 96, 80),
+        labelDelayCheck: verifyControlledDelayShift(16, 96, 80), invalidRunReasons: [] })
+      expect(result.profile.status).toBe('NOT_MEASURED')
+      expect(result.failures.length).toBeGreaterThan(0)
+    })
+  }
 })
 
 describe('Clock mapping derivation (AC1)', () => {
@@ -378,8 +448,9 @@ describe('Parser Checks and Failure Rejections (AC5)', () => {
     expect(result.errors.some((e) => e.includes('moved backwards'))).toBe(true)
   })
 
-  it('accepts one label commit closing several document mutations', () => {
-    // Counters advance independently: three mutations, then a single commit.
+  it('accepts independent label counters only for the exact presented canvas state', () => {
+    // Contract §6: label counter 1 may depict app/canvas 3. This proves only
+    // revision 3, not superseded canvases 1/2; their grouping needs separate proof.
     const result = parseTraceEvidence(
       hardwarePresentationTrace('in-1', 3),
       [
@@ -487,6 +558,9 @@ describe('Separation of Diagnostics and Presentation (AC2, AC3)', () => {
     expect(result.verdict).toBe('UNSUPPORTED')
     expect(result.chains[0].frame_link).toBe('temporal_next_paint')
     expect(result.chains[0].presentation_provenance).toBe('unrelated_next_paint')
+    expect(result.chains[0].presentation_timestamp_ms).toBeNull()
+    expect(result.chains[0].presented_frame_id).toBeNull()
+    expect(result.chains[0].latency_ms).toBeNull()
   })
 
   it('marks fabricated or fallback feedback as unqualified', () => {
@@ -513,6 +587,9 @@ describe('Separation of Diagnostics and Presentation (AC2, AC3)', () => {
     const result = parseTraceEvidence(trace, [createCorrelation()], profile)
     expect(result.verdict).toBe('UNSUPPORTED')
     expect(result.chains[0].presentation_provenance).toBe('fabricated')
+    expect(result.chains[0].presentation_timestamp_ms).toBeNull()
+    expect(result.chains[0].presented_frame_id).toBeNull()
+    expect(result.chains[0].latency_ms).toBeNull()
   })
 
   it('qualifies only a revision-matched chain with hardware feedback', () => {
@@ -528,6 +605,105 @@ describe('Separation of Diagnostics and Presentation (AC2, AC3)', () => {
     expect(result.chains[0].presentation_provenance).toBe('platform_presentation_feedback')
     expect(result.chains[0].presented_frame_id).toBe('swap-7')
     // 1_016_000 us -> 1016 ms page clock (offset 0), input origin 1000 ms.
+    expect(result.chains[0].latency_ms).toBe(16)
+  })
+
+  for (const defect of ['canvas-only', 'missing-frame', 'blank-frame', 'late-label',
+    'missing-label-time', 'new-labels-old-canvas', 'submission-only', 'missing-dispatch',
+    'dispatch-after-commit', 'dispatch-after-presentation', 'missing-presentation-time',
+    'hw-clock-only', 'hw-completion-only'] as const) {
+    it(`withholds public endpoints for ${defect}`, () => {
+      const trace = hardwarePresentationTrace('in-1', 1)
+      const correlation = createCorrelation()
+      const feedback = trace[1]
+      if (defect === 'canvas-only') delete feedback.args!.label_revision
+      if (defect === 'missing-frame') delete feedback.id
+      if (defect === 'blank-frame') feedback.id = ' '
+      if (defect === 'late-label') correlation.label_commit_ms = 1017
+      if (defect === 'missing-label-time') correlation.label_commit_ms = null
+      if (defect === 'new-labels-old-canvas') correlation.label_commit_app_revision = 2
+      if (defect === 'submission-only') feedback.name = 'DisplayScheduler::DrawAndSwap'
+      if (defect === 'missing-dispatch') trace.shift()
+      if (defect === 'dispatch-after-commit') trace[0].ts = 1_003_000
+      if (defect === 'dispatch-after-presentation') trace[0].ts = 1_020_000
+      if (defect === 'missing-presentation-time') delete feedback.args!.presentation_timestamp
+      if (defect === 'hw-clock-only') feedback.args!.flags = 0x02
+      if (defect === 'hw-completion-only') feedback.args!.flags = 0x04
+      const result = parseTraceEvidence(trace, [correlation], profile)
+      expect(result.verdict).not.toBe('QUALIFIED')
+      for (const chain of result.chains) {
+        expect(chain.presentation_timestamp_ms).toBeNull()
+        expect(chain.presented_frame_id).toBeNull()
+        expect(chain.latency_ms).toBeNull()
+      }
+      expect([...result.errors, ...result.reasons].length).toBeGreaterThan(0)
+    })
+  }
+
+  for (const provenance of ['fabricated', 'unrelated'] as const) {
+    it(`cannot pass an 80 ms delay using ${provenance} endpoints`, () => {
+      const baseline = hardwarePresentationTrace('in-1', 1)
+      if (provenance === 'fabricated') baseline[1].args!.fabricated = true
+      else baseline[1].args!.canvas_revision = 99
+      const delayed = structuredClone(baseline)
+      delayed[1].ts += 80_000
+      delayed[1].args!.presentation_timestamp = 1_096_000
+      const before = parseTraceEvidence(baseline, [createCorrelation()], profile)
+      const after = parseTraceEvidence(delayed, [createCorrelation()], profile)
+      const check = verifyControlledDelayShift(before.chains[0].latency_ms, after.chains[0].latency_ms, 80)
+      expect(check.status).toBe('NOT_MEASURED')
+      expect(check.pass).toBe(false)
+      expect(check.shiftMs).toBeNull()
+    })
+  }
+
+  for (const kind of ['submission', 'fabricated'] as const) {
+    it(`selects genuine feedback after an earlier matching ${kind}`, () => {
+      const trace = hardwarePresentationTrace('in-1', 1)
+      const invalid = structuredClone(trace[1])
+      invalid.ts = 1_008_000
+      invalid.id = 'invalid-frame'
+      invalid.args!.presentation_timestamp = 1_008_000
+      if (kind === 'submission') invalid.name = 'DisplayScheduler::DrawAndSwap'
+      else invalid.args!.fabricated = true
+      trace.splice(1, 0, invalid)
+      const result = parseTraceEvidence(trace, [createCorrelation()], profile)
+      expect(result.verdict).toBe('QUALIFIED')
+      expect(result.chains[0].presented_frame_id).toBe('swap-7')
+      expect(result.chains[0].presentation_timestamp_ms).toBe(1016)
+    })
+  }
+
+  it('selects the first actual coherent presentation even when its feedback arrives later', () => {
+    const trace = hardwarePresentationTrace('in-1', 1)
+    const earlierPresentation = structuredClone(trace[1])
+    earlierPresentation.ts = 1_040_000
+    earlierPresentation.id = 'first-presented-frame'
+    earlierPresentation.args!.presentation_timestamp = 1_008_000
+    trace.push(earlierPresentation)
+    const result = parseTraceEvidence(trace, [createCorrelation()], profile)
+    expect(result.verdict).toBe('QUALIFIED')
+    expect(result.chains[0].presented_frame_id).toBe('first-presented-frame')
+    expect(result.chains[0].presentation_timestamp_ms).toBe(1008)
+    expect(result.chains[0].latency_ms).toBe(8)
+  })
+
+  it('rejects an infinite feedback receipt rather than qualifying its finite endpoint', () => {
+    const trace = hardwarePresentationTrace('in-1', 1)
+    trace[1].ts = Infinity
+    const result = parseTraceEvidence(trace, [createCorrelation()], profile)
+    expect(result.valid).toBe(false)
+    expect(result.verdict).toBe('NOT_MEASURED')
+    expect(result.chains).toEqual([])
+    expect(result.errors.some((error) => error.includes('Invalid timestamp'))).toBe(true)
+  })
+
+  it('uses hardware presentation time, not later feedback receipt', () => {
+    const trace = hardwarePresentationTrace('in-1', 1)
+    trace[1].ts = 1_040_000
+    const result = parseTraceEvidence(trace, [createCorrelation()], profile)
+    expect(result.verdict).toBe('QUALIFIED')
+    expect(result.chains[0].presentation_timestamp_ms).toBe(1016)
     expect(result.chains[0].latency_ms).toBe(16)
   })
 
@@ -618,6 +794,7 @@ describe('Qualification Report Generation (AC1, AC4, AC6)', () => {
     // The source identity the contract requires must be present.
     expect(report).toContain(profile.identity.commit)
     expect(report).toContain(profile.identity.build_hash)
+    expect(report).toContain(profile.identity.source_fingerprint)
   })
 
   it('reports the actual delay-check status instead of asserting verification', () => {
@@ -674,6 +851,74 @@ describe('Qualification Report Generation (AC1, AC4, AC6)', () => {
     expect(report).toContain('# Qualification Report: QUALIFIED Collector Profile')
     expect(report).not.toContain('L3-03 is **BLOCKED**')
     expect(report).toContain('L3-03 may consume this collector')
+  })
+})
+
+describe('Final qualification decision used by the driver', () => {
+  function inputs() {
+    const profile = createSampleProfile()
+    const parsed = parseTraceEvidence(hardwarePresentationTrace('in-1', 1), [createCorrelation()], profile)
+    // Explicit synthetic coherent chains for each interaction, not browser proof.
+    parsed.chains = (['pan', 'zoom', 'drag'] as const).map((scenario) => ({
+      ...parsed.chains[0], input_id: scenario, scenario,
+    }))
+    return {
+      profile, parsed,
+      appDelayCheck: verifyControlledDelayShift(16, 96, 80),
+      labelDelayCheck: verifyControlledDelayShift(16, 96, 80),
+      invalidRunReasons: [] as string[],
+    }
+  }
+
+  it('seals QUALIFIED only after every evidence gate passes', () => {
+    const result = finalizeQualification(inputs())
+    expect(result.profile.status).toBe('QUALIFIED')
+    expect(result.failures).toEqual([])
+    expect(validateCollectorProfile(result.profile, { requireAcceptanceMode: true }).valid).toBe(true)
+  })
+
+  for (const defect of ['profile', 'app-delay', 'label-delay', 'unmeasured-delay',
+    'invalid-run', 'missing-scenario', 'parser-invalid'] as const) {
+    it(`never seals QUALIFIED for ${defect}`, () => {
+      const input = inputs()
+      if (defect === 'profile') input.profile.host.gpu_driver = UNKNOWN
+      if (defect === 'app-delay') input.appDelayCheck = verifyControlledDelayShift(16, 16, 80)
+      if (defect === 'label-delay') input.labelDelayCheck = verifyControlledDelayShift(16, 16, 80)
+      if (defect === 'unmeasured-delay') input.labelDelayCheck = verifyControlledDelayShift(16, null, 80)
+      if (defect === 'invalid-run') input.invalidRunReasons.push('Device loss during run')
+      if (defect === 'missing-scenario') input.parsed.chains.pop()
+      if (defect === 'parser-invalid') input.parsed.valid = false
+      const result = finalizeQualification(input)
+      expect(result.profile.status).toBe('NOT_MEASURED')
+      expect(result.failures.length).toBeGreaterThan(0)
+      expect(result.reasons.length).toBeGreaterThan(0)
+      const { hash, ...sealed } = result.profile
+      expect(hash).toBe(computeProfileHash(sealed))
+      const report = generateQualificationReport(result.profile, result.reasons, {
+        scenariosTested: ['pan', 'zoom', 'drag'], chains: input.parsed.chains,
+        gpuAdapter: input.profile.host.gpu_adapter, browserVersion: input.profile.host.browser_version,
+        appDelayCheck: result.appDelayCheck, labelDelayCheck: result.labelDelayCheck,
+        diagnosticShifts: { appDispatchShiftMs: null, labelCommitShiftMs: null },
+      })
+      expect(report).toContain('L3-03 is **BLOCKED**')
+      for (const reason of result.reasons) expect(report).toContain(reason)
+    })
+  }
+
+  it('preserves honest unsupported evidence with both delay checks NOT_MEASURED', () => {
+    const input = inputs()
+    input.parsed.verdict = 'UNSUPPORTED'
+    input.parsed.chains = input.parsed.chains.map((chain) => ({
+      ...chain, latency_ms: null, presentation_timestamp_ms: null, presented_frame_id: null,
+      presentation_provenance: 'missing', frame_link: 'none',
+    }))
+    input.appDelayCheck = verifyControlledDelayShift(null, null, 80)
+    input.labelDelayCheck = verifyControlledDelayShift(null, null, 80)
+    const result = finalizeQualification(input)
+    expect(result.profile.status).toBe('UNSUPPORTED')
+    expect(result.failures).toEqual([])
+    expect(result.appDelayCheck.status).toBe('NOT_MEASURED')
+    expect(result.labelDelayCheck.status).toBe('NOT_MEASURED')
   })
 })
 

@@ -20,6 +20,18 @@ export interface CanvasGeometry {
   backing_size: { width: number; height: number }
 }
 
+export interface NativeWindowGeometry {
+  headed: boolean
+  device_metrics_emulated: boolean
+  x: number; y: number; width: number; height: number
+  screen_width: number; screen_height: number
+  available_x: number; available_y: number; available_width: number; available_height: number
+  visual_viewport_scale: number
+  document_visible: boolean; focused: boolean
+  canvas_unobscured: boolean; labels_visible: boolean
+  skill_list_visible: boolean; task_panel_visible: boolean
+}
+
 export interface HostEnvironmentInfo {
   cpu: string
   logical_cpus: number
@@ -42,6 +54,8 @@ export interface HostEnvironmentInfo {
   browser_executable: string
   browser_version: string
   browser_backend: string
+  browser_command_line: string[]
+  native_window: NativeWindowGeometry | null
 }
 
 /**
@@ -99,6 +113,7 @@ export interface SourceIdentity {
   commit: string
   tree_dirty: boolean
   build_hash: string
+  source_fingerprint: string
 }
 
 export interface CollectorProfile {
@@ -141,6 +156,8 @@ export interface CorrelationEvent {
   label_revision: number | null
   /** App revision the closing label commit had observed; null when uncommitted. */
   label_commit_app_revision: number | null
+  /** Page-clock time after the synchronous label commit/delay; never presentation. */
+  label_commit_ms: number | null
   /** Measured CPU duration of the dispatch; null when not measured. */
   cpu_work_duration_ms: number | null
   /** Null unless the run actually measured GPU submit completion. */
@@ -293,6 +310,61 @@ export function isSoftwareAdapter(adapterDescription: string): boolean {
  * observation: an `unknown` adapter or a null refresh rate is an escalation,
  * not a recordable result.
  */
+/** Pre-capture gate, also rechecked at the final publication boundary. */
+export function validateReferenceEnvironment(host: HostEnvironmentInfo): string[] {
+  const errors: string[] = []
+  for (const field of ['browser_version', 'browser_backend', 'browser_executable', 'compositor'] as const) {
+    if (!host[field]?.trim() || host[field] === UNKNOWN) errors.push(`Actual ${field} is unknown (AC1).`)
+  }
+  if (/^wayland-\d+$/.test(host.compositor) || !/\d+\.\d+/.test(host.compositor)) {
+    errors.push('Compositor identity and version are required; a Wayland socket is not an identity (AC1).')
+  }
+  if (!host.browser_command_line?.length) errors.push('Actual browser command line was not recorded (AC1).')
+  if (host.viewport_css?.[0] !== 1200 || host.viewport_css?.[1] !== 720) {
+    errors.push('Actual headed viewport must be 1200×720 CSS pixels (contract §3).')
+  }
+  if (host.device_pixel_ratio !== 1.5) errors.push('Actual native DPR must be 1.5 (contract §3).')
+  const canvas = host.canvas_geometry
+  if (!canvas) errors.push('Canvas CSS and backing geometry were not recorded (AC1).')
+  else {
+    const { x, y, width, height } = canvas.css_bounds
+    if (![x, y, width, height].every(Number.isFinite) || x < 0 || y < 0 || width <= 0 || height <= 0 ||
+      x + width > (host.viewport_css?.[0] ?? 0) + 0.01 || y + height > (host.viewport_css?.[1] ?? 0) + 0.01) {
+      errors.push('Canvas is clipped or has invalid bounds; the entire canvas must be inside the viewport (contract §3).')
+    }
+    // ResizeObserver sizing floors physical pixels; DOMRect float snapping can
+    // add subpixel noise. Allow one pixel plus 0.001 physical pixels, never two.
+    const backingRoundingTolerance = 1.001
+    if (!Number.isInteger(canvas.backing_size.width) || !Number.isInteger(canvas.backing_size.height) ||
+      canvas.backing_size.width <= 0 || canvas.backing_size.height <= 0 ||
+      Math.abs(canvas.backing_size.width - width * (host.device_pixel_ratio ?? 0)) > backingRoundingTolerance ||
+      Math.abs(canvas.backing_size.height - height * (host.device_pixel_ratio ?? 0)) > backingRoundingTolerance) {
+      errors.push('Canvas backing size does not match observed CSS size × native DPR (contract §3).')
+    }
+  }
+  const native = host.native_window
+  if (!native) errors.push('Native headed window/screen geometry was not observed (AC1).')
+  else {
+    if (!native.headed || native.device_metrics_emulated || native.visual_viewport_scale !== 1) {
+      errors.push('Headed native geometry is required; device emulation/zoom is not reference evidence (contract §3).')
+    }
+    const dimensions = [native.x, native.y, native.width, native.height, native.screen_width,
+      native.screen_height, native.available_x, native.available_y, native.available_width, native.available_height]
+    if (!dimensions.every(Number.isFinite) || native.width <= 0 || native.height <= 0 ||
+      native.width < (host.viewport_css?.[0] ?? 0) || native.height < (host.viewport_css?.[1] ?? 0) ||
+      native.x < native.available_x || native.y < native.available_y ||
+      native.x + native.width > native.available_x + native.available_width + 1 ||
+      native.y + native.height > native.available_y + native.available_height + 1) {
+      errors.push('Native window is outside the available display bounds (contract §3).')
+    }
+    if (!native.document_visible || !native.focused || !native.canvas_unobscured || !native.labels_visible ||
+      !native.skill_list_visible || !native.task_panel_visible) {
+      errors.push('Canvas must be visible, focused and unobscured with labels, Skill list and Task panel retained (contract §3).')
+    }
+  }
+  return errors
+}
+
 export function validateCollectorProfile(
   profile: CollectorProfile,
   options: { requireAcceptanceMode?: boolean } = {}
@@ -330,6 +402,10 @@ export function validateCollectorProfile(
   // AC1: acceptance mode cannot record an unresolved host fact.
   if (options.requireAcceptanceMode) {
     const { host } = profile
+    errors.push(...validateReferenceEnvironment(host))
+    if (profile.identity.tree_dirty && !/^[a-f0-9]{64}$/i.test(profile.identity.source_fingerprint ?? '')) {
+      errors.push('Dirty source requires a valid 64-hex source fingerprint (AC1).')
+    }
     if (host.gpu_adapter === UNKNOWN || host.gpu_adapter === '') {
       errors.push('Actual GPU adapter is unknown; AC1 requires escalation, not a recorded guess.')
     }
@@ -484,7 +560,7 @@ export function parseTraceEvidence(
   // AC5 Check 3: Reject negative or malformed timestamps and durations.
   for (let i = 0; i < traceEvents.length; i++) {
     const e = traceEvents[i]
-    if (typeof e.ts !== 'number' || Number.isNaN(e.ts)) {
+    if (typeof e.ts !== 'number' || !Number.isFinite(e.ts)) {
       errors.push(`Invalid timestamp at index ${i}: ${e.ts}`)
       break
     }
@@ -591,19 +667,55 @@ export function parseTraceEvidence(
 
   for (const c of correlationEvents) {
     const dispatchMark = sortedEvents.find((e) =>
-      e.name?.startsWith(`gurow:app_dispatch:${c.input_id}:`)
+      e.name === `gurow:app_dispatch:${c.input_id}:${c.app_revision}`
     )
 
-    // A presentation event counts as linked only when it names the canvas
-    // revision it presented. Chromium does not carry our revision, so this
-    // stays unmatched on a software presentation path — by design.
-    const revisionMatched = presentationEvents.find(
-      (pe) =>
-        readNumberArg(pe.args, 'canvas_revision') === c.canvas_revision ||
-        readNumberArg(pe.args, 'gurow_canvas_revision') === c.canvas_revision
-    )
-
+    // Qualification schema, not invented Chromium args: a future acquisition
+    // join must demonstrate BOTH revisions on this same frame. Raw Chromium
+    // currently provides no such join, so remains honestly unsupported.
+    const coherentRevision = (pe: TraceEvent) =>
+      (readNumberArg(pe.args, 'canvas_revision') ??
+        readNumberArg(pe.args, 'gurow_canvas_revision')) === c.canvas_revision &&
+      readNumberArg(pe.args, 'label_revision') === c.label_revision &&
+      readNumberArg(pe.args, 'label_commit_app_revision') === c.canvas_revision &&
+      c.label_commit_app_revision === c.canvas_revision &&
+      c.app_revision === c.canvas_revision
     const dispatchTs = dispatchMark?.ts
+    const dispatchMs = dispatchTs === undefined ? null : toPageMs(dispatchTs)
+    const assessPresentation = (event: TraceEvent | undefined) => {
+      const flags = readNumberArg(event?.args, 'flags') ??
+        readNumberArg(event?.args, 'presentation_flags') ?? 0
+      const declaredFallback = Boolean(
+        event?.args?.is_fallback || event?.args?.fabricated || event?.args?.estimated
+      )
+      const hasHardwareFeedback = Number.isInteger(flags) &&
+        (flags & FLAG_HW_CLOCK) !== 0 && (flags & FLAG_HW_COMPLETION) !== 0
+      // Receipt/submission time is not presentation time. The explicit actual
+      // timestamp uses the profile's declared trace units and clock.
+      const actualPresentationTs = readNumberArg(event?.args, 'presentation_timestamp')
+      const endpointMs = actualPresentationTs === undefined ? null : toPageMs(actualPresentationTs)
+      const hasFrame = typeof event?.id === 'string' && event.id.trim().length > 0
+      const chronologyValid = dispatchMs !== null && Number.isFinite(dispatchMs) &&
+        c.label_commit_ms !== null && Number.isFinite(c.label_commit_ms) &&
+        endpointMs !== null && Number.isFinite(endpointMs) && endpointMs >= 0 &&
+        dispatchMs <= c.label_commit_ms && c.label_commit_ms <= endpointMs &&
+        actualPresentationTs! <= event!.ts &&
+        c.input_origin_ms !== null && Number.isFinite(c.input_origin_ms) &&
+        c.input_origin_ms >= 0 && c.input_origin_ms <= dispatchMs
+      const isPresentation = event?.name !== 'DisplayScheduler::DrawAndSwap'
+      return { declaredFallback, hasHardwareFeedback, endpointMs, hasFrame, chronologyValid,
+        isPresentation, eligible: !declaredFallback && hasHardwareFeedback && hasFrame &&
+          chronologyValid && isPresentation }
+    }
+    const coherentCandidates = presentationEvents.filter(coherentRevision)
+    // Choose the first actual coherent presentation, not the first receipt or
+    // submission with matching revision args. Invalid candidates remain useful
+    // for diagnostics only when no genuinely eligible endpoint exists.
+    const eligible = coherentCandidates
+      .map((event) => ({ event, assessment: assessPresentation(event) }))
+      .filter(({ assessment }) => assessment.eligible)
+      .sort((a, b) => a.assessment.endpointMs! - b.assessment.endpointMs!)
+    const revisionMatched = eligible[0]?.event ?? coherentCandidates[0]
     const temporalNext =
       dispatchTs === undefined
         ? undefined
@@ -624,12 +736,14 @@ export function parseTraceEvidence(
       reasons.push(`No presentation event follows the dispatch of input ${c.input_id}.`)
     }
 
-    const flags =
-      readNumberArg(linked?.args, 'flags') ?? readNumberArg(linked?.args, 'presentation_flags') ?? 0
-    const declaredFallback = Boolean(
-      linked?.args?.is_fallback || linked?.args?.fabricated || linked?.args?.estimated
-    )
-    const hasHardwareFeedback = (flags & FLAG_HW_CLOCK) !== 0 || (flags & FLAG_HW_COMPLETION) !== 0
+    const { declaredFallback, hasHardwareFeedback, endpointMs, hasFrame,
+      chronologyValid, isPresentation } = assessPresentation(linked)
+    if (linked && (!hasFrame || !chronologyValid || !isPresentation)) {
+      reasons.push(`Input ${c.input_id} lacks a nonempty presented-frame ID, actual hardware presentation time, or ordered input -> dispatch -> label commit -> presentation evidence; submission is not presentation.`)
+    }
+    if (endpointMs !== null && c.input_origin_ms !== null && endpointMs < c.input_origin_ms) {
+      reasons.push(`Input ${c.input_id} produced a negative interval; clock mapping or input origin is invalid.`)
+    }
 
     let provenance: PresentationProvenance
     if (!linked) {
@@ -639,7 +753,7 @@ export function parseTraceEvidence(
       reasons.push(
         `Presentation timing for ${c.input_id} uses fabricated/fallback feedback; platform hardware timestamp unavailable.`
       )
-    } else if (frameLink !== 'revision_matched') {
+    } else if (frameLink !== 'revision_matched' || !hasFrame || !chronologyValid || !isPresentation) {
       provenance = 'unrelated_next_paint'
     } else {
       provenance = 'platform_presentation_feedback'
@@ -647,7 +761,7 @@ export function parseTraceEvidence(
 
     // Never synthesise an endpoint. Only a real linked presentation event and a
     // real pre-dispatch origin can produce a latency.
-    const presentationTsMs = linked ? toPageMs(linked.ts) : null
+    const presentationTsMs = provenance === 'platform_presentation_feedback' ? endpointMs : null
     let latencyMs: number | null = null
     if (presentationTsMs !== null && c.input_origin_ms !== null) {
       const delta = presentationTsMs - c.input_origin_ms
@@ -673,7 +787,7 @@ export function parseTraceEvidence(
       app_revision: c.app_revision,
       canvas_revision: c.canvas_revision,
       label_revision: c.label_revision,
-      presented_frame_id: linked?.id ?? null,
+      presented_frame_id: presentationTsMs === null ? null : linked?.id ?? null,
       presentation_timestamp_ms: presentationTsMs,
       latency_ms: latencyMs,
       frame_link: frameLink,
@@ -791,6 +905,11 @@ export function generateQualificationReport(
 **Verdict:** **${profile.status}**
 **Source Commit:** \`${profile.identity.commit}\`${profile.identity.tree_dirty ? ' (working tree dirty)' : ''}
 **Build Hash:** \`${profile.identity.build_hash}\`
+**Source Fingerprint:** \`${profile.identity.source_fingerprint}\`
+
+**Actual browser command line:** \`${JSON.stringify(host.browser_command_line)}\`
+
+**Native window/screen and visibility observations:** \`${JSON.stringify(host.native_window)}\`
 
 ---
 

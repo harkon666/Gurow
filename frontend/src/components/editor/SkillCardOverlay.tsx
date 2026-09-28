@@ -1,19 +1,22 @@
-import React, { useEffect } from 'react'
+import React, { useLayoutEffect } from 'react'
 import type { LabelLayout } from './protocol'
 import { screenToCssRect } from './coords'
-import { recordLabelCommit } from './benchmarkHooks'
+import { recordLabelCommit, type LabelRevision } from './benchmarkHooks'
 
 interface SkillCardOverlayProps {
   labels: LabelLayout[]
+  benchmarkRevision?: LabelRevision
 }
 
 export const SkillCardOverlay: React.FC<SkillCardOverlayProps> = ({
   labels,
+  benchmarkRevision,
 }) => {
-  // Benchmark instrumentation is a no-op unless a driver enabled it.
-  useEffect(() => {
-    recordLabelCommit()
-  }, [labels])
+  // Layout effects run after DOM mutation but before the browser may paint.
+  // Metadata belongs to these rendered labels, not the latest global counters.
+  useLayoutEffect(() => {
+    recordLabelCommit(benchmarkRevision)
+  }, [labels, benchmarkRevision])
 
   return (
     <div
