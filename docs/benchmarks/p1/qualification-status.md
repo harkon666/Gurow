@@ -68,6 +68,7 @@ A related trap is closed on the way: `Browser.setWindowBounds` is a request, not
 ## Consequences
 
 - **L3-03 is blocked** from using this collector for primary latency. The **optical acquisition alternative** in contract §6 is the defined path.
+- Follow-up [#41](https://github.com/harkon666/Gurow/issues/41) owns that decision and is recorded as a native blocker of [#37](https://github.com/harkon666/Gurow/issues/37), because a closed L3-01 with `UNSUPPORTED` does not unblock L3-03 on its own.
 - L3-02 and L3-04 may progress (contract §6).
 - #7 stays open. Nothing here establishes a performance result: no p95, no threshold comparison, no acceptance environment.
 

@@ -1,6 +1,8 @@
 # T06 / #7 — executable L3 breakdown
 
-Status: **Task A measurement-design complete; seven approved execution packets published as sub-issues #34–#40, not implemented.** Parent [#7](https://github.com/harkon666/Gurow/issues/7) remains the P1 gate. Seven native parent links, seven blocking edges, all issue bodies and `ready-for-agent` labels were read back and verified on 2026-09-28. The parent body and state were not edited.
+Status: **Task A measurement-design complete; seven approved execution packets published as sub-issues #34–#40. L3-01 (#34) is closed with an explicit `UNSUPPORTED` collector verdict; the remaining six are not implemented.** Parent [#7](https://github.com/harkon666/Gurow/issues/7) remains the P1 gate. Seven native parent links, seven blocking edges, all issue bodies and `ready-for-agent` labels were read back and verified on 2026-09-28. The parent body and state were not edited.
+
+Primary input-to-visible latency has **no qualified acquisition path**: see [the qualification status record](../../benchmarks/p1/qualification-status.md) and follow-up [#41](https://github.com/harkon666/Gurow/issues/41), which is recorded as a native blocker of L3-03.
 
 Start with [benchmark contract A](../../benchmarks/p1/contract.md), [numeric protocol](../../benchmarks/p1/protocol.json), and [observed reference host](../../benchmarks/p1/reference-environment.json). The contract is fixed enough to implement; presentation collection still requires a real qualification run. A finished design is not evidence of a passing gate.
 
@@ -8,9 +10,9 @@ Start with [benchmark contract A](../../benchmarks/p1/contract.md), [numeric pro
 
 | ID | Independently verifiable outcome | Blocked by | Executor | User stories |
 | --- | --- | --- | --- | --- |
-| [L3-01](qualify-presentation-collector.md) / [#34](https://github.com/harkon666/Gurow/issues/34) | Real-app collector qualification, or explicit unsupported result | A | Strong / measurement specialist | US80, US84 |
+| [L3-01](qualify-presentation-collector.md) / [#34](https://github.com/harkon666/Gurow/issues/34) — **CLOSED, `UNSUPPORTED`** | Real-app collector qualification, or explicit unsupported result | A | Strong / measurement specialist | US80, US84 |
 | [L3-02](load-deterministic-workloads.md) / [#35](https://github.com/harkon666/Gurow/issues/35) | Prescribed fixtures load through normal app with correct IDs, Tasks, DAG and visible labels | A | Flash candidate | US80, US83, US84 |
-| [L3-03](capture-primary-interactions.md) / [#37](https://github.com/harkon666/Gurow/issues/37) | Nine primary windows produce complete input/presentation evidence | L3-01 **QUALIFIED**, L3-02, L3-04 | Flash after collector contract | US80, US84 |
+| [L3-03](capture-primary-interactions.md) / [#37](https://github.com/harkon666/Gurow/issues/37) | Nine primary windows produce complete input/presentation evidence | L3-01 **QUALIFIED** (not met: #34 is UNSUPPORTED, see [#41](https://github.com/harkon666/Gurow/issues/41)), L3-02, L3-04 | Flash after collector contract | US80, US84 |
 | [L3-04](reduce-and-validate-reports.md) / [#36](https://github.com/harkon666/Gurow/issues/36) | Evidence reduces to validated JSON/Markdown verdicts; malformed evidence cannot pass | A | Flash candidate | US84 |
 | [L3-05](record-comparisons-and-diagnostics.md) / [#38](https://github.com/harkon666/Gurow/issues/38) | Comparison workloads and resource/boundary diagnostics feed the report | L3-03, L3-04 | Flash candidate | US80, US84 |
 | [L3-06](integrate-functional-and-gate-checks.md) / [#39](https://github.com/harkon666/Gurow/issues/39) | Complete P1 flow plus T06 acceptance runs from current-source harness | L3-05 | Flash with independent review | US80, US82, US83, US84 |
