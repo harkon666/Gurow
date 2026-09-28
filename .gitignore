@@ -15,3 +15,6 @@ dist-ssr/
 # Local agent run state and Python cache
 .harness/
 __pycache__/
+
+# Dedicated Chromium profile used by frontend/scripts/dev-webgpu.sh
+frontend/.webgpu-profile/
