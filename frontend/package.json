@@ -16,9 +16,9 @@
     "smoke-check:t03": "bun run scripts/t03-smoke-check.ts",
     "smoke-check:t04": "bun run scripts/t04-smoke-check.ts",
     "smoke-check:t05": "bun run scripts/t05-smoke-check.ts",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "dev:webgpu": "bash scripts/dev-webgpu.sh"
   },
-
   "dependencies": {
     "@tailwindcss/vite": "^4.1.18",
     "@tanstack/react-devtools": "latest",

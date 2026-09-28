@@ -15,7 +15,29 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
 SCHEMA_VERSION = 1
-PROMPT_FILE = Path("/home/harkon666/.codex/skills/graphify/references/extraction-spec.md")
+
+
+def _resolve_prompt_file() -> Path:
+    """Locates the Graphify extraction spec without hardcoding one home directory.
+
+    ``GRAPHIFY_EXTRACTION_SPEC`` overrides the search. Otherwise the known skill
+    locations are probed in order, so the exporter works for any user and any of
+    the supported agent installations.
+    """
+    override = os.environ.get("GRAPHIFY_EXTRACTION_SPEC")
+    if override:
+        return Path(override).expanduser()
+
+    relative = Path("skills/graphify/references/extraction-spec.md")
+    for root in (Path.home() / ".claude", Path.home() / ".codex"):
+        candidate = root / relative
+        if candidate.is_file():
+            return candidate
+    # Fall back to the Claude location so the error names a concrete path.
+    return Path.home() / ".claude" / relative
+
+
+PROMPT_FILE = _resolve_prompt_file()
 OWN_FILES = {
     "scripts/graphify_brain.py",
     "scripts/test_graphify_brain.py",

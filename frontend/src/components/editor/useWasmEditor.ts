@@ -14,6 +14,12 @@ import {
 } from './protocol'
 import type { GpuStatus, SelectedSkillInfo } from './types'
 import { getCanvasDpr, toCanvasBufferSize, cssToLogicalPoint } from './coords'
+import {
+  applyAppDelay,
+  beginInput,
+  recordDispatch,
+  recordLabelUpdate,
+} from './benchmarkHooks'
 
 // Install WebGPU device hook to observe real hardware/software device loss (ADR-0017 / Spec 2)
 if (typeof window !== 'undefined') {
@@ -164,15 +170,7 @@ export function useWasmEditor({
           onOperationCompletedRef.current?.()
           break
         case 'LabelsUpdated':
-          if (typeof window !== 'undefined') {
-            const hooks = (window as any).__gurowBenchmarkHooks
-            if (hooks?.enabled) {
-              hooks.labelRevision = (hooks.labelRevision || 0) + 1
-              if (typeof performance.mark === 'function') {
-                performance.mark(`gurow:labels_updated:${hooks.labelRevision}`)
-              }
-            }
-          }
+          recordLabelUpdate()
           setLabels(event.labels)
           break
         case 'ConnectionsUpdated':
@@ -223,33 +221,12 @@ export function useWasmEditor({
   // Single consolidated command dispatch helper (Matt Pocock SDD)
   const dispatchInternal = useCallback(
     (editor: WasmEditor, cmd: EditorCommand) => {
-      const hooks = typeof window !== 'undefined' ? (window as any).__gurowBenchmarkHooks : undefined
-      if (hooks?.enabled && hooks.appDelayMs && hooks.appDelayMs > 0) {
-        const start = performance.now()
-        while (performance.now() - start < hooks.appDelayMs) {}
-      }
+      applyAppDelay()
       const t0 = performance.now()
       const validatedCmd = EditorCommandSchema.parse(cmd)
       const eventsJson = editor.dispatch_command(JSON.stringify(validatedCmd))
       const parsedEvents = EditorEventsSchema.parse(JSON.parse(eventsJson))
-      const cpuWorkMs = performance.now() - t0
-      if (hooks?.enabled) {
-        hooks.appRevision = (hooks.appRevision || 0) + 1
-        hooks.canvasRevision = hooks.appRevision
-        const inputId = (cmd as any).__inputId || hooks.lastInputId || `input-${hooks.appRevision}`
-        hooks.dispatches = hooks.dispatches || []
-        hooks.dispatches.push({
-          inputId,
-          commandType: cmd.type,
-          appRevision: hooks.appRevision,
-          canvasRevision: hooks.canvasRevision,
-          timestamp: performance.timeOrigin + performance.now(),
-          cpuWorkMs,
-        })
-        if (typeof performance.mark === 'function') {
-          performance.mark(`gurow:app_dispatch:${inputId}:${hooks.appRevision}`)
-        }
-      }
+      recordDispatch(cmd.type, performance.now() - t0)
       handleEvents(parsedEvents)
       return parsedEvents
     },
@@ -356,8 +333,7 @@ export function useWasmEditor({
 
         setGpuStatus('ready')
         if (typeof window !== 'undefined') {
-          ;(window as any).__gurowEditorReady = true
-          ;(window as any).__gurowDispatch = dispatch
+          ;(window as unknown as { __gurowEditorReady?: boolean }).__gurowEditorReady = true
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err)
@@ -436,6 +412,7 @@ export function useWasmEditor({
       if (!canvas || !editorRef.current) return
 
       isPointerDownRef.current = true
+      beginInput(e, 'drag')
       try {
         e.currentTarget.setPointerCapture(e.pointerId)
       } catch {
@@ -460,6 +437,7 @@ export function useWasmEditor({
       const canvas = canvasRef.current
       if (!canvas || !editorRef.current) return
 
+      beginInput(e, 'drag')
       const rect = canvas.getBoundingClientRect()
       const logicalPt = cssToLogicalPoint(e.clientX, e.clientY, rect)
 
@@ -506,6 +484,7 @@ export function useWasmEditor({
       e.preventDefault()
       if (!editorRef.current) return
 
+      beginInput(e, e.ctrlKey || e.metaKey ? 'zoom' : 'pan')
       const rect = canvas.getBoundingClientRect()
       const logicalPt = cssToLogicalPoint(e.clientX, e.clientY, rect)
 

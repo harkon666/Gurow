@@ -182,7 +182,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
       {/* Canvas & Overlay Container */}
       <div
         ref={containerRef}
-        className="relative flex-1 w-full h-full overflow-hidden"
+        className="relative flex-1 w-full min-h-0 overflow-hidden"
       >
         {/* Notice when WebGPU is unsupported */}
         {gpuStatus === 'unsupported' && (
@@ -207,6 +207,18 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
                 className="text-[11px] text-amber-300 mt-4 bg-amber-500/10 p-2.5 rounded-xl border border-amber-500/20 text-left leading-relaxed"
               >
                 <strong>Canvas Availability:</strong> Card positioning remains a canvas operation requiring WebGPU. You can continue navigating all Skills and editing associated Tasks via the keyboard-accessible list.
+              </div>
+              <div
+                id="canvas-enable-webgpu-hint"
+                className="text-[11px] text-slate-400 mt-3 bg-slate-950/60 p-2.5 rounded-xl border border-slate-800 text-left leading-relaxed"
+              >
+                <strong className="text-slate-300">Enabling WebGPU locally:</strong> on a Linux
+                laptop with switchable graphics, Chromium needs both a Vulkan backend and discrete
+                GPU offload. Run{' '}
+                <code className="text-emerald-300">bun run dev:webgpu</code> from{' '}
+                <code className="text-emerald-300">frontend/</code> to launch a correctly configured
+                browser. Enabling only <code>chrome://flags/#enable-unsafe-webgpu</code> selects the
+                SwiftShader software renderer, which runs but is not hardware accelerated.
               </div>
             </div>
           </div>

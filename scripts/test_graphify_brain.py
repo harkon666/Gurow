@@ -26,7 +26,9 @@ class GraphifyBrainTests(unittest.TestCase):
             (repo / "README.md").write_text("tracked", encoding="utf-8")
             subprocess.run(["git", "-C", str(repo), "add", "README.md"], check=True)
             for relative in ("docs/research/new.md", "docs/research/new.json", "docs/research/old.issue.md", "random.md"):
-                path = repo / relative; path.parent.mkdir(parents=True, exist_ok=True); path.write_text(relative, encoding="utf-8")
+                path = repo / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(relative, encoding="utf-8")
             records, excluded = brain.inventory(repo)
             included = {r["repository_path"] for r in records}
             reasons = {r["repository_path"]: r["reason"] for r in excluded}
@@ -36,8 +38,12 @@ class GraphifyBrainTests(unittest.TestCase):
 
     def test_semantic_fragment_with_stale_source_hash_is_rejected(self):
         with tempfile.TemporaryDirectory() as raw:
-            root = Path(raw); staging = root / "staging/g"; source = "sources/repository/docs/a.md"
-            path = staging / source; path.parent.mkdir(parents=True); path.write_text("current", encoding="utf-8")
+            root = Path(raw)
+            staging = root / "staging/g"
+            source = "sources/repository/docs/a.md"
+            path = staging / source
+            path.parent.mkdir(parents=True)
+            path.write_text("current", encoding="utf-8")
             digest = brain.sha256_file(path)
             snapshot = {"fingerprint": "snap"}
             request_file = {"source_file": source, "sha256": digest, "extraction_required": True}
@@ -64,9 +70,11 @@ class GraphifyBrainTests(unittest.TestCase):
 
     def test_publication_pointer_failure_restores_legacy_directories(self):
         with tempfile.TemporaryDirectory() as raw:
-            root = Path(raw); staging = root / "staging/g"
+            root = Path(raw)
+            staging = root / "staging/g"
             for name in ("sources", "metadata", "graphify-out"):
-                (root / name).mkdir(parents=True); (root / name / "old").write_text(name, encoding="utf-8")
+                (root / name).mkdir(parents=True)
+                (root / name / "old").write_text(name, encoding="utf-8")
                 (staging / name).mkdir(parents=True)
             real_replace = brain.os.replace
             def fail_pointer(source, destination):
