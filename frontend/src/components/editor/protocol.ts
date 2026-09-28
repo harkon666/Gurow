@@ -1,5 +1,6 @@
 import { z } from 'zod'
 
+/** Shared JSON contract for Rust/React editor coordinates and commands/events. */
 export const PointSchema = z.object({
   x: z.number(),
   y: z.number(),
@@ -150,6 +151,7 @@ export const EditorCommandSchema = z.discriminatedUnion('type', [
   SetCameraCommandSchema,
 ])
 
+/** Events emitted by the editor engine after a command has been applied. */
 export const DocumentLoadedEventSchema = z.object({
   type: z.literal('DocumentLoaded'),
 })

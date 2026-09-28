@@ -69,6 +69,13 @@ interface UseWasmEditorOptions {
   onCameraChanged?: (camera: CameraState) => void
 }
 
+/**
+ * Connects React controls to the Rust editor through the JSON command/event
+ * protocol and mirrors engine labels, selection, history, and diagnostics.
+ *
+ * The hook owns browser input listeners and persistence coordination; Rust
+ * remains the source of truth for the live Canvas Document and camera.
+ */
 export function useWasmEditor({
   canvasRef,
   containerRef,
@@ -157,6 +164,15 @@ export function useWasmEditor({
           onOperationCompletedRef.current?.()
           break
         case 'LabelsUpdated':
+          if (typeof window !== 'undefined') {
+            const hooks = (window as any).__gurowBenchmarkHooks
+            if (hooks?.enabled) {
+              hooks.labelRevision = (hooks.labelRevision || 0) + 1
+              if (typeof performance.mark === 'function') {
+                performance.mark(`gurow:labels_updated:${hooks.labelRevision}`)
+              }
+            }
+          }
           setLabels(event.labels)
           break
         case 'ConnectionsUpdated':
@@ -207,9 +223,33 @@ export function useWasmEditor({
   // Single consolidated command dispatch helper (Matt Pocock SDD)
   const dispatchInternal = useCallback(
     (editor: WasmEditor, cmd: EditorCommand) => {
+      const hooks = typeof window !== 'undefined' ? (window as any).__gurowBenchmarkHooks : undefined
+      if (hooks?.enabled && hooks.appDelayMs && hooks.appDelayMs > 0) {
+        const start = performance.now()
+        while (performance.now() - start < hooks.appDelayMs) {}
+      }
+      const t0 = performance.now()
       const validatedCmd = EditorCommandSchema.parse(cmd)
       const eventsJson = editor.dispatch_command(JSON.stringify(validatedCmd))
       const parsedEvents = EditorEventsSchema.parse(JSON.parse(eventsJson))
+      const cpuWorkMs = performance.now() - t0
+      if (hooks?.enabled) {
+        hooks.appRevision = (hooks.appRevision || 0) + 1
+        hooks.canvasRevision = hooks.appRevision
+        const inputId = (cmd as any).__inputId || hooks.lastInputId || `input-${hooks.appRevision}`
+        hooks.dispatches = hooks.dispatches || []
+        hooks.dispatches.push({
+          inputId,
+          commandType: cmd.type,
+          appRevision: hooks.appRevision,
+          canvasRevision: hooks.canvasRevision,
+          timestamp: performance.timeOrigin + performance.now(),
+          cpuWorkMs,
+        })
+        if (typeof performance.mark === 'function') {
+          performance.mark(`gurow:app_dispatch:${inputId}:${hooks.appRevision}`)
+        }
+      }
       handleEvents(parsedEvents)
       return parsedEvents
     },
@@ -315,6 +355,10 @@ export function useWasmEditor({
         }
 
         setGpuStatus('ready')
+        if (typeof window !== 'undefined') {
+          ;(window as any).__gurowEditorReady = true
+          ;(window as any).__gurowDispatch = dispatch
+        }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err)
         console.error('WebGPU editor initialization failed:', err)

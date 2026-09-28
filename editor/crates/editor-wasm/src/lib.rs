@@ -6,6 +6,7 @@ mod wasm {
     use wasm_bindgen::prelude::*;
 
     #[wasm_bindgen]
+    /// Handle for a renderer that can be attached to a headless editor state.
     pub struct WasmRendererHandle {
         renderer: WgpuRenderer,
     }
@@ -52,6 +53,7 @@ mod wasm {
     }
 
     #[wasm_bindgen]
+    /// Creates a WebGPU renderer for a browser canvas.
     pub async fn create_renderer_handle(canvas: web_sys::HtmlCanvasElement) -> Result<WasmRendererHandle, JsValue> {
         console_error_panic_hook::set_once();
         let renderer = build_renderer_internal(&canvas).await?;
@@ -59,6 +61,10 @@ mod wasm {
     }
 
     #[wasm_bindgen]
+    /// Rust-owned editor state exposed to the React application through JSON.
+    ///
+    /// Commands mutate CPU state first; when a renderer is attached, the same
+    /// command is rendered before its events are serialized back to JavaScript.
     pub struct WasmEditor {
         state: EditorState,
         renderer: Option<WgpuRenderer>,
@@ -81,6 +87,7 @@ mod wasm {
 
     #[wasm_bindgen]
     impl WasmEditor {
+        /// Creates a headed editor, initializes WebGPU, and performs the first render.
         pub async fn create(canvas: web_sys::HtmlCanvasElement) -> Result<WasmEditor, JsValue> {
             console_error_panic_hook::set_once();
 
@@ -103,6 +110,7 @@ mod wasm {
             })
         }
 
+        /// Creates an editor without WebGPU for deterministic state and protocol tests.
         pub fn create_headless() -> WasmEditor {
             console_error_panic_hook::set_once();
             let mut state = EditorState::new();
@@ -114,6 +122,7 @@ mod wasm {
             }
         }
 
+        /// Attaches a prepared renderer and renders the current CPU state immediately.
         pub fn attach_renderer(&mut self, handle: WasmRendererHandle, canvas: web_sys::HtmlCanvasElement) -> Result<(), JsValue> {
             let mut renderer = handle.renderer;
             renderer
@@ -125,14 +134,20 @@ mod wasm {
             Ok(())
         }
 
+        /// Drops the renderer while retaining the CPU-side document and history.
         pub fn simulate_device_loss(&mut self) {
             self.renderer = None;
         }
 
+        /// Reports whether a renderer is currently attached and usable by the editor.
         pub fn is_renderer_active(&self) -> bool {
             self.renderer.is_some()
         }
 
+        /// Parses, applies, renders, and serializes one editor command.
+        ///
+        /// A successful return is a JSON array of [`EditorEvent`] values. A
+        /// parse or serialization failure is returned as a JavaScript error.
         pub fn dispatch_command(&mut self, json_str: &str) -> Result<String, JsValue> {
             let cmd: EditorCommand = serde_json::from_str(json_str)
                 .map_err(|e| JsValue::from_str(&format!("Failed to parse command: {:?}", e)))?;

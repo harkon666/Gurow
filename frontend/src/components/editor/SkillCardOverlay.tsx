@@ -9,6 +9,19 @@ interface SkillCardOverlayProps {
 export const SkillCardOverlay: React.FC<SkillCardOverlayProps> = ({
   labels,
 }) => {
+  if (typeof window !== 'undefined') {
+    const hooks = (window as any).__gurowBenchmarkHooks
+    if (hooks?.enabled) {
+      if (hooks.labelDelayMs && hooks.labelDelayMs > 0) {
+        const start = performance.now()
+        while (performance.now() - start < hooks.labelDelayMs) {}
+      }
+      if (typeof performance.mark === 'function') {
+        performance.mark(`gurow:labels_rendered:${hooks.labelRevision || 0}`)
+      }
+    }
+  }
+
   return (
     <div
       id="labels-overlay"

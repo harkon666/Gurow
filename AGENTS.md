@@ -1,5 +1,9 @@
 ## Agent skills
 
+### Codebase navigation
+
+For cross-file code or architecture exploration, read [the Graphify workflow](docs/agents/graphify.md). Check graph freshness, use the Gurow brain to locate sources, and verify findings against the current repository before editing.
+
 ### Issue tracker
 
 Publish and retrieve specs and tickets through GitHub Issues for `harkon666/Gurow`. Read [the tracker conventions](docs/agents/issue-tracker.md) before tracker operations.

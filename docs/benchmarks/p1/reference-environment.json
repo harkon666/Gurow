@@ -1,0 +1,29 @@
+{
+  "observed_at": "2026-09-28",
+  "purpose": "reference host inventory for measurement design; not an executed browser benchmark",
+  "host": {
+    "cpu": "13th Gen Intel Core i5-13500HX",
+    "logical_cpus": 20,
+    "physical_memory_bytes": 16462508032,
+    "os": "Omarchy 4.0.4 (Arch-derived)",
+    "kernel": "7.2.5-3-omarchy x86_64",
+    "cpu_governor": "powersave",
+    "ac_power_online": true,
+    "pci_gpus": ["Intel Alder Lake-S UHD Graphics 8086:468b", "NVIDIA AD107M GeForce RTX 4050 Mobile 10de:28e1"],
+    "nvidia_module_version": "610.57.04",
+    "gpu_inventory_limitation": "nvidia-smi could not communicate with its driver during inventory; kernel module presence does not establish the active Chromium adapter"
+  },
+  "display": {"output": "eDP-2", "width": 1920, "height": 1200, "refresh_hz": 165, "compositor_scale": 1.5, "vrr": false},
+  "browser_observed": {"executable": "chromium", "version": "152.0.7977.82 Arch Linux"},
+  "run_requirements": {
+    "headed": true,
+    "hardware_webgpu": true,
+    "viewport_css": [1200, 720],
+    "device_pixel_ratio": 1.5,
+    "browser_zoom_percent": 100,
+    "dedicated_profile": true,
+    "production_build": true
+  },
+  "must_capture_during_qualification": ["actual WebGPU adapter and fallback status", "actual adapter driver", "compositor version", "headed browser backend and flags", "viewport and canvas geometry after selection", "trace categories and parser version", "presentation feedback provenance", "clock mapping", "collector profile hash"],
+  "qualification_result": "NOT_RUN"
+}

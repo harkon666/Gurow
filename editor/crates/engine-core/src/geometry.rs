@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+/// A point in either world or screen coordinates, depending on the API call.
 pub struct Point {
     pub x: f32,
     pub y: f32,
@@ -9,24 +10,28 @@ pub struct Point {
 impl Point {
     pub const ZERO: Self = Self { x: 0.0, y: 0.0 };
 
+    /// Creates a point from its two coordinates.
     pub fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+/// A width and height in the coordinate space of the caller.
 pub struct Size {
     pub width: f32,
     pub height: f32,
 }
 
 impl Size {
+    /// Creates a size from width and height.
     pub fn new(width: f32, height: f32) -> Self {
         Self { width, height }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+/// An axis-aligned rectangle used for card bounds and label placement.
 pub struct Rect {
     pub x: f32,
     pub y: f32,
@@ -35,6 +40,7 @@ pub struct Rect {
 }
 
 impl Rect {
+    /// Creates a rectangle from its origin and dimensions.
     pub fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
         Self {
             x,
@@ -44,6 +50,7 @@ impl Rect {
         }
     }
 
+    /// Reports whether a point lies inside the rectangle, including edges.
     pub fn contains(&self, p: Point) -> bool {
         p.x >= self.x && p.x <= self.x + self.width && p.y >= self.y && p.y <= self.y + self.height
     }
@@ -54,15 +61,22 @@ pub const MAX_WORLD_COORD: f32 = 1_000_000.0;
 pub const MIN_ZOOM: f32 = 0.1;
 pub const MAX_ZOOM: f32 = 4.0;
 
+/// Clamps one world coordinate to the editor's supported finite range.
 pub fn clamp_world_coord(val: f32) -> f32 {
     val.clamp(MIN_WORLD_COORD, MAX_WORLD_COORD)
 }
 
+/// Clamps both coordinates of a world-space point.
 pub fn clamp_world_point(p: Point) -> Point {
     Point::new(clamp_world_coord(p.x), clamp_world_coord(p.y))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+/// Camera transform shared by hit testing, labels, and rendering.
+///
+/// Offsets are screen-space values. Zoom is clamped to the product bounds
+/// [`MIN_ZOOM`, `MAX_ZOOM`], and world coordinates are clamped to the finite
+/// editor range when the camera moves.
 pub struct Camera {
     pub offset_x: f32,
     pub offset_y: f32,
@@ -80,6 +94,7 @@ impl Default for Camera {
 }
 
 impl Camera {
+    /// Creates a camera and clamps its zoom and visible world origin.
     pub fn new(offset_x: f32, offset_y: f32, zoom: f32) -> Self {
         let mut cam = Self {
             offset_x,
@@ -90,6 +105,7 @@ impl Camera {
         cam
     }
 
+    /// Converts a world-space point to screen-space coordinates.
     pub fn world_to_screen(&self, world_p: Point) -> Point {
         Point::new(
             world_p.x * self.zoom + self.offset_x,
@@ -97,6 +113,7 @@ impl Camera {
         )
     }
 
+    /// Converts a screen-space point back to world space.
     pub fn screen_to_world(&self, screen_p: Point) -> Point {
         Point::new(
             (screen_p.x - self.offset_x) / self.zoom,
@@ -104,6 +121,7 @@ impl Camera {
         )
     }
 
+    /// Projects a world-space rectangle into screen space.
     pub fn world_rect_to_screen(&self, rect: Rect) -> Rect {
         let top_left = self.world_to_screen(Point::new(rect.x, rect.y));
         Rect::new(
@@ -114,12 +132,14 @@ impl Camera {
         )
     }
 
+    /// Moves the camera by a screen-space delta, then enforces world bounds.
     pub fn pan(&mut self, delta_x: f32, delta_y: f32) {
         self.offset_x += delta_x;
         self.offset_y += delta_y;
         self.clamp_bounds();
     }
 
+    /// Changes zoom while keeping the world point under `anchor_screen` fixed.
     pub fn zoom_at(&mut self, anchor_screen: Point, factor: f32) {
         let old_zoom = self.zoom;
         let new_zoom = (old_zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
@@ -133,6 +153,7 @@ impl Camera {
         self.clamp_bounds();
     }
 
+    /// Keeps the visible world origin inside the editor's finite coordinate range.
     pub fn clamp_bounds(&mut self) {
         let top_left_world = self.screen_to_world(Point::ZERO);
         let clamped_x = clamp_world_coord(top_left_world.x);

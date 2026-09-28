@@ -88,14 +88,17 @@ export function validateCheckpointIntegrity(
   return parsed
 }
 
+/** Returns the account- and Learning Path-scoped key for a full checkpoint. */
 export function getCheckpointKey(accountId: string, pathId: string): string {
   return `gurow:checkpoint:${accountId}:${pathId}`
 }
 
+/** Returns the account- and Learning Path-scoped key for camera view state. */
 export function getCameraKey(accountId: string, pathId: string): string {
   return `gurow:camera:${accountId}:${pathId}`
 }
 
+/** Validates and persists the editor/application checkpoint atomically. */
 export function saveCheckpoint(
   storage: Storage,
   accountId: string,
@@ -107,6 +110,7 @@ export function saveCheckpoint(
   storage.setItem(key, JSON.stringify(validated))
 }
 
+/** Loads and validates a checkpoint, returning null when none exists. */
 export function loadCheckpoint(
   storage: Storage,
   accountId: string,
@@ -131,6 +135,7 @@ export function loadCheckpoint(
   }
 }
 
+/** Validates and persists camera state separately from the editor checkpoint. */
 export function saveCameraState(
   storage: Storage,
   accountId: string,
@@ -142,6 +147,7 @@ export function saveCameraState(
   storage.setItem(key, JSON.stringify(validated))
 }
 
+/** Loads camera state; malformed or absent local state is treated as missing. */
 export function loadCameraState(
   storage: Storage,
   accountId: string,
@@ -161,6 +167,7 @@ export function loadCameraState(
   }
 }
 
+/** Removes both the checkpoint and camera state for one account and path. */
 export function clearLocalScene(
   storage: Storage,
   accountId: string,

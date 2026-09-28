@@ -3,12 +3,14 @@ use crate::geometry::{Point, Rect, Size};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Selection information emitted across the Rust/TypeScript boundary.
 pub struct SelectionChange {
     pub selected_id: Option<String>,
     pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+/// Screen-space geometry and identity used to position an HTML Skill label.
 pub struct LabelLayout {
     pub card_id: String,
     pub title: String,
@@ -18,6 +20,10 @@ pub struct LabelLayout {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
+/// Commands accepted by the Wasm editor boundary.
+///
+/// Coordinates in pointer, camera, and viewport commands are CSS-pixel
+/// coordinates. The renderer may use a higher-resolution physical canvas.
 pub enum EditorCommand {
     LoadDocument {
         document: CanvasDocument,
@@ -76,6 +82,7 @@ pub enum EditorCommand {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
+/// State changes and diagnostics returned after a command is applied.
 pub enum EditorEvent {
     DocumentLoaded,
     CardCreated { card: SkillCard },
@@ -119,4 +126,3 @@ pub enum EditorEvent {
     GpuError { message: String },
     Error { message: String },
 }
-

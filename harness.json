@@ -6,14 +6,17 @@
     "rust-tests": {"cwd": ".", "argv": ["cargo", "test", "--manifest-path", "editor/Cargo.toml"], "timeout": 300},
     "build": {"cwd": "frontend", "argv": ["bun", "run", "build"], "timeout": 600},
     "t04-browser": {"cwd": "frontend", "argv": ["bun", "run", "scripts/t04-smoke-check.ts", "--check-only"], "timeout": 180},
-    "t05-browser": {"cwd": "frontend", "argv": ["bun", "run", "scripts/t05-smoke-check.ts", "--check-only"], "timeout": 180}
+    "t05-browser": {"cwd": "frontend", "argv": ["bun", "run", "scripts/t05-smoke-check.ts", "--check-only"], "timeout": 180},
+    "collector-tests": {"cwd": "frontend", "argv": ["bun", "test", "scripts/benchmark/collector.test.ts"], "timeout": 120},
+    "t06-l3-01-qualify": {"cwd": "frontend", "argv": ["bun", "run", "scripts/benchmark/qualify.ts", "--contract", "../docs/benchmarks/p1/protocol.json", "--out", "../.harness/t06/qualification"], "timeout": 300}
   },
   "profiles": {
-    "quick": ["harness-tests", "frontend-types", "frontend-tests", "rust-tests"],
-    "full": ["harness-tests", "frontend-types", "frontend-tests", "rust-tests", "build", "t04-browser"]
+    "quick": ["harness-tests", "frontend-types", "frontend-tests", "rust-tests", "collector-tests"],
+    "full": ["harness-tests", "frontend-types", "frontend-tests", "rust-tests", "build", "collector-tests", "t06-l3-01-qualify"]
   },
   "tickets": {
     "T04": ["t04-browser"],
-    "T05": ["t05-browser"]
+    "T05": ["t05-browser"],
+    "T06-L3-01": ["collector-tests", "t06-l3-01-qualify"]
   }
 }

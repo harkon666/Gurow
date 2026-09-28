@@ -3,6 +3,7 @@ use crate::geometry::{clamp_world_point, Camera, Point, Size};
 use crate::protocol::{EditorCommand, EditorEvent, LabelLayout, SelectionChange};
 
 #[derive(Debug, Clone, PartialEq)]
+/// Transient pointer interaction owned by the Rust editor state machine.
 pub enum InteractionState {
     Idle,
     DraggingCard {
@@ -16,6 +17,7 @@ pub enum InteractionState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// Undoable editor operation. A completed drag is one history action.
 pub enum HistoryAction {
     MoveCard {
         card_id: String,
@@ -25,6 +27,10 @@ pub enum HistoryAction {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// Complete live editor state owned by Rust between JSON commands.
+///
+/// The React application owns learning payloads; this state owns the canvas,
+/// camera, selection, transient gesture, and editor history.
 pub struct EditorState {
     pub document: CanvasDocument,
     pub camera: Camera,
@@ -50,14 +56,17 @@ impl Default for EditorState {
 }
 
 impl EditorState {
+    /// Creates an editor with an empty document and default viewport/camera.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Sets the viewport used by the camera and renderer, with a minimum of one pixel.
     pub fn set_viewport(&mut self, width: f32, height: f32) {
         self.viewport_size = Size::new(width.max(1.0), height.max(1.0));
     }
 
+    /// Returns the topmost card containing a screen-space point.
     pub fn hit_test(&self, screen_pos: Point) -> Option<String> {
         let world_pos = self.camera.screen_to_world(screen_pos);
         for card in self.document.cards.iter().rev() {
@@ -68,6 +77,7 @@ impl EditorState {
         None
     }
 
+    /// Changes selection and returns the event payload when it changed.
     pub fn select_card(&mut self, id: Option<String>) -> Option<SelectionChange> {
         if self.selected_card_id != id {
             self.selected_card_id = id.clone();
@@ -83,6 +93,7 @@ impl EditorState {
         }
     }
 
+    /// Iterates cards paired with whether each card is currently selected.
     pub fn cards_with_selection(&self) -> impl Iterator<Item = (&SkillCard, bool)> {
         self.document.cards.iter().map(|card| {
             let is_selected = self.selected_card_id.as_deref() == Some(&card.id);
@@ -90,6 +101,7 @@ impl EditorState {
         })
     }
 
+    /// Computes HTML-label rectangles from the current camera and card bounds.
     pub fn get_label_layouts(&self) -> Vec<LabelLayout> {
         self.document
             .cards
@@ -108,10 +120,12 @@ impl EditorState {
             .collect()
     }
 
+    /// Finds a directed Prerequisite path in the current document.
     pub fn find_path(&self, start: &str, target: &str) -> Option<Vec<String>> {
         self.document.find_path(start, target)
     }
 
+    /// Cancels an in-progress gesture and emits any compensating card movement.
     pub fn cancel_active_interaction(&mut self, events: &mut Vec<EditorEvent>) -> bool {
         let mut labels_changed = false;
         match std::mem::replace(&mut self.interaction, InteractionState::Idle) {
@@ -170,6 +184,10 @@ impl EditorState {
         (actual_pos, labels_changed)
     }
 
+    /// Applies one JSON-protocol command and returns the resulting events.
+    ///
+    /// The command is applied to CPU state first. The Wasm boundary then uses
+    /// these events to render and update the React-side labels.
     pub fn apply_command(&mut self, cmd: EditorCommand) -> Vec<EditorEvent> {
         let mut events = Vec::new();
         let mut labels_changed = false;
@@ -537,4 +555,3 @@ impl EditorState {
         events
     }
 }
-

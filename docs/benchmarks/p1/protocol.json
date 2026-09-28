@@ -1,0 +1,81 @@
+{
+  "contract_id": "gurow-p1-v1",
+  "report_schema": "gurow-p1-report-v1",
+  "parent_issue": 7,
+  "source_commit_at_design": "0a3b9be96a8ef89ce74a22d011ce7e9ba49e996d",
+  "design_status": "complete_approved",
+  "collector_status": "not_qualified",
+  "benchmark_status": "not_run",
+  "thresholds_ms": {
+    "frame_p95": 20,
+    "input_to_visible_p95": 50
+  },
+  "primary": {
+    "cards": 1000,
+    "connections": 2000,
+    "grid_columns": 25,
+    "grid_rows": 40,
+    "initial_visible_cards": 200,
+    "visible_cards_min": 180,
+    "visible_cards_max": 240,
+    "html_labels": true
+  },
+  "comparisons": [
+    {
+      "cards": 100,
+      "connections": 200,
+      "grid_columns": 10,
+      "grid_rows": 10
+    },
+    {
+      "cards": 10000,
+      "connections": 20000,
+      "grid_columns": 100,
+      "grid_rows": 100
+    }
+  ],
+  "card_size_world": {
+    "width": 180,
+    "height": 80
+  },
+  "viewport_css": {
+    "width": 1200,
+    "height": 720
+  },
+  "device_pixel_ratio": 1.5,
+  "display_refresh_hz": 165,
+  "sampling": {
+    "warmup_seconds": 10,
+    "active_seconds": 30,
+    "drain_seconds": 2,
+    "repetitions_per_scenario": 3,
+    "input_hz": 120,
+    "minimum_delivered_requests": 3420,
+    "minimum_response_groups": 300,
+    "minimum_presented_intervals": 300,
+    "visibility_sample_hz": 10,
+    "motion_period_seconds": 2,
+    "pan_drag_amplitude_cell_fraction": 0.1,
+    "zoom_min_factor": 0.99,
+    "zoom_max_factor": 1.01
+  },
+  "scenarios": [
+    "pan",
+    "zoom",
+    "drag"
+  ],
+  "percentile": "nearest_rank_ceil",
+  "run_verdicts": [
+    "PASS",
+    "FAIL",
+    "NOT_MEASURED"
+  ],
+  "qualification_delay_ms": 80,
+  "latency_statistics_unit": "each_original_delivered_input",
+  "coalesced_fallback": "repeat_oldest_group_latency_for_every_member",
+  "censored_tail_policy": "NOT_MEASURED",
+  "optical_equivalent_input_count_per_30s": {
+    "min": 3420,
+    "max": 3780
+  }
+}

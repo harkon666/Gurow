@@ -1,0 +1,156 @@
+{
+  "parent_issue": 7,
+  "contract": "gurow-p1-v1",
+  "status": "approved",
+  "publication": "published_verified",
+  "tasks": [
+    {
+      "id": "T06-L3-01",
+      "slug": "qualify-presentation-collector",
+      "title": "Qualify input-to-presentation evidence on the reference browser",
+      "depends": [],
+      "model": "Strong model / measurement specialist",
+      "stories": [
+        80,
+        84
+      ],
+      "acs": [
+        2,
+        3,
+        5
+      ],
+      "issue_number": 34,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/34"
+    },
+    {
+      "id": "T06-L3-02",
+      "slug": "load-deterministic-workloads",
+      "title": "Load deterministic benchmark workloads through the existing application",
+      "depends": [],
+      "model": "Flash candidate",
+      "stories": [
+        80,
+        83,
+        84
+      ],
+      "acs": [
+        1,
+        2,
+        3,
+        4
+      ],
+      "issue_number": 35,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/35"
+    },
+    {
+      "id": "T06-L3-03",
+      "slug": "capture-primary-interactions",
+      "title": "Capture the primary pan, zoom and drag workload with qualified timing",
+      "depends": [
+        "T06-L3-01",
+        "T06-L3-02",
+        "T06-L3-04"
+      ],
+      "model": "Flash candidate after a QUALIFIED collector handoff",
+      "stories": [
+        80,
+        84
+      ],
+      "acs": [
+        2,
+        3,
+        5
+      ],
+      "issue_number": 37,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/37"
+    },
+    {
+      "id": "T06-L3-04",
+      "slug": "reduce-and-validate-reports",
+      "title": "Turn raw benchmark evidence into reproducible verdicts and reports",
+      "depends": [],
+      "model": "Flash candidate",
+      "stories": [
+        84
+      ],
+      "acs": [
+        2,
+        3,
+        4,
+        5
+      ],
+      "issue_number": 36,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/36"
+    },
+    {
+      "id": "T06-L3-05",
+      "slug": "record-comparisons-and-diagnostics",
+      "title": "Record comparison workloads and explain benchmark resource costs",
+      "depends": [
+        "T06-L3-03",
+        "T06-L3-04"
+      ],
+      "model": "Flash candidate",
+      "stories": [
+        80,
+        84
+      ],
+      "acs": [
+        3,
+        4,
+        5
+      ],
+      "issue_number": 38,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/38"
+    },
+    {
+      "id": "T06-L3-06",
+      "slug": "integrate-functional-and-gate-checks",
+      "title": "Exercise the complete P1 flow and wire T06 acceptance into the harness",
+      "depends": [
+        "T06-L3-05"
+      ],
+      "model": "Flash candidate with independent acceptance review",
+      "stories": [
+        80,
+        82,
+        83,
+        84
+      ],
+      "acs": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "issue_number": 39,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/39"
+    },
+    {
+      "id": "T06-L3-07",
+      "slug": "review-evidence-and-decide-p1",
+      "title": "Review the evidence and decide the P1 gate without hiding failures",
+      "depends": [
+        "T06-L3-06"
+      ],
+      "model": "Strong independent reviewer / integrator",
+      "stories": [
+        80,
+        82,
+        83,
+        84
+      ],
+      "acs": [
+        1,
+        2,
+        3,
+        4,
+        5
+      ],
+      "issue_number": 40,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/40"
+    }
+  ],
+  "published_on": "2026-09-28"
+}

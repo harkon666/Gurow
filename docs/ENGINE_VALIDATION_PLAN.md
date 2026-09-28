@@ -2,6 +2,8 @@
 
 This records the accepted testing strategy and initial benchmark targets. These are planned checks, not completed tests or demonstrated product capacity. The agreed scopes and acceptance criteria for P1 and P2 are in [PROTOTYPE_PLAN.md](PROTOTYPE_PLAN.md).
 
+The concrete T06 measurement design is in the [P1 benchmark contract](benchmarks/p1/contract.md), with [L3 execution packets](tickets/t06-l3/README.md). It fixes the reference setup, workload, acquisition qualification, sampling and reporting rules. The design is complete; collector qualification and benchmark execution are still outstanding, and the approved L3 breakdown is published as sub-issues #34–#40. These documents do not establish that P1 has passed.
+
 ## Reference environment and workloads
 
 Record the reference device and its CPU, RAM, GPU, operating system, browser, viewport, device pixel ratio, and display refresh rate before measuring. Use a fixed, recorded configuration for comparisons and identify the fixture and interaction sequence used.
