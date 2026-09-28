@@ -149,9 +149,16 @@ export function useWasmEditor({
   const onCameraChangedRef = useRef(onCameraChanged)
   onCameraChangedRef.current = onCameraChanged
 
+  // Kept in sync on every render, like the callback refs above. The initial
+  // document usually arrives after this component has already mounted, so a ref
+  // frozen at first render would make the engine load an empty document and
+  // never recover, leaving the canvas blank with "0 cards".
   const initialCardsRef = useRef(initialCards)
+  initialCardsRef.current = initialCards
   const initialConnectionsRef = useRef(initialConnections)
+  initialConnectionsRef.current = initialConnections
   const initialCameraRef = useRef(initialCamera)
+  initialCameraRef.current = initialCamera
 
   const handleEvents = useCallback((events: EditorEvent[]) => {
     for (const event of events) {
@@ -372,7 +379,50 @@ export function useWasmEditor({
         editorRef.current = null
       }
     }
-  }, [canvasRef, containerRef, dispatchInternal, initialCards])
+    // `initialCards` is deliberately NOT a dependency. Re-running this effect
+    // tears down an initialisation that may still be in flight, which
+    // wasm-bindgen reports as "FnOnce called more than once" and leaves the
+    // editor dead with an empty canvas. The document is applied by the effect
+    // below instead.
+  }, [canvasRef, containerRef, dispatchInternal])
+
+  // The initial document is usually fetched after this component mounts. Load
+  // it into the existing engine rather than recreating the engine, so the
+  // renderer and history survive and initialisation is never re-entered.
+  // Seeded with the mount-time values because the init effect already loads
+  // those, so this only fires for data that arrives later.
+  const loadedDocumentRef = useRef<{
+    cards: typeof initialCards
+    connections: typeof initialConnections
+  }>({ cards: initialCards, connections: initialConnections })
+
+  useEffect(() => {
+    const editor = editorRef.current
+    if (!editor) return
+
+    const previous = loadedDocumentRef.current
+    if (previous.cards === initialCards && previous.connections === initialConnections) {
+      return
+    }
+    loadedDocumentRef.current = { cards: initialCards, connections: initialConnections }
+
+    dispatch({
+      type: 'LoadDocument',
+      document: {
+        cards: initialCards ?? [],
+        connections: initialConnections ?? [],
+      },
+    })
+
+    if (initialCameraRef.current) {
+      dispatch({
+        type: 'SetCamera',
+        offset_x: initialCameraRef.current.offset_x,
+        offset_y: initialCameraRef.current.offset_y,
+        zoom: initialCameraRef.current.zoom,
+      })
+    }
+  }, [initialCards, initialConnections, gpuStatus, dispatch])
 
   // ResizeObserver: keeps canvas buffer and engine logical viewport synchronized
   useEffect(() => {
