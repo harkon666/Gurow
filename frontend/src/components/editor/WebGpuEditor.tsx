@@ -151,7 +151,9 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
   ])
 
   return (
-    <div className="relative flex-1 flex flex-col h-full overflow-hidden bg-slate-950">
+    // The canvas is the primary surface: in a stacked narrow layout it keeps a
+    // usable floor instead of collapsing to zero height.
+    <div className="relative flex-1 flex flex-col h-full min-h-[360px] md:min-h-0 overflow-hidden bg-slate-950">
       {/* Top Action Bar */}
       <EditorToolbar
         gpuStatus={gpuStatus}

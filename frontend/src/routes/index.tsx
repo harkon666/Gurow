@@ -364,7 +364,10 @@ function LearningPathEditorPage() {
       {/* Editor Main Canvas & Panel Container */}
       <section
         id="canvas-editor-container"
-        className="h-[640px] w-full rounded-2xl border border-slate-800 shadow-2xl overflow-hidden bg-slate-950 flex flex-col md:flex-row"
+        // Below md the three panes stack, so a fixed height would squeeze the
+        // editor to nothing: let the column grow and keep the fixed height for
+        // the side-by-side layout only.
+        className="w-full md:h-[640px] rounded-2xl border border-slate-800 shadow-2xl overflow-hidden bg-slate-950 flex flex-col md:flex-row"
       >
         {mounted ? (
           <>

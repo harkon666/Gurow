@@ -269,6 +269,35 @@ async function main() {
     }
     console.log('  Verified: Skill/Prerequisite list renders all active fixture skills.')
 
+    // A half-tiled window is ordinary use on a tiling desktop. Below the md
+    // breakpoint the three panes stack, and the editor used to be squeezed to
+    // zero CSS height inside a fixed-height row while its backing buffer stayed
+    // full size: a blank editor with a live renderer behind it.
+    await page.setViewport({ width: 621, height: 694, deviceScaleFactor: 1 })
+    await new Promise((resolve) => setTimeout(resolve, 600))
+    const narrowCanvas = await page.$eval('#editor-canvas', (el: any) => {
+      const rect = el.getBoundingClientRect()
+      return { width: rect.width, height: rect.height, backing: { width: el.width, height: el.height } }
+    })
+    const narrowLabels = await page.$$eval('[id^="card-label-"]', (els: any[]) =>
+      els.filter((el) => el.getBoundingClientRect().height > 0).length
+    )
+    console.log(
+      `  Narrow 621×694 canvas: ${narrowCanvas.width.toFixed(1)}×${narrowCanvas.height.toFixed(1)} CSS, ` +
+        `${narrowCanvas.backing.width}×${narrowCanvas.backing.height} backing, ${narrowLabels} visible labels`
+    )
+    if (narrowCanvas.height < 200 || narrowCanvas.width < 200) {
+      throw new Error(
+        `Editor canvas collapsed in a narrow window: ${narrowCanvas.width}×${narrowCanvas.height} CSS pixels.`
+      )
+    }
+    if (narrowLabels < 1) {
+      throw new Error('No HTML card label remained visible in a narrow window.')
+    }
+    console.log('  Verified: editor keeps a usable canvas and labels in a half-tiled window.')
+    await page.setViewport({ width: 1280, height: 800, deviceScaleFactor: 1 })
+    await new Promise((resolve) => setTimeout(resolve, 600))
+
     // =========================================================================
     // Phase 2: Graph Setup & Card Movement Before Failure (AC 5, Spec 3)
     // =========================================================================
