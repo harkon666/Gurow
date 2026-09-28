@@ -10,6 +10,7 @@ import type {
 } from './protocol'
 import { useWasmEditor } from './useWasmEditor'
 import { EditorToolbar } from './EditorToolbar'
+import { WebGpuEnableHint } from './WebGpuEnableHint'
 import { SkillCardOverlay } from './SkillCardOverlay'
 
 export interface WebGpuEditorActions {
@@ -208,18 +209,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
               >
                 <strong>Canvas Availability:</strong> Card positioning remains a canvas operation requiring WebGPU. You can continue navigating all Skills and editing associated Tasks via the keyboard-accessible list.
               </div>
-              <div
-                id="canvas-enable-webgpu-hint"
-                className="text-[11px] text-slate-400 mt-3 bg-slate-950/60 p-2.5 rounded-xl border border-slate-800 text-left leading-relaxed"
-              >
-                <strong className="text-slate-300">Enabling WebGPU locally:</strong> on a Linux
-                laptop with switchable graphics, Chromium needs both a Vulkan backend and discrete
-                GPU offload. Run{' '}
-                <code className="text-emerald-300">bun run dev:webgpu</code> from{' '}
-                <code className="text-emerald-300">frontend/</code> to launch a correctly configured
-                browser. Enabling only <code>chrome://flags/#enable-unsafe-webgpu</code> selects the
-                SwiftShader software renderer, which runs but is not hardware accelerated.
-              </div>
+              <WebGpuEnableHint />
             </div>
           </div>
         )}
@@ -242,6 +232,11 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
               <p className="text-xs text-slate-300 leading-relaxed mb-4">
                 {errorMessage || 'Renderer failure detected. Active document and task edits have been preserved.'}
               </p>
+
+              {/* A lost or unobtainable adapter is usually a local GPU setup issue. */}
+              <div className="mb-4">
+                <WebGpuEnableHint />
+              </div>
 
               {recoveryError && (
                 <div
