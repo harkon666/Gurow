@@ -151,7 +151,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
   ])
 
   return (
-    <div className="relative flex-1 min-w-0 flex flex-col h-full overflow-hidden bg-slate-950">
+    <div className="relative flex-1 min-w-0 min-h-[360px] md:min-h-0 flex flex-col h-full overflow-hidden bg-slate-950">
       {/* Top Action Bar */}
       <EditorToolbar
         gpuStatus={gpuStatus}

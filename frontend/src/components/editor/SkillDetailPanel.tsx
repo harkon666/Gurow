@@ -122,7 +122,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
       id="skill-detail-panel"
       data-connections={JSON.stringify(connections)}
       data-connections-count={connections.length}
-      className="w-80 shrink-0 h-full border-l border-slate-800 bg-slate-900/80 p-6 flex flex-col gap-6 backdrop-blur-md overflow-y-auto"
+      className="w-full md:w-80 shrink-0 md:h-full border-t md:border-t-0 md:border-l border-slate-800 bg-slate-900/80 p-6 flex flex-col gap-6 backdrop-blur-md overflow-y-auto"
     >
       <div className="space-y-6">
         {/* Header & Badges */}

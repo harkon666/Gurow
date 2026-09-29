@@ -354,7 +354,7 @@ function LearningPathEditorPage() {
       {/* Editor Main Canvas & Panel Container */}
       <section
         id="canvas-editor-container"
-        className="w-full flex-1 min-h-0 flex flex-row overflow-hidden bg-slate-950 relative"
+        className="w-full flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden bg-slate-950 relative"
       >
         {mounted ? (
           <>
@@ -363,7 +363,7 @@ function LearningPathEditorPage() {
               connections={connections}
               selectedSkillId={selectedSkill?.id ?? null}
               onSelectSkill={handleSelectListSkill}
-              className="w-64 lg:w-72 shrink-0 h-full border-r border-slate-800/80"
+              className="w-full md:w-64 lg:w-72 shrink-0 md:h-full border-b md:border-b-0 md:border-r border-slate-800/80"
             />
             <WebGpuEditor
               onSelectSkill={setSelectedSkill}
