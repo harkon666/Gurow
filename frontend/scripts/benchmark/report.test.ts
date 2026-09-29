@@ -4,12 +4,14 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { computeProfileHash, GUROW_INPUT_COALESCING, type CollectorProfile } from './collector'
-import { generateBenchmarkFixture } from './fixture'
+import { generateBenchmarkFixture, parseBenchmarkContract } from './fixture'
 import { gateExitCode, markdownReport, nearestRank, reduceReport, verifyArtifactBindings, verifyArtifacts, type BenchmarkReport, type CaptureManifest, type CaptureRun, type Protocol, type Verdict } from './report'
 import { runCli } from './report-cli'
 
 // Entire record is SYNTHETIC: no observed hardware, qualified collector, or P1 result.
 const contract = readFileSync(resolve(import.meta.dir, '../../../docs/benchmarks/p1/protocol.json'))
+const fixtureOf = (cards: 100 | 1000 | 10000) =>
+  generateBenchmarkFixture(parseBenchmarkContract(contract.toString()), cards, { canvasCss: { width: 592, height: 628 } })
 const p = JSON.parse(contract.toString()) as Protocol
 const sha = (b: Uint8Array) => createHash('sha256').update(b).digest('hex')
 const F = 'b'.repeat(64)
@@ -168,9 +170,9 @@ describe('P1 report-v1 SYNTHETIC reducer', () => {
       m.artifacts=[]
       for (const cards of [100,1000,10000] as const) {
         const f=cards===1000 ? m.fixture : m.comparison_fixtures.find(f=>f.cards===cards)!
-        const generated=generateBenchmarkFixture(cards)
-        if (cards===1000) m.fixture.camera_and_cell={z0:generated.geometry.z0,px:generated.geometry.px,py:generated.geometry.py,
-          offset_x:generated.geometry.camera.offset_x,offset_y:generated.geometry.camera.offset_y}
+        const generated=fixtureOf(cards)
+        if (cards===1000) m.fixture.camera_and_cell={z0:generated.manifest.geometry.z0,px:generated.manifest.geometry.cell_pitch_world.x,py:generated.manifest.geometry.cell_pitch_world.y,
+          offset_x:generated.manifest.geometry.camera.offset_x,offset_y:generated.manifest.geometry.camera.offset_y}
         f.hash=generated.manifest.checkpoint_hash
         f.manifest_path=`manifest-${cards}.json`;f.checkpoint_path=`checkpoint-${cards}.json`
         m.runs.filter(r=>r.cards===cards).forEach(r=>r.fixture_hash=f.hash)
@@ -199,7 +201,7 @@ describe('P1 report-v1 SYNTHETIC reducer', () => {
       expect(verifyArtifacts(m.artifacts,directory)).toEqual([])
       expect(verifyArtifactBindings(m,directory).join(' ')).toContain('checkpoint does not match')
       const rawManifest=JSON.parse(readFileSync(join(directory,f.manifest_path),'utf8'))
-      delete rawManifest.cell_pitch_world
+      delete rawManifest.geometry.cell_pitch_world
       const manifestBytes=Buffer.from(JSON.stringify(rawManifest))
       writeFileSync(join(directory,f.manifest_path),manifestBytes)
       m.artifacts.find(a=>a.path===f.manifest_path)!.sha256=sha(manifestBytes)
@@ -207,7 +209,7 @@ describe('P1 report-v1 SYNTHETIC reducer', () => {
       // Recompute every declared hash after moving a card: consistency alone must not qualify layout.
       for (const cards of [100,1000] as const) {
         const fixture=cards===1000 ? m.fixture : m.comparison_fixtures[0]!
-        const generated=generateBenchmarkFixture(cards)
+        const generated=fixtureOf(cards)
         const moved=structuredClone(generated.checkpoint)
         moved.editor.cards[0]!.position.x+=1000
         fixture.hash=sha(Buffer.from(JSON.stringify(moved)))

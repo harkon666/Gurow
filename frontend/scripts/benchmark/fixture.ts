@@ -1,63 +1,86 @@
 /**
- * Deterministic benchmark fixtures and generator for P1/T06 (issue #35 / T06-L3-02).
- * Contract: gurow-p1-v1 (docs/benchmarks/p1/contract.md and protocol.json).
+ * Deterministic benchmark fixtures for P1/T06 (issue #35 / T06-L3-02).
+ * Contract: gurow-p1-v1 (docs/benchmarks/p1/contract.md §4 and protocol.json).
  *
- * Provides:
- * - Deterministic card grid, DAG forward-edge connections, and Task associations
- *   for 100, 1,000 and 10,000 workloads.
- * - Strict integrity validation (no cycles, self-edges, dangling edges, duplicates,
- *   or broken Task associations).
- * - Exact viewport geometry and initial camera offsets targeting 200 visible cards
- *   (or 100 for comparison).
- * - Geometric card and connection visibility calculations across planned interaction paths.
- * - Deterministic manifest computation and SHA-256 fingerprinting.
- * - LocalStorage seeding helpers for browser runs.
+ * The numeric workload comes from the contract file, and the camera geometry
+ * from the canvas dimensions measured in the settled browser layout, so neither
+ * is restated here. Written fixture files are only accepted back after they
+ * reproduce the recipe exactly, which keeps a malformed or smaller workload
+ * from being substituted silently.
  */
 
 import { createHash } from 'node:crypto'
-import { writeFileSync, mkdirSync } from 'node:fs'
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { z } from 'zod'
 import type {
   CameraState,
   LearningPathCheckpoint,
   PrerequisiteConnection,
   SkillCard,
   SkillPayload,
-  TaskPayload,
 } from '../../src/components/editor/protocol'
 import { CameraStateSchema } from '../../src/components/editor/protocol'
-import { validateCheckpointIntegrity } from '../../src/components/editor/checkpoint'
+import {
+  getCameraKey,
+  getCheckpointKey,
+  validateCheckpointIntegrity,
+} from '../../src/components/editor/checkpoint'
 import { INITIAL_LEARNING_PATH_FIXTURE } from '../../src/fixtures/learningPath'
+import { CONTRACT_ID } from './artifacts'
 
-export const CONTRACT_ID = 'gurow-p1-v1' as const
+export const FIXTURE_GENERATOR_VERSION = 'gurow-p1-fixture-v2'
 export const BENCHMARK_SIZES = [100, 1000, 10000] as const
 export type BenchmarkSize = (typeof BENCHMARK_SIZES)[number]
 
-export const BENCHMARK_ACCOUNT_ID = 'fixture-user' as const
+/**
+ * Storage scope of the route (`frontend/src/routes/index.tsx`). The browser
+ * check proves the match: a wrong scope restores the four-Skill fallback.
+ */
+export const BENCHMARK_ACCOUNT_ID = 'fixture-user'
 export const BENCHMARK_PATH_ID = INITIAL_LEARNING_PATH_FIXTURE.id
 
-export const REFERENCE_VIEWPORT_CSS = {
-  width: 1200,
-  height: 720,
-} as const
+/** Contract §4: target viewport block and the card-plus-gap cell used for z0. */
+const TARGET_COLUMNS = 10
+const PRIMARY_TARGET_ROWS = 20
+const Z0_CELL_WORLD = { width: 220, height: 120 } as const
+const Z0_BOUNDS = { min: 0.1, max: 4 } as const
 
-/**
- * Settled canvas CSS dimensions inside the 1200x720 reference window:
- * - Width: 1200 - 288 (left sidebar) - 320 (right sidebar) = 592 CSS px.
- * - Height: 720 - 44 (header) - 48 (toolbar) = 628 CSS px.
- * Contract §4: "With settled canvas CSS dimensions W,H, target a 10-column x 20-row viewport".
- */
-export const SETTLED_CANVAS_CSS = {
-  width: 592,
-  height: 628,
-} as const
+export interface Size {
+  width: number
+  height: number
+}
 
-export const REFERENCE_CANVAS_CSS = SETTLED_CANVAS_CSS
+export interface WorldPoint {
+  x: number
+  y: number
+}
 
-export const CARD_SIZE_WORLD = {
-  width: 180,
-  height: 80,
-} as const
+const SizeSchema = z.object({ width: z.number().positive(), height: z.number().positive() })
+const WorkloadSchema = z.object({
+  cards: z.number().int(),
+  connections: z.number().int(),
+  grid_columns: z.number().int().positive(),
+  grid_rows: z.number().int().positive(),
+})
+const ProtocolSchema = z.object({
+  contract_id: z.literal(CONTRACT_ID),
+  sampling: z.object({
+    pan_drag_amplitude_cell_fraction: z.number().positive(),
+    zoom_min_factor: z.number().positive(),
+    zoom_max_factor: z.number().positive(),
+  }),
+  primary: WorkloadSchema.extend({
+    initial_visible_cards: z.number().int().positive(),
+    visible_cards_min: z.number().int().positive(),
+    visible_cards_max: z.number().int().positive(),
+    html_labels: z.literal(true),
+  }),
+  comparisons: z.array(WorkloadSchema),
+  card_size_world: SizeSchema,
+  viewport_css: SizeSchema,
+  device_pixel_ratio: z.number().positive(),
+})
 
 export interface GridRecipe {
   cards: BenchmarkSize
@@ -66,64 +89,108 @@ export interface GridRecipe {
   grid_rows: number
   target_columns: number
   target_rows: number
+  /** Geometric visible cards expected before any interaction. */
   initial_visible_cards: number
-  visible_cards_min: number
-  visible_cards_max: number
+  /** Primary visibility band; null for the comparison without a band. */
+  visibility_band: { min: number; max: number } | null
 }
 
-export const GRID_RECIPES: Record<BenchmarkSize, GridRecipe> = {
-  100: {
-    cards: 100,
-    connections: 200,
-    grid_columns: 10,
-    grid_rows: 10,
-    target_columns: 10,
-    target_rows: 10,
-    initial_visible_cards: 100,
-    visible_cards_min: 90,
-    visible_cards_max: 100,
-  },
-  1000: {
-    cards: 1000,
-    connections: 2000,
-    grid_columns: 25,
-    grid_rows: 40,
-    target_columns: 10,
-    target_rows: 20,
-    initial_visible_cards: 200,
-    visible_cards_min: 180,
-    visible_cards_max: 240,
-  },
-  10000: {
-    cards: 10000,
-    connections: 20000,
-    grid_columns: 100,
-    grid_rows: 100,
-    target_columns: 10,
-    target_rows: 20,
-    initial_visible_cards: 200,
-    visible_cards_min: 180,
-    visible_cards_max: 240,
-  },
+/** Planned motion extremes (contract §5, protocol.json `sampling`). */
+export interface PlannedMotion {
+  /** Pan and drag amplitude as a fraction of one cell pitch. */
+  amplitude_cell_fraction: number
+  zoom_min_factor: number
+  zoom_max_factor: number
+}
+
+export interface BenchmarkContract {
+  contract_id: typeof CONTRACT_ID
+  /** SHA-256 of the contract file bytes, for source identity. */
+  sha256: string
+  /** Size of the primary workload that carries the pass thresholds. */
+  primary_size: BenchmarkSize
+  motion: PlannedMotion
+  card_size_world: Size
+  viewport_css: Size
+  device_pixel_ratio: number
+  recipes: Record<BenchmarkSize, GridRecipe>
+}
+
+/**
+ * Parses protocol.json into the fixture recipes (contract §1 and §4).
+ *
+ * The primary and the large comparison target a 10×20 block and share the
+ * primary visibility band; the 100-card comparison shows its whole 10×10 grid
+ * and carries no band, since comparison workloads have no pass thresholds.
+ */
+export function parseBenchmarkContract(raw: string): BenchmarkContract {
+  const protocol = ProtocolSchema.parse(JSON.parse(raw))
+  const primarySize = BENCHMARK_SIZES.find((size) => size === protocol.primary.cards)
+  if (!primarySize) {
+    throw new Error(`Contract primary workload of ${protocol.primary.cards} cards is not a benchmark size.`)
+  }
+  const workloads = [protocol.primary, ...protocol.comparisons]
+  const recipes = {} as Record<BenchmarkSize, GridRecipe>
+
+  for (const size of BENCHMARK_SIZES) {
+    const workload = workloads.find((w) => w.cards === size)
+    if (!workload) {
+      throw new Error(`Contract ${protocol.contract_id} defines no ${size}-card workload.`)
+    }
+    if (workload.grid_columns * workload.grid_rows !== size) {
+      throw new Error(`Contract grid ${workload.grid_columns}x${workload.grid_rows} does not hold ${size} cards.`)
+    }
+    const fullGrid = workload.grid_rows < PRIMARY_TARGET_ROWS
+    const targetRows = fullGrid ? workload.grid_rows : PRIMARY_TARGET_ROWS
+    recipes[size] = {
+      cards: size,
+      connections: workload.connections,
+      grid_columns: workload.grid_columns,
+      grid_rows: workload.grid_rows,
+      target_columns: TARGET_COLUMNS,
+      target_rows: targetRows,
+      initial_visible_cards: fullGrid ? size : protocol.primary.initial_visible_cards,
+      visibility_band: fullGrid
+        ? null
+        : { min: protocol.primary.visible_cards_min, max: protocol.primary.visible_cards_max },
+    }
+  }
+
+  return {
+    contract_id: protocol.contract_id,
+    sha256: createHash('sha256').update(raw).digest('hex'),
+    primary_size: primarySize,
+    motion: {
+      amplitude_cell_fraction: protocol.sampling.pan_drag_amplitude_cell_fraction,
+      zoom_min_factor: protocol.sampling.zoom_min_factor,
+      zoom_max_factor: protocol.sampling.zoom_max_factor,
+    },
+    card_size_world: protocol.card_size_world,
+    viewport_css: protocol.viewport_css,
+    device_pixel_ratio: protocol.device_pixel_ratio,
+    recipes,
+  }
+}
+
+export function loadBenchmarkContract(contractPath: string): BenchmarkContract {
+  return parseBenchmarkContract(readFileSync(contractPath, 'utf8'))
 }
 
 export interface FixtureGeometry {
-  canvas_css: { width: number; height: number }
+  canvas_css: Size
   z0: number
-  px: number
-  py: number
-  card_size: { width: number; height: number }
+  cell_pitch_world: WorldPoint
+  card_size_world: Size
   start_col: number
   start_row: number
-  center_col: number
-  center_row: number
-  center_card_id: string
-  center_card_world: { x: number; y: number }
+  center_card: { id: string; col: number; row: number; world_pos: WorldPoint }
   camera: CameraState
 }
 
 export interface FixtureManifest {
   contract_id: typeof CONTRACT_ID
+  contract_sha256: string
+  generator_version: typeof FIXTURE_GENERATOR_VERSION
   size: BenchmarkSize
   card_count: number
   connection_count: number
@@ -131,18 +198,16 @@ export interface FixtureManifest {
   grid_rows: number
   target_columns: number
   target_rows: number
-  cell_pitch_world: { x: number; y: number }
-  camera_initial: CameraState
-  center_card: {
-    id: string
-    col: number
-    row: number
-    world_pos: { x: number; y: number }
-  }
+  geometry: FixtureGeometry
   initial_visible_cards: number
-  visibility_band: { min: number; max: number }
+  visibility_band: { min: number; max: number } | null
+  /** SHA-256 of the checkpoint exactly as written. */
   checkpoint_hash: string
-  created_at: string
+  /** Order-insensitive editor identity at engine (f32) precision. */
+  editor_identity_hash: string
+  /** Order-insensitive Skill/Task payload identity. */
+  application_hash: string
+  saved_at: string
   learning_path_id: string
   account_id: string
 }
@@ -150,7 +215,6 @@ export interface FixtureManifest {
 export interface BenchmarkFixture {
   size: BenchmarkSize
   recipe: GridRecipe
-  geometry: FixtureGeometry
   manifest: FixtureManifest
   checkpoint: LearningPathCheckpoint
   camera: CameraState
@@ -164,6 +228,10 @@ export function formatTaskId(index: number): string {
   return `p1-task-${String(index).padStart(5, '0')}`
 }
 
+export function isBenchmarkSkillId(id: string): boolean {
+  return /^p1-skill-\d+$/.test(id)
+}
+
 export function parseSkillIndex(id: string): number {
   const match = id.match(/^p1-skill-(\d+)$/)
   if (!match) {
@@ -172,169 +240,160 @@ export function parseSkillIndex(id: string): number {
   return parseInt(match[1], 10)
 }
 
+/** World position of the card centred in grid cell (col, row), at engine f32 precision. */
+function cardWorldPosition(col: number, row: number, pitch: WorldPoint, card: Size): WorldPoint {
+  return {
+    x: Math.fround(col * pitch.x + (pitch.x - card.width) / 2),
+    y: Math.fround(row * pitch.y + (pitch.y - card.height) / 2),
+  }
+}
+
 /**
- * Computes world cell pitches, scale factor z0, and initial camera offset
- * following Contract §4:
- *
- * - With settled canvas CSS dimensions W, H, target 10 cols x 20 rows (or 10x10 for 100).
- * - z0 = min(1, W / (targetCols * 220), H / (targetRows * 120)).
- * - Fails geometry setup if z0 is outside [0.1, 4].
- * - px = W / (targetCols * z0), py = H / (targetRows * z0).
- * - Centered viewport on interior block: startCol = floor((cols - targetCols) / 2),
- *   startRow = floor((rows - targetRows) / 2).
- * - Camera offset: offset_x = -startCol * (W / targetCols), offset_y = -startRow * (H / targetRows).
+ * Computes z0, cell pitches and the initial camera (contract §4):
+ * z0 = min(1, W/(10*220), H/(rows*120)); px = W/(10*z0), py = H/(rows*z0);
+ * the viewport starts at the interior block floor((cols-10)/2), floor((rows-rows_t)/2).
  */
 export function computeFixtureGeometry(
-  size: BenchmarkSize,
-  canvasCss: { width: number; height: number } = SETTLED_CANVAS_CSS
+  recipe: GridRecipe,
+  cardSize: Size,
+  canvasCss: Size
 ): FixtureGeometry {
-  const recipe = GRID_RECIPES[size]
-  if (!recipe) {
-    throw new Error(`Unsupported benchmark fixture size: ${size}`)
-  }
-
   const { width: W, height: H } = canvasCss
-  const targetCols = recipe.target_columns
-  const targetRows = recipe.target_rows
-
-  const z0 = Math.min(1, W / (targetCols * 220), H / (targetRows * 120))
-  if (z0 < 0.1 || z0 > 4.0) {
+  const z0 = Math.min(
+    1,
+    W / (recipe.target_columns * Z0_CELL_WORLD.width),
+    H / (recipe.target_rows * Z0_CELL_WORLD.height)
+  )
+  if (!(z0 >= Z0_BOUNDS.min && z0 <= Z0_BOUNDS.max)) {
     throw new Error(
-      `Geometry setup failure: computed z0 ${z0.toFixed(4)} is outside permitted bounds [0.1, 4.0].`
+      `Geometry setup failure: z0 ${z0} for canvas ${W}x${H} is outside [${Z0_BOUNDS.min}, ${Z0_BOUNDS.max}].`
     )
   }
 
-  const px = W / (targetCols * z0)
-  const py = H / (targetRows * z0)
-
-  const startCol = Math.floor((recipe.grid_columns - targetCols) / 2)
-  const startRow = Math.floor((recipe.grid_rows - targetRows) / 2)
-
-  const offset_x = -startCol * (W / targetCols)
-  const offset_y = -startRow * (H / targetRows)
-
-  const centerCol = startCol + Math.floor(targetCols / 2)
-  const centerRow = startRow + Math.floor(targetRows / 2)
-  const centerIndex = centerRow * recipe.grid_columns + centerCol
-  const centerCardId = formatSkillId(centerIndex)
-
-  const centerCardWorld = {
-    x: centerCol * px + (px - CARD_SIZE_WORLD.width) / 2,
-    y: centerRow * py + (py - CARD_SIZE_WORLD.height) / 2,
-  }
+  const pitch = { x: W / (recipe.target_columns * z0), y: H / (recipe.target_rows * z0) }
+  const startCol = Math.floor((recipe.grid_columns - recipe.target_columns) / 2)
+  const startRow = Math.floor((recipe.grid_rows - recipe.target_rows) / 2)
+  const centerCol = startCol + Math.floor(recipe.target_columns / 2)
+  const centerRow = startRow + Math.floor(recipe.target_rows / 2)
 
   return {
     canvas_css: { width: W, height: H },
     z0,
-    px,
-    py,
-    card_size: { ...CARD_SIZE_WORLD },
+    cell_pitch_world: pitch,
+    card_size_world: { ...cardSize },
     start_col: startCol,
     start_row: startRow,
-    center_col: centerCol,
-    center_row: centerRow,
-    center_card_id: centerCardId,
-    center_card_world: centerCardWorld,
+    center_card: {
+      id: formatSkillId(centerRow * recipe.grid_columns + centerCol),
+      col: centerCol,
+      row: centerRow,
+      world_pos: cardWorldPosition(centerCol, centerRow, pitch, cardSize),
+    },
     camera: {
-      offset_x,
-      offset_y,
+      // `0 -` keeps a zero start index from serialising as -0.
+      offset_x: 0 - startCol * pitch.x * z0,
+      offset_y: 0 - startRow * pitch.y * z0,
       zoom: z0,
     },
   }
 }
 
 /**
- * Generates forward connections following Contract §4:
- *
- * "Add forward edges by enumerating increasing gap g=1,2,..., then source i=0..N-g-1,
- * taking (i,i+g) until 2*N edges exist. No duplicate, self, cross-Path or cyclic edge is possible."
+ * Forward edges by increasing gap g=1,2,..., then source i=0..N-g-1, taking
+ * (i,i+g) until the recipe's edge count exists (contract §4).
  */
-export function generateConnections(size: BenchmarkSize): PrerequisiteConnection[] {
-  const targetCount = size * 2
+export function generateConnections(recipe: GridRecipe): PrerequisiteConnection[] {
+  const size = recipe.cards
   const connections: PrerequisiteConnection[] = []
-  let g = 1
-
-  while (connections.length < targetCount) {
-    for (let i = 0; i < size - g && connections.length < targetCount; i++) {
-      connections.push({
-        from_id: formatSkillId(i),
-        to_id: formatSkillId(i + g),
-      })
+  for (let g = 1; connections.length < recipe.connections && g < size; g++) {
+    for (let i = 0; i < size - g && connections.length < recipe.connections; i++) {
+      connections.push({ from_id: formatSkillId(i), to_id: formatSkillId(i + g) })
     }
-    g++
   }
-
   return connections
 }
 
-/** Computes canonical SHA-256 hash for deterministic checkpoint comparison. */
-export function computeCheckpointHash(checkpoint: LearningPathCheckpoint): string {
-  const json = JSON.stringify(checkpoint)
-  return createHash('sha256').update(json).digest('hex')
+function sha256Json(value: unknown): string {
+  return createHash('sha256').update(JSON.stringify(value)).digest('hex')
 }
 
-export interface GenerateFixtureOptions {
-  canvasCss?: { width: number; height: number }
-  savedAt?: string
-  learningPathId?: string
-  accountId?: string
+/** SHA-256 of the checkpoint exactly as serialized. */
+export function computeCheckpointHash(checkpoint: LearningPathCheckpoint): string {
+  return sha256Json(checkpoint)
 }
 
 /**
- * Generates a complete, validated benchmark fixture matching Contract §4.
+ * Identity of an editor document as the engine holds it: IDs, titles, f32
+ * geometry and edges, independent of export order. Comparing this with a live
+ * engine export proves the loaded document is the fixture.
  */
+export function computeEditorIdentityHash(editor: {
+  cards: SkillCard[]
+  connections: PrerequisiteConnection[]
+}): string {
+  const cards = editor.cards
+    .map((c) => [c.id, c.title, Math.fround(c.position.x), Math.fround(c.position.y),
+      Math.fround(c.size.width), Math.fround(c.size.height)])
+    .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+  const connections = editor.connections
+    .map((c) => `${c.from_id}->${c.to_id}`)
+    .sort()
+  return sha256Json({ cards, connections })
+}
+
+/** Order-insensitive identity of the Skill/Task application payload. */
+export function computeApplicationHash(application: LearningPathCheckpoint['application']): string {
+  const skills = [...application.skills].sort((a, b) => a.id.localeCompare(b.id))
+  return sha256Json({ learning_path_id: application.learning_path_id, skills })
+}
+
+export interface GenerateFixtureOptions {
+  canvasCss: Size
+  savedAt?: string
+}
+
+/** Generates a complete, validated benchmark fixture (contract §4). */
 export function generateBenchmarkFixture(
+  contract: BenchmarkContract,
   size: BenchmarkSize,
-  options: GenerateFixtureOptions = {}
+  options: GenerateFixtureOptions
 ): BenchmarkFixture {
-  const recipe = GRID_RECIPES[size]
+  const recipe = contract.recipes[size]
   if (!recipe) {
     throw new Error(`Unsupported benchmark size: ${size}`)
   }
-
-  const canvasCss = options.canvasCss ?? SETTLED_CANVAS_CSS
-  const geometry = computeFixtureGeometry(size, canvasCss)
-  const learningPathId = options.learningPathId ?? BENCHMARK_PATH_ID
-  const accountId = options.accountId ?? BENCHMARK_ACCOUNT_ID
+  const cardSize = contract.card_size_world
+  const geometry = computeFixtureGeometry(recipe, cardSize, options.canvasCss)
   const savedAt = options.savedAt ?? '2026-09-28T00:00:00.000Z'
 
   const cards: SkillCard[] = []
   const skills: SkillPayload[] = []
-
-  const { px, py } = geometry
-
   for (let i = 0; i < size; i++) {
-    const col = i % recipe.grid_columns
-    const row = Math.floor(i / recipe.grid_columns)
-
     const skillId = formatSkillId(i)
-    const taskId = formatTaskId(i)
-
-    const cardWorldX = col * px + (px - CARD_SIZE_WORLD.width) / 2
-    const cardWorldY = row * py + (py - CARD_SIZE_WORLD.height) / 2
-
     cards.push({
       id: skillId,
       title: `Skill ${skillId}`,
-      position: { x: cardWorldX, y: cardWorldY },
-      size: { ...CARD_SIZE_WORLD },
+      position: cardWorldPosition(
+        i % recipe.grid_columns,
+        Math.floor(i / recipe.grid_columns),
+        geometry.cell_pitch_world,
+        cardSize
+      ),
+      size: { ...cardSize },
     })
-
-    const task: TaskPayload = {
-      id: taskId,
-      title: `Task for ${skillId}`,
-      description: `Deterministic benchmark verification task for ${skillId}.`,
-      required: i % 2 === 0,
-    }
-
     skills.push({
       id: skillId,
       outcome: `Master and demonstrate core competency for ${skillId}.`,
-      tasks: [task],
+      tasks: [
+        {
+          id: formatTaskId(i),
+          title: `Task for ${skillId}`,
+          description: `Deterministic benchmark verification task for ${skillId}.`,
+          required: i % 2 === 0,
+        },
+      ],
     })
   }
-
-  const connections = generateConnections(size)
 
   const checkpoint: LearningPathCheckpoint = {
     version: 1,
@@ -343,418 +402,369 @@ export function generateBenchmarkFixture(
       format_version: 1,
       revision: 1,
       cards,
-      connections,
+      connections: generateConnections(recipe),
     },
     application: {
-      learning_path_id: learningPathId,
+      learning_path_id: BENCHMARK_PATH_ID,
       skills,
     },
   }
 
-  const checkpointHash = computeCheckpointHash(checkpoint)
-
   const manifest: FixtureManifest = {
-    contract_id: CONTRACT_ID,
+    contract_id: contract.contract_id,
+    contract_sha256: contract.sha256,
+    generator_version: FIXTURE_GENERATOR_VERSION,
     size,
     card_count: cards.length,
-    connection_count: connections.length,
+    connection_count: checkpoint.editor.connections.length,
     grid_columns: recipe.grid_columns,
     grid_rows: recipe.grid_rows,
     target_columns: recipe.target_columns,
     target_rows: recipe.target_rows,
-    cell_pitch_world: { x: px, y: py },
-    camera_initial: { ...geometry.camera },
-    center_card: {
-      id: geometry.center_card_id,
-      col: geometry.center_col,
-      row: geometry.center_row,
-      world_pos: { ...geometry.center_card_world },
-    },
+    geometry,
     initial_visible_cards: recipe.initial_visible_cards,
-    visibility_band: {
-      min: recipe.visible_cards_min,
-      max: recipe.visible_cards_max,
-    },
-    checkpoint_hash: checkpointHash,
-    created_at: savedAt,
-    learning_path_id: learningPathId,
-    account_id: accountId,
+    visibility_band: recipe.visibility_band,
+    checkpoint_hash: computeCheckpointHash(checkpoint),
+    editor_identity_hash: computeEditorIdentityHash(checkpoint.editor),
+    application_hash: computeApplicationHash(checkpoint.application),
+    saved_at: savedAt,
+    learning_path_id: BENCHMARK_PATH_ID,
+    account_id: BENCHMARK_ACCOUNT_ID,
   }
 
   const fixture: BenchmarkFixture = {
     size,
     recipe,
-    geometry,
     manifest,
     checkpoint,
     camera: { ...geometry.camera },
   }
-
-  validateBenchmarkFixture(fixture, size)
-
+  validateBenchmarkFixture(fixture)
   return fixture
 }
 
 /**
- * Validates all semantic and syntactic invariants required for benchmark workloads (AC 1 & AC 2):
- * - Exactly N cards and 2*N unique forward connections
- * - Valid DAG: no self-edges, no duplicates, no cycles, no dangling endpoints
- * - Exactly one distinct task per skill with nonempty title and description
- * - Exact schema and envelope integrity against LearningPathCheckpointSchema
- * - Deterministic hash matches manifest
+ * Validates the workload invariants (issue #35 AC1/AC2): exact counts, stable
+ * IDs, one distinct nonempty Task per Skill, a forward-only DAG without self,
+ * duplicate or dangling edges, the route's checkpoint integrity rules, and the
+ * manifest hashes.
  */
-export function validateBenchmarkFixture(
-  fixture: BenchmarkFixture,
-  expectedSize?: BenchmarkSize
-): void {
-  const { size, checkpoint, camera, manifest } = fixture
-
-  if (expectedSize !== undefined && size !== expectedSize) {
-    throw new Error(`Fixture size mismatch: expected ${expectedSize}, got ${size}`)
-  }
-
-  const recipe = GRID_RECIPES[size]
-  if (!recipe) {
-    throw new Error(`Invalid fixture size in validation: ${size}`)
-  }
-
+export function validateBenchmarkFixture(fixture: BenchmarkFixture): void {
+  const { recipe, checkpoint, camera, manifest } = fixture
   const cards = checkpoint.editor.cards
   const connections = checkpoint.editor.connections
   const skills = checkpoint.application.skills
 
-  // 1. Exact counts
+  if (fixture.size !== recipe.cards || manifest.size !== recipe.cards) {
+    throw new Error(`Fixture size mismatch: recipe ${recipe.cards}, fixture ${fixture.size}, manifest ${manifest.size}`)
+  }
   if (cards.length !== recipe.cards) {
-    throw new Error(
-      `AC1 Violation: card count must be exactly ${recipe.cards}, got ${cards.length}`
-    )
+    throw new Error(`AC1 Violation: card count must be exactly ${recipe.cards}, got ${cards.length}`)
   }
   if (connections.length !== recipe.connections) {
-    throw new Error(
-      `AC1 Violation: connection count must be exactly ${recipe.connections}, got ${connections.length}`
-    )
+    throw new Error(`AC1 Violation: connection count must be exactly ${recipe.connections}, got ${connections.length}`)
   }
   if (skills.length !== recipe.cards) {
-    throw new Error(
-      `AC1 Violation: skill count in application must be exactly ${recipe.cards}, got ${skills.length}`
-    )
+    throw new Error(`AC1 Violation: skill count must be exactly ${recipe.cards}, got ${skills.length}`)
   }
 
-  // 2. Card ID stability and uniqueness
-  const cardIdSet = new Set<string>()
-  for (let i = 0; i < cards.length; i++) {
-    const card = cards[i]
-    const expectedId = formatSkillId(i)
-    if (card.id !== expectedId) {
-      throw new Error(`AC1 Violation: expected card ID '${expectedId}', got '${card.id}'`)
+  const cardIds = new Set<string>()
+  cards.forEach((card, i) => {
+    if (card.id !== formatSkillId(i)) {
+      throw new Error(`AC1 Violation: expected card ID '${formatSkillId(i)}', got '${card.id}'`)
     }
-    if (cardIdSet.has(card.id)) {
-      throw new Error(`AC2 Violation: duplicate card ID detected '${card.id}'`)
+    if (cardIds.has(card.id)) {
+      throw new Error(`AC2 Violation: duplicate card ID '${card.id}'`)
     }
-    cardIdSet.add(card.id)
-  }
+    cardIds.add(card.id)
+  })
 
-  // 3. Task association: exactly 1 distinct task per skill, matching IDs, nonempty title/desc
-  const taskIdSet = new Set<string>()
-  for (let i = 0; i < skills.length; i++) {
-    const skill = skills[i]
+  const taskIds = new Set<string>()
+  skills.forEach((skill, i) => {
     if (skill.id !== cards[i].id) {
-      throw new Error(
-        `AC2 Violation: skill ID '${skill.id}' does not match card ID '${cards[i].id}'`
-      )
+      throw new Error(`AC2 Violation: skill ID '${skill.id}' does not match card ID '${cards[i].id}'`)
     }
-    if (!skill.tasks || skill.tasks.length !== 1) {
-      throw new Error(
-        `AC1 Violation: skill '${skill.id}' must have exactly 1 task, got ${skill.tasks?.length ?? 0}`
-      )
+    if (skill.tasks.length !== 1) {
+      throw new Error(`AC1 Violation: skill '${skill.id}' must have exactly 1 task, got ${skill.tasks.length}`)
     }
     const task = skill.tasks[0]
-    const expectedTaskId = formatTaskId(i)
-    if (task.id !== expectedTaskId) {
-      throw new Error(
-        `AC1 Violation: expected task ID '${expectedTaskId}', got '${task.id}'`
-      )
+    if (task.id !== formatTaskId(i)) {
+      throw new Error(`AC1 Violation: expected task ID '${formatTaskId(i)}', got '${task.id}'`)
     }
-    if (!task.title || task.title.trim().length === 0) {
-      throw new Error(`AC1 Violation: task '${task.id}' has empty title`)
+    if (!task.title.trim() || !task.description.trim()) {
+      throw new Error(`AC1 Violation: task '${task.id}' needs a nonempty title and description`)
     }
-    if (!task.description || task.description.trim().length === 0) {
-      throw new Error(`AC1 Violation: task '${task.id}' has empty description`)
+    if (taskIds.has(task.id)) {
+      throw new Error(`AC2 Violation: duplicate task ID '${task.id}'`)
     }
-    if (taskIdSet.has(task.id)) {
-      throw new Error(`AC2 Violation: duplicate task ID detected '${task.id}'`)
-    }
-    taskIdSet.add(task.id)
-  }
+    taskIds.add(task.id)
+  })
 
-  // 4. Connection DAG validation: no self, no duplicate, forward-only, no dangling, acyclic
-  const edgeSet = new Set<string>()
+  const edges = new Set<string>()
   for (const conn of connections) {
     if (conn.from_id === conn.to_id) {
-      throw new Error(
-        `AC2 Violation: self-connection detected on card '${conn.from_id}'`
-      )
+      throw new Error(`AC2 Violation: self-connection on card '${conn.from_id}'`)
     }
     const edgeKey = `${conn.from_id}->${conn.to_id}`
-    if (edgeSet.has(edgeKey)) {
-      throw new Error(
-        `AC2 Violation: duplicate connection detected '${edgeKey}'`
-      )
+    if (edges.has(edgeKey)) {
+      throw new Error(`AC2 Violation: duplicate connection '${edgeKey}'`)
     }
-    edgeSet.add(edgeKey)
-
-    if (!cardIdSet.has(conn.from_id)) {
-      throw new Error(
-        `AC2 Violation: dangling connection from_id '${conn.from_id}' not found in cards`
-      )
+    edges.add(edgeKey)
+    if (!cardIds.has(conn.from_id) || !cardIds.has(conn.to_id)) {
+      throw new Error(`AC2 Violation: dangling connection '${edgeKey}'`)
     }
-    if (!cardIdSet.has(conn.to_id)) {
-      throw new Error(
-        `AC2 Violation: dangling connection to_id '${conn.to_id}' not found in cards`
-      )
-    }
-
-    const fromIdx = parseSkillIndex(conn.from_id)
-    const toIdx = parseSkillIndex(conn.to_id)
-    if (fromIdx >= toIdx) {
-      throw new Error(
-        `AC2 Violation: backward or cyclic connection from '${conn.from_id}' to '${conn.to_id}'`
-      )
+    // Every edge points to a higher index, so no cycle can exist.
+    if (parseSkillIndex(conn.from_id) >= parseSkillIndex(conn.to_id)) {
+      throw new Error(`AC2 Violation: backward or cyclic connection '${edgeKey}'`)
     }
   }
 
-  // 5. Checkpoint schema and semantic integrity
   validateCheckpointIntegrity(checkpoint, manifest.learning_path_id)
   CameraStateSchema.parse(camera)
 
-  // 6. Deterministic hash verification
-  const computedHash = computeCheckpointHash(checkpoint)
-  if (computedHash !== manifest.checkpoint_hash) {
-    throw new Error(
-      `AC1 Violation: checkpoint hash mismatch: manifest has '${manifest.checkpoint_hash}', computed '${computedHash}'`
-    )
+  const hashes = {
+    checkpoint_hash: computeCheckpointHash(checkpoint),
+    editor_identity_hash: computeEditorIdentityHash(checkpoint.editor),
+    application_hash: computeApplicationHash(checkpoint.application),
+  }
+  for (const [field, computed] of Object.entries(hashes)) {
+    const recorded = manifest[field as keyof typeof hashes]
+    if (computed !== recorded) {
+      throw new Error(`AC1 Violation: ${field} mismatch: manifest '${recorded}', computed '${computed}'`)
+    }
   }
 }
 
-/**
- * Computes positive-area intersection of cards with canvas rect [0, W] x [0, H] (Contract §4).
- */
-export function computeCardVisibility(
+export interface CanvasRect {
+  left: number
+  top: number
+  width: number
+  height: number
+}
+
+/** True when two rectangles overlap with positive area (contract §4 visibility). */
+export function intersectsWithPositiveArea(a: CanvasRect, b: CanvasRect): boolean {
+  const width = Math.min(a.left + a.width, b.left + b.width) - Math.max(a.left, b.left)
+  const height = Math.min(a.top + a.height, b.top + b.height) - Math.max(a.top, b.top)
+  return width > 0 && height > 0
+}
+
+/** A card displaced along the planned drag path. */
+export interface CardDisplacement {
+  id: string
+  dx: number
+  dy: number
+}
+
+/** IDs of cards whose screen rectangle intersects the canvas [0,W]x[0,H]. */
+export function computeVisibleCardIds(
   cards: SkillCard[],
   camera: CameraState,
-  canvasCss: { width: number; height: number } = SETTLED_CANVAS_CSS
-): { visibleCardIds: string[]; visibleCount: number } {
-  const { width: W, height: H } = canvasCss
-  const { offset_x, offset_y, zoom } = camera
-  const visibleCardIds: string[] = []
-
+  canvasCss: Size,
+  displacement?: CardDisplacement
+): string[] {
+  const canvas = { left: 0, top: 0, ...canvasCss }
+  const visible: string[] = []
   for (const card of cards) {
-    const sx = card.position.x * zoom + offset_x
-    const sy = card.position.y * zoom + offset_y
-    const sw = card.size.width * zoom
-    const sh = card.size.height * zoom
-
-    const interW = Math.max(0, Math.min(sx + sw, W) - Math.max(sx, 0))
-    const interH = Math.max(0, Math.min(sy + sh, H) - Math.max(sy, 0))
-
-    if (interW > 0 && interH > 0) {
-      visibleCardIds.push(card.id)
+    const moved = displacement?.id === card.id
+    const x = card.position.x + (moved ? displacement.dx : 0)
+    const y = card.position.y + (moved ? displacement.dy : 0)
+    const rect = {
+      left: x * camera.zoom + camera.offset_x,
+      top: y * camera.zoom + camera.offset_y,
+      width: card.size.width * camera.zoom,
+      height: card.size.height * camera.zoom,
     }
+    if (intersectsWithPositiveArea(rect, canvas)) visible.push(card.id)
   }
-
-  return {
-    visibleCardIds,
-    visibleCount: visibleCardIds.length,
-  }
+  return visible
 }
 
 /**
- * Computes connection visibility against the canvas rect (Contract §4).
- * Returns both endpoints visible count, at least one endpoint visible, and bounding box intersection.
+ * Conservative connection counts. The renderer tessellates curves, so these
+ * centre-to-centre figures are estimates, not exact mesh intersections.
  */
-export function computeConnectionVisibility(
+export function estimateConnectionVisibility(
   connections: PrerequisiteConnection[],
-  cardsById: Map<string, SkillCard>,
+  cards: SkillCard[],
   camera: CameraState,
-  canvasCss: { width: number; height: number } = SETTLED_CANVAS_CSS
-): {
-  bothEndpointsVisibleCount: number
-  atLeastOneEndpointVisibleCount: number
-  boundingBoxIntersectsCount: number
-} {
-  const { width: W, height: H } = canvasCss
-  const { offset_x, offset_y, zoom } = camera
+  canvasCss: Size
+): { both_endpoint_centres_visible_estimate: number; bounding_box_intersects_estimate: number } {
+  const cardsById = new Map(cards.map((c) => [c.id, c]))
+  const centre = (card: SkillCard) => ({
+    x: (card.position.x + card.size.width / 2) * camera.zoom + camera.offset_x,
+    y: (card.position.y + card.size.height / 2) * camera.zoom + camera.offset_y,
+  })
+  const inside = (p: WorldPoint) => p.x >= 0 && p.x <= canvasCss.width && p.y >= 0 && p.y <= canvasCss.height
 
-  let bothEndpointsVisibleCount = 0
-  let atLeastOneEndpointVisibleCount = 0
-  let boundingBoxIntersectsCount = 0
-
+  let both = 0
+  let bbox = 0
   for (const conn of connections) {
-    const fromCard = cardsById.get(conn.from_id)
-    const toCard = cardsById.get(conn.to_id)
-    if (!fromCard || !toCard) continue
-
-    const fromCx = (fromCard.position.x + fromCard.size.width / 2) * zoom + offset_x
-    const fromCy = (fromCard.position.y + fromCard.size.height / 2) * zoom + offset_y
-    const toCx = (toCard.position.x + toCard.size.width / 2) * zoom + offset_x
-    const toCy = (toCard.position.y + toCard.size.height / 2) * zoom + offset_y
-
-    const fromIn = fromCx >= 0 && fromCx <= W && fromCy >= 0 && fromCy <= H
-    const toIn = toCx >= 0 && toCx <= W && toCy >= 0 && toCy <= H
-
-    if (fromIn && toIn) bothEndpointsVisibleCount++
-    if (fromIn || toIn) atLeastOneEndpointVisibleCount++
-
-    const minX = Math.min(fromCx, toCx)
-    const maxX = Math.max(fromCx, toCx)
-    const minY = Math.min(fromCy, toCy)
-    const maxY = Math.max(fromCy, toCy)
-
-    if (maxX >= 0 && minX <= W && maxY >= 0 && minY <= H) {
-      boundingBoxIntersectsCount++
-    }
+    const from = cardsById.get(conn.from_id)
+    const to = cardsById.get(conn.to_id)
+    if (!from || !to) continue
+    const a = centre(from)
+    const b = centre(to)
+    if (inside(a) && inside(b)) both++
+    // Closed-interval test: a horizontal or vertical segment has a zero-area box.
+    if (Math.max(a.x, b.x) >= 0 && Math.min(a.x, b.x) <= canvasCss.width &&
+        Math.max(a.y, b.y) >= 0 && Math.min(a.y, b.y) <= canvasCss.height) bbox++
   }
-
-  return {
-    bothEndpointsVisibleCount,
-    atLeastOneEndpointVisibleCount,
-    boundingBoxIntersectsCount,
-  }
+  return { both_endpoint_centres_visible_estimate: both, bounding_box_intersects_estimate: bbox }
 }
 
 export interface PathVisibilityResult {
-  initialVisible: number
-  minVisible: number
-  maxVisible: number
-  inBand: boolean
+  initial_visible: number
+  min_visible: number
+  max_visible: number
+  samples: number
+  in_band: boolean
   violations: string[]
 }
 
+/** Samples per half-period of the planned motion (0.05 of the amplitude). */
+const PATH_STEPS = 20
+
+/** Screen-space pan/drag amplitude in CSS px for a fixture (contract §5). */
+export function motionAmplitudeCss(geometry: FixtureGeometry, motion: PlannedMotion): number {
+  return motion.amplitude_cell_fraction * geometry.cell_pitch_world.x * geometry.z0
+}
+
+/** Zoom factor at a motion phase in [-1, 1], reaching the contract extremes at ±1. */
+export function zoomFactorAt(phase: number, motion: PlannedMotion): number {
+  return phase >= 0 ? 1 + phase * (motion.zoom_max_factor - 1) : 1 + phase * (1 - motion.zoom_min_factor)
+}
+
+/** Camera after zooming by `factor` about the canvas centre. */
+export function zoomAboutCentre(camera: CameraState, factor: number, canvas: Size): CameraState {
+  return {
+    offset_x: canvas.width / 2 - (canvas.width / 2 - camera.offset_x) * factor,
+    offset_y: canvas.height / 2 - (canvas.height / 2 - camera.offset_y) * factor,
+    zoom: camera.zoom * factor,
+  }
+}
+
 /**
- * Validates that the geometric card visibility stays strictly within the
- * required band (180-240 for 1000/10000; exactly 100 for 100) across all points
- * along the planned interaction path (Contract §4 & §5, AC 4).
+ * Checks geometric card visibility along the planned pan, zoom and drag paths
+ * (contract §5): pan moves camera X and drag moves the centre card by the
+ * contract amplitude, zoom scales between the contract factors about the canvas
+ * centre. Every sample must stay inside the visibility band, if one applies.
  */
-export function validatePlannedPathVisibility(
-  fixture: BenchmarkFixture,
-  canvasCss: { width: number; height: number } = SETTLED_CANVAS_CSS
-): PathVisibilityResult {
-  const { recipe, geometry, checkpoint, camera } = fixture
+export function validatePlannedPathVisibility(fixture: BenchmarkFixture, motion: PlannedMotion): PathVisibilityResult {
+  const { recipe, checkpoint, camera, manifest } = fixture
+  const { canvas_css: canvas, center_card } = manifest.geometry
+  const amplitude = motionAmplitudeCss(manifest.geometry, motion)
   const cards = checkpoint.editor.cards
-  const { width: W, height: H } = canvasCss
-  const { px, z0, center_col, center_row } = geometry
-
-  const initial = computeCardVisibility(cards, camera, canvasCss).visibleCount
   const violations: string[] = []
+  const counts: number[] = []
 
+  const countVisible = (label: string, view: CameraState, displacement?: CardDisplacement) => {
+    const count = computeVisibleCardIds(cards, view, canvas, displacement).length
+    counts.push(count)
+    const band = recipe.visibility_band
+    if (band && (count < band.min || count > band.max)) {
+      violations.push(`${label}: ${count} visible cards left band [${band.min}, ${band.max}]`)
+    }
+  }
+
+  const initial = computeVisibleCardIds(cards, camera, canvas).length
   if (initial !== recipe.initial_visible_cards) {
-    violations.push(
-      `Initial visible count ${initial} does not match recipe target ${recipe.initial_visible_cards}`
-    )
+    violations.push(`initial: ${initial} visible cards, expected ${recipe.initial_visible_cards}`)
   }
 
-  let minVisible = initial
-  let maxVisible = initial
-
-  function checkStep(ox: number, oy: number, zoom: number, movedCenterCard?: { dx: number; dy: number }) {
-    let count = 0
-    const centerIndex = center_row * recipe.grid_columns + center_col
-
-    for (let i = 0; i < cards.length; i++) {
-      const card = cards[i]
-      let posX = card.position.x
-      let posY = card.position.y
-
-      if (movedCenterCard && i === centerIndex) {
-        posX += movedCenterCard.dx
-        posY += movedCenterCard.dy
-      }
-
-      const sx = posX * zoom + ox
-      const sy = posY * zoom + oy
-      const sw = card.size.width * zoom
-      const sh = card.size.height * zoom
-
-      const interW = Math.max(0, Math.min(sx + sw, W) - Math.max(sx, 0))
-      const interH = Math.max(0, Math.min(sy + sh, H) - Math.max(sy, 0))
-
-      if (interW > 0 && interH > 0) {
-        count++
-      }
-    }
-
-    minVisible = Math.min(minVisible, count)
-    maxVisible = Math.max(maxVisible, count)
-
-    if (count < recipe.visible_cards_min || count > recipe.visible_cards_max) {
-      violations.push(
-        `Visible count ${count} left allowed band [${recipe.visible_cards_min}, ${recipe.visible_cards_max}]`
-      )
-    }
-  }
-
-  // 1. Pan motion: camera X shifts between +-0.1 screen-space cell pitch (W / targetCols)
-  const cellPitchScreenX = W / recipe.target_columns
-  for (let step = -1; step <= 1; step += 0.05) {
-    const shiftX = step * 0.1 * cellPitchScreenX
-    checkStep(camera.offset_x + shiftX, camera.offset_y, z0)
-  }
-
-  // 2. Zoom motion: zoom between 0.99*z0 and 1.01*z0 anchored at canvas center (W/2, H/2)
-  for (let step = -1; step <= 1; step += 0.05) {
-    const factor = 1 + step * 0.01
-    const zoom = z0 * factor
-    const ox = W / 2 - (W / 2 - camera.offset_x) * factor
-    const oy = H / 2 - (H / 2 - camera.offset_y) * factor
-    checkStep(ox, oy, zoom)
-  }
-
-  // 3. Drag motion: center card moves horizontally by +-0.1 cell pitch while mouse is down
-  for (let step = -1; step <= 1; step += 0.05) {
-    const dx = step * 0.1 * px
-    checkStep(camera.offset_x, camera.offset_y, z0, { dx, dy: 0 })
+  for (let k = -PATH_STEPS; k <= PATH_STEPS; k++) {
+    const phase = k / PATH_STEPS
+    countVisible(`pan ${phase}`, { ...camera, offset_x: camera.offset_x + phase * amplitude })
+    countVisible(`zoom ${phase}`, zoomAboutCentre(camera, zoomFactorAt(phase, motion), canvas))
+    countVisible(`drag ${phase}`, camera, { id: center_card.id, dx: (phase * amplitude) / camera.zoom, dy: 0 })
   }
 
   return {
-    initialVisible: initial,
-    minVisible,
-    maxVisible,
-    inBand: violations.length === 0,
+    initial_visible: initial,
+    min_visible: Math.min(initial, ...counts),
+    max_visible: Math.max(initial, ...counts),
+    samples: counts.length + 1,
+    in_band: violations.length === 0,
     violations,
   }
 }
 
-/**
- * Writes the manifest, checkpoint, and camera JSON files for one fixture to disk.
- */
-export function writeFixtureFiles(
-  outDir: string,
-  fixture: BenchmarkFixture
-): { manifestPath: string; checkpointPath: string; cameraPath: string } {
-  mkdirSync(outDir, { recursive: true })
+export interface FixtureFiles {
+  manifest: string
+  checkpoint: string
+  camera: string
+}
 
-  const manifestPath = join(outDir, `manifest-${fixture.size}.json`)
-  const checkpointPath = join(outDir, `checkpoint-${fixture.size}.json`)
-  const cameraPath = join(outDir, `camera-${fixture.size}.json`)
+export function fixtureFilePaths(dir: string, size: BenchmarkSize): FixtureFiles {
+  return {
+    manifest: join(dir, `manifest-${size}.json`),
+    checkpoint: join(dir, `checkpoint-${size}.json`),
+    camera: join(dir, `camera-${size}.json`),
+  }
+}
 
-  writeFileSync(manifestPath, JSON.stringify(fixture.manifest, null, 2) + '\n')
-  writeFileSync(checkpointPath, JSON.stringify(fixture.checkpoint, null, 2) + '\n')
-  writeFileSync(cameraPath, JSON.stringify(fixture.camera, null, 2) + '\n')
+/** Writes the manifest, checkpoint and camera files for one fixture. */
+export function writeFixtureFiles(dir: string, fixture: BenchmarkFixture): FixtureFiles {
+  mkdirSync(dir, { recursive: true })
+  const files = fixtureFilePaths(dir, fixture.size)
+  writeFileSync(files.manifest, JSON.stringify(fixture.manifest, null, 2) + '\n')
+  writeFileSync(files.checkpoint, JSON.stringify(fixture.checkpoint, null, 2) + '\n')
+  writeFileSync(files.camera, JSON.stringify(fixture.camera, null, 2) + '\n')
+  return files
+}
 
-  return { manifestPath, checkpointPath, cameraPath }
+export class FixtureRejectedError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'FixtureRejectedError'
+  }
 }
 
 /**
- * Seeds a Storage interface (e.g. window.localStorage in Puppeteer) with fixture data.
+ * Reads fixture files back for setup and accepts them only if they are exactly
+ * the recipe regenerated at the recorded canvas. A malformed, mismatched or
+ * smaller workload is rejected instead of being loaded.
  */
-export function seedStorageWithFixture(
-  storage: { setItem: (key: string, value: string) => void },
-  fixture: BenchmarkFixture,
-  accountId = BENCHMARK_ACCOUNT_ID,
-  pathId = BENCHMARK_PATH_ID
-): void {
-  const checkpointKey = `gurow:checkpoint:${accountId}:${pathId}`
-  const cameraKey = `gurow:camera:${accountId}:${pathId}`
+export function readFixtureFiles(
+  contract: BenchmarkContract,
+  dir: string,
+  size: BenchmarkSize
+): BenchmarkFixture {
+  const files = fixtureFilePaths(dir, size)
+  try {
+    const manifest = JSON.parse(readFileSync(files.manifest, 'utf8')) as FixtureManifest
+    const checkpoint = JSON.parse(readFileSync(files.checkpoint, 'utf8')) as LearningPathCheckpoint
+    const camera = JSON.parse(readFileSync(files.camera, 'utf8')) as CameraState
+    if (manifest.size !== size) {
+      throw new Error(`manifest describes ${manifest.size} cards, setup requested ${size}`)
+    }
+    if (manifest.contract_sha256 !== contract.sha256) {
+      throw new Error('manifest was generated from a different contract file')
+    }
+    const expected = generateBenchmarkFixture(contract, size, {
+      canvasCss: manifest.geometry.canvas_css,
+      savedAt: manifest.saved_at,
+    })
+    const loaded: BenchmarkFixture = { size, recipe: expected.recipe, manifest, checkpoint, camera }
+    validateBenchmarkFixture(loaded)
+    if (JSON.stringify(manifest) !== JSON.stringify(expected.manifest)) {
+      throw new Error('manifest differs from the regenerated recipe')
+    }
+    if (JSON.stringify(camera) !== JSON.stringify(expected.camera)) {
+      throw new Error('camera differs from the manifest geometry')
+    }
+    return loaded
+  } catch (err: unknown) {
+    const reason = err instanceof Error ? err.message : String(err)
+    throw new FixtureRejectedError(`Rejected ${size}-card fixture in ${dir}: ${reason}`)
+  }
+}
 
-  storage.setItem(checkpointKey, JSON.stringify(fixture.checkpoint))
-  storage.setItem(cameraKey, JSON.stringify(fixture.camera))
+/** The route's own storage keys and values that seed one fixture. */
+export function fixtureStorageEntries(fixture: BenchmarkFixture): Array<[string, string]> {
+  const { account_id, learning_path_id } = fixture.manifest
+  return [
+    [getCheckpointKey(account_id, learning_path_id), JSON.stringify(fixture.checkpoint)],
+    [getCameraKey(account_id, learning_path_id), JSON.stringify(fixture.camera)],
+  ]
 }

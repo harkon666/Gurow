@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { readFileSync, realpathSync } from 'node:fs'
 import { resolve, relative, isAbsolute } from 'node:path'
 import { computeProfileHash, validateCollectorProfile, validateReferenceEnvironment, isSoftwareAdapter, type CollectorProfile, type HostEnvironmentInfo } from './collector'
-import { computeCheckpointHash, generateBenchmarkFixture, type FixtureManifest } from './fixture'
+import { computeCheckpointHash, generateBenchmarkFixture, loadBenchmarkContract, type BenchmarkContract, type FixtureManifest } from './fixture'
 
 /** Capture-manifest-v1: all times are milliseconds on the named clock. Every request
  * has exactly one terminal classification; groups contain original input IDs, not
@@ -109,6 +109,10 @@ const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('h
 const APPROVED_V1_SHA256 = '1ffe143745d68eda253d993d8f3dff55043ec042811b3fd2527d03b6ffb72d10'
 // Fixture generator is deterministic and takes no random seed; bind metadata to this implementation.
 const FIXTURE_SEED = 'none-deterministic', FIXTURE_ALGORITHM = 'gurow-grid-gap-v1'
+// Fixture layouts are regenerated from the repository contract file; the canvas they were generated for comes from the manifest.
+let fixtureContract: BenchmarkContract | undefined
+const getFixtureContract = () =>
+  (fixtureContract ??= loadBenchmarkContract(resolve(import.meta.dir, '../../../docs/benchmarks/p1/protocol.json')))
 const good = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0
 const text = (s: unknown): s is string => typeof s === 'string' && s.trim().length > 0
 const hex = (s: unknown) => typeof s === 'string' && /^[a-f0-9]{64}$/i.test(s)
@@ -174,8 +178,8 @@ export function verifyArtifactBindings(m: CaptureManifest, directory: string): s
     try {
       const record = JSON.parse(readFileSync(resolve(directory, manifestArtifact.path), 'utf8')) as FixtureManifest
       const checkpoint = JSON.parse(readFileSync(resolve(directory, checkpointArtifact.path), 'utf8'))
-      const expected = generateBenchmarkFixture(fixture.cards, {
-        savedAt: record.created_at, learningPathId: record.learning_path_id, accountId: record.account_id,
+      const expected = generateBenchmarkFixture(getFixtureContract(), fixture.cards, {
+        canvasCss: record.geometry.canvas_css, savedAt: record.saved_at,
       })
       if (record.contract_id !== m.identity.contract_id || record.size !== fixture.cards || record.card_count !== fixture.cards ||
         record.connection_count !== fixture.connections || record.checkpoint_hash !== fixture.hash)
@@ -188,9 +192,9 @@ export function verifyArtifactBindings(m: CaptureManifest, directory: string): s
       if (fixture.cards === 1000 && ('camera_and_cell' in fixture) &&
         (fixture.seed !== FIXTURE_SEED || fixture.algorithm_version !== FIXTURE_ALGORITHM ||
           Object.keys(fixture.camera_and_cell ?? {}).sort().join(',') !== 'offset_x,offset_y,px,py,z0' ||
-          fixture.camera_and_cell.z0 !== expected.geometry.z0 || fixture.camera_and_cell.px !== expected.geometry.px ||
-          fixture.camera_and_cell.py !== expected.geometry.py || fixture.camera_and_cell.offset_x !== expected.geometry.camera.offset_x ||
-          fixture.camera_and_cell.offset_y !== expected.geometry.camera.offset_y))
+          fixture.camera_and_cell.z0 !== expected.manifest.geometry.z0 || fixture.camera_and_cell.px !== expected.manifest.geometry.cell_pitch_world.x ||
+          fixture.camera_and_cell.py !== expected.manifest.geometry.cell_pitch_world.y || fixture.camera_and_cell.offset_x !== expected.manifest.geometry.camera.offset_x ||
+          fixture.camera_and_cell.offset_y !== expected.manifest.geometry.camera.offset_y))
         errors.push('Primary fixture metadata differs from verified generator geometry and algorithm.')
     } catch { errors.push(`Fixture ${fixture.cards} manifest/checkpoint unreadable or invalid.`) }
   }

@@ -1,265 +1,272 @@
 import { describe, expect, it } from 'bun:test'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import {
   BENCHMARK_SIZES,
-  GRID_RECIPES,
+  computeCheckpointHash,
+  computeEditorIdentityHash,
   computeFixtureGeometry,
-  generateBenchmarkFixture,
-  validateBenchmarkFixture,
-  computeCardVisibility,
-  computeConnectionVisibility,
-  validatePlannedPathVisibility,
+  computeVisibleCardIds,
+  estimateConnectionVisibility,
+  fixtureFilePaths,
+  fixtureStorageEntries,
   formatSkillId,
   formatTaskId,
-  computeCheckpointHash,
+  generateBenchmarkFixture,
+  loadBenchmarkContract,
+  parseBenchmarkContract,
+  readFixtureFiles,
+  validateBenchmarkFixture,
+  validatePlannedPathVisibility,
+  writeFixtureFiles,
+  FixtureRejectedError,
+  type BenchmarkFixture,
+  type BenchmarkSize,
 } from './fixture'
-import type { BenchmarkFixture } from './fixture'
+import { loadCheckpoint } from '../../src/components/editor/checkpoint'
 
-describe('Deterministic Benchmark Fixture Generator (T06-L3-02)', () => {
-  describe('AC1: Exact counts, stable IDs, associated Tasks, and deterministic hashes', () => {
-    for (const size of BENCHMARK_SIZES) {
-      it(`generates exactly ${size} cards and ${GRID_RECIPES[size].connections} connections with stable IDs`, () => {
-        const fixture = generateBenchmarkFixture(size)
+const CONTRACT_PATH = path.resolve(import.meta.dir, '../../../docs/benchmarks/p1/protocol.json')
+const contract = loadBenchmarkContract(CONTRACT_PATH)
+/** Canvas measured at 1200x720 with the list and Task panel open (fixture-check). */
+const CANVAS = { width: 592, height: 628 }
 
-        expect(fixture.checkpoint.editor.cards).toHaveLength(size)
-        expect(fixture.checkpoint.editor.connections).toHaveLength(
-          GRID_RECIPES[size].connections
-        )
-        expect(fixture.checkpoint.application.skills).toHaveLength(size)
+const generate = (size: BenchmarkSize, canvasCss = CANVAS) =>
+  generateBenchmarkFixture(contract, size, { canvasCss })
 
-        // Check stable IDs on first and last elements
-        expect(fixture.checkpoint.editor.cards[0].id).toBe('p1-skill-00000')
-        expect(fixture.checkpoint.editor.cards[size - 1].id).toBe(
-          formatSkillId(size - 1)
-        )
+function mutated(fixture: BenchmarkFixture, change: (f: BenchmarkFixture) => void): BenchmarkFixture {
+  const copy = structuredClone(fixture)
+  change(copy)
+  return copy
+}
 
-        // Check associated Task per Skill
-        for (let i = 0; i < size; i++) {
-          const skill = fixture.checkpoint.application.skills[i]
-          expect(skill.id).toBe(formatSkillId(i))
-          expect(skill.tasks).toHaveLength(1)
-          const task = skill.tasks[0]
-          expect(task.id).toBe(formatTaskId(i))
-          expect(task.title.length).toBeGreaterThan(0)
-          expect(task.description.length).toBeGreaterThan(0)
-        }
+describe('benchmark contract', () => {
+  it('reads every workload from protocol.json instead of restating it', () => {
+    expect(contract.contract_id).toBe('gurow-p1-v1')
+    expect(contract.primary_size).toBe(1000)
+    expect(contract.motion).toEqual({ amplitude_cell_fraction: 0.1, zoom_min_factor: 0.99, zoom_max_factor: 1.01 })
+    expect(contract.sha256).toMatch(/^[a-f0-9]{64}$/)
+    expect(contract.recipes[1000]).toMatchObject({
+      connections: 2000, grid_columns: 25, grid_rows: 40, initial_visible_cards: 200,
+      visibility_band: { min: 180, max: 240 },
+    })
+    expect(contract.recipes[10000]).toMatchObject({ connections: 20000, target_rows: 20, visibility_band: { min: 180, max: 240 } })
+    expect(contract.recipes[100]).toMatchObject({ connections: 200, target_rows: 10, visibility_band: null })
+  })
+
+  it('rejects a different contract or a missing workload', () => {
+    const raw = JSON.parse(readFileSync(CONTRACT_PATH, 'utf8'))
+    expect(() => parseBenchmarkContract(JSON.stringify({ ...raw, contract_id: 'other' }))).toThrow()
+    expect(() => parseBenchmarkContract(JSON.stringify({ ...raw, comparisons: raw.comparisons.slice(0, 1) })))
+      .toThrow(/no 10000-card workload/)
+  })
+})
+
+describe('AC1: exact counts, stable IDs, one Task per Skill, deterministic hashes', () => {
+  for (const size of BENCHMARK_SIZES) {
+    it(`generates ${size} cards and ${2 * size} connections with stable IDs and Tasks`, () => {
+      const fixture = generate(size)
+      expect(fixture.checkpoint.editor.cards).toHaveLength(size)
+      expect(fixture.checkpoint.editor.connections).toHaveLength(2 * size)
+      expect(fixture.checkpoint.application.skills).toHaveLength(size)
+      fixture.checkpoint.application.skills.forEach((skill, i) => {
+        expect(fixture.checkpoint.editor.cards[i].id).toBe(formatSkillId(i))
+        expect(skill.id).toBe(formatSkillId(i))
+        expect(skill.tasks.map((t) => t.id)).toEqual([formatTaskId(i)])
+        expect(skill.tasks[0].title.trim()).not.toBe('')
+        expect(skill.tasks[0].description.trim()).not.toBe('')
       })
-    }
-
-    it('produces completely deterministic SHA-256 hashes across repeated runs', () => {
-      const run1 = generateBenchmarkFixture(1000)
-      const run2 = generateBenchmarkFixture(1000)
-
-      expect(run1.manifest.checkpoint_hash).toBe(run2.manifest.checkpoint_hash)
-      expect(run1.manifest.checkpoint_hash.length).toBe(64)
-      expect(run1.manifest.checkpoint_hash).toMatch(/^[a-f0-9]{64}$/)
-
-      // Altering anything changes the hash
-      const mutatedCheckpoint = structuredClone(run1.checkpoint)
-      mutatedCheckpoint.application.skills[0].tasks[0].title = 'Mutated Task Title'
-      const mutatedHash = computeCheckpointHash(mutatedCheckpoint)
-      expect(mutatedHash).not.toBe(run1.manifest.checkpoint_hash)
     })
+  }
+
+  it('produces identical hashes for the same recipe and canvas', () => {
+    const a = generate(1000)
+    const b = generate(1000)
+    expect(a.manifest).toEqual(b.manifest)
+    expect(a.manifest.checkpoint_hash).toMatch(/^[a-f0-9]{64}$/)
+    const changed = mutated(a, (f) => { f.checkpoint.application.skills[0].tasks[0].title = 'Changed' })
+    expect(computeCheckpointHash(changed.checkpoint)).not.toBe(a.manifest.checkpoint_hash)
   })
 
-  describe('AC2: DAG validity, acyclicity, no dangling/duplicate edges, distinct identities', () => {
+  it('keeps card geometry exact at engine f32 precision', () => {
+    for (const card of generate(1000).checkpoint.editor.cards) {
+      expect(Math.fround(card.position.x)).toBe(card.position.x)
+      expect(Math.fround(card.position.y)).toBe(card.position.y)
+    }
+  })
+
+  it('persists canvas, z0, pitches, start indices and camera in the manifest', () => {
+    const { geometry } = generate(1000).manifest
+    expect(geometry.canvas_css).toEqual(CANVAS)
+    expect(geometry.z0).toBeCloseTo(Math.min(1, 592 / 2200, 628 / 2400), 12)
+    expect(geometry.cell_pitch_world.x * geometry.z0).toBeCloseTo(59.2, 9)
+    expect(geometry.cell_pitch_world.y * geometry.z0).toBeCloseTo(31.4, 9)
+    expect([geometry.start_col, geometry.start_row]).toEqual([7, 10])
+    expect(geometry.camera.offset_x).toBeCloseTo(-7 * 59.2, 9)
+    expect(geometry.camera.offset_y).toBeCloseTo(-10 * 31.4, 9)
+    expect(geometry.center_card.id).toBe(formatSkillId(20 * 25 + 12))
+  })
+})
+
+describe('AC2: DAG validity and fixture identity', () => {
+  for (const size of BENCHMARK_SIZES) {
+    it(`builds a forward-only DAG without self, duplicate or dangling edges for ${size}`, () => {
+      const fixture = generate(size)
+      const ids = new Set(fixture.checkpoint.editor.cards.map((c) => c.id))
+      const edges = new Set<string>()
+      for (const { from_id, to_id } of fixture.checkpoint.editor.connections) {
+        expect(ids.has(from_id) && ids.has(to_id)).toBe(true)
+        expect(from_id < to_id).toBe(true)
+        edges.add(`${from_id}->${to_id}`)
+      }
+      expect(edges.size).toBe(2 * size)
+    })
+  }
+
+  it('gives each size and each canvas its own identity', () => {
+    const hashes = new Set(BENCHMARK_SIZES.map((size) => generate(size).manifest.checkpoint_hash))
+    expect(hashes.size).toBe(3)
+    expect(generate(1000, { width: 600, height: 628 }).manifest.editor_identity_hash)
+      .not.toBe(generate(1000).manifest.editor_identity_hash)
+  })
+
+  it('passes the route checkpoint loader unchanged', () => {
+    const fixture = generate(1000)
+    const storage = new Map(fixtureStorageEntries(fixture))
+    const loaded = loadCheckpoint(
+      { getItem: (key: string) => storage.get(key) ?? null } as Storage,
+      fixture.manifest.account_id,
+      fixture.manifest.learning_path_id
+    )
+    expect(loaded).toEqual(fixture.checkpoint)
+  })
+
+  it('matches an engine export whatever its order and decimal rendering', () => {
+    const fixture = generate(1000)
+    const exported = {
+      cards: [...fixture.checkpoint.editor.cards].reverse().map((c) => ({
+        ...c, position: { x: Number(c.position.x.toPrecision(9)), y: Number(c.position.y.toPrecision(9)) },
+      })),
+      connections: [...fixture.checkpoint.editor.connections].reverse(),
+    }
+    expect(computeEditorIdentityHash(exported)).toBe(fixture.manifest.editor_identity_hash)
+    exported.cards[0].position.x += 1
+    expect(computeEditorIdentityHash(exported)).not.toBe(fixture.manifest.editor_identity_hash)
+  })
+
+  const invalid: Array<[string, (f: BenchmarkFixture) => void, RegExp]> = [
+    ['a mismatched Skill ID', (f) => { f.checkpoint.application.skills[0].id = 'wrong-id' }, /AC2 Violation: skill ID/],
+    ['a self-connection', (f) => { f.checkpoint.editor.connections[0] = { from_id: formatSkillId(0), to_id: formatSkillId(0) } }, /self-connection/],
+    ['a backward edge', (f) => { f.checkpoint.editor.connections[0] = { from_id: formatSkillId(10), to_id: formatSkillId(5) } }, /backward or cyclic/],
+    ['a dangling edge', (f) => { f.checkpoint.editor.connections[0] = { from_id: formatSkillId(0), to_id: 'p1-skill-99999' } }, /dangling connection/],
+    ['a duplicate edge', (f) => { f.checkpoint.editor.connections[1] = { ...f.checkpoint.editor.connections[0] } }, /duplicate connection/],
+    ['an empty Task title', (f) => { f.checkpoint.application.skills[0].tasks[0].title = '  ' }, /nonempty title/],
+    ['a second Task on one Skill', (f) => { f.checkpoint.application.skills[0].tasks.push({ ...f.checkpoint.application.skills[1].tasks[0] }) }, /exactly 1 task/],
+    ['a tampered hash', (f) => { f.manifest.checkpoint_hash = 'bad' }, /checkpoint_hash mismatch/],
+  ]
+  for (const [name, change, error] of invalid) {
+    it(`rejects ${name}`, () => {
+      expect(() => validateBenchmarkFixture(mutated(generate(100), change))).toThrow(error)
+    })
+  }
+})
+
+describe('AC4: geometry and planned-path visibility', () => {
+  it('shows 200 cards for the primary and large workloads and the whole 100-card grid', () => {
+    for (const [size, visible] of [[100, 100], [1000, 200], [10000, 200]] as const) {
+      const fixture = generate(size)
+      expect(computeVisibleCardIds(fixture.checkpoint.editor.cards, fixture.camera, CANVAS)).toHaveLength(visible)
+    }
+  })
+
+  for (const size of [1000, 10000] as const) {
+    it(`keeps ${size} cards inside [180, 240] along the pan, zoom and drag paths`, () => {
+      const result = validatePlannedPathVisibility(generate(size), contract.motion)
+      expect(result.violations).toEqual([])
+      expect(result.initial_visible).toBe(200)
+      expect(result.min_visible).toBeGreaterThanOrEqual(180)
+      expect(result.max_visible).toBeLessThanOrEqual(240)
+      expect(result.samples).toBe(3 * 41 + 1)
+    })
+  }
+
+  it('reports the 100-card comparison without applying the primary band', () => {
+    const result = validatePlannedPathVisibility(generate(100), contract.motion)
+    expect(result.in_band).toBe(true)
+    expect(result.initial_visible).toBe(100)
+  })
+
+  it('reports a camera that leaves the band', () => {
+    const fixture = generate(1000)
+    const shifted = mutated(fixture, (f) => { f.manifest.geometry.canvas_css = { width: 800, height: 628 } })
+    expect(validatePlannedPathVisibility(shifted, contract.motion).in_band).toBe(false)
+  })
+
+  it('labels connection counts as estimates', () => {
+    const fixture = generate(1000)
+    const counts = estimateConnectionVisibility(
+      fixture.checkpoint.editor.connections, fixture.checkpoint.editor.cards, fixture.camera, CANVAS
+    )
+    expect(counts.both_endpoint_centres_visible_estimate).toBeGreaterThan(0)
+    expect(counts.bounding_box_intersects_estimate).toBeGreaterThanOrEqual(counts.both_endpoint_centres_visible_estimate)
+  })
+
+  it('fails geometry setup when z0 leaves [0.1, 4]', () => {
+    expect(() => computeFixtureGeometry(contract.recipes[1000], contract.card_size_world, { width: 100, height: 100 }))
+      .toThrow(/Geometry setup failure/)
+  })
+})
+
+describe('AC6: setup rejects malformed or substituted fixture files', () => {
+  const setupDir = () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'gurow-fixture-'))
+    for (const size of BENCHMARK_SIZES) writeFixtureFiles(dir, generate(size))
+    return dir
+  }
+
+  it('accepts the files it wrote', () => {
+    const dir = setupDir()
     for (const size of BENCHMARK_SIZES) {
-      it(`validates strict DAG invariants for ${size} cards without cycles or self-edges`, () => {
-        const fixture = generateBenchmarkFixture(size)
-        const cards = fixture.checkpoint.editor.cards
-        const connections = fixture.checkpoint.editor.connections
-        const cardIdSet = new Set(cards.map((c) => c.id))
-
-        expect(cardIdSet.size).toBe(size)
-
-        const edgeSet = new Set<string>()
-        for (const conn of connections) {
-          // No self connection
-          expect(conn.from_id).not.toBe(conn.to_id)
-
-          // No duplicate connection
-          const key = `${conn.from_id}->${conn.to_id}`
-          expect(edgeSet.has(key)).toBe(false)
-          edgeSet.add(key)
-
-          // Endpoints exist
-          expect(cardIdSet.has(conn.from_id)).toBe(true)
-          expect(cardIdSet.has(conn.to_id)).toBe(true)
-
-          // Forward only (i < j guarantees acyclicity)
-          const fromIndex = parseInt(conn.from_id.replace('p1-skill-', ''), 10)
-          const toIndex = parseInt(conn.to_id.replace('p1-skill-', ''), 10)
-          expect(fromIndex).toBeLessThan(toIndex)
-        }
-      })
+      expect(readFixtureFiles(contract, dir, size).manifest).toEqual(generate(size).manifest)
     }
-
-    it('produces distinct hashes and identities when size changes', () => {
-      const fix100 = generateBenchmarkFixture(100)
-      const fix1000 = generateBenchmarkFixture(1000)
-      const fix10000 = generateBenchmarkFixture(10000)
-
-      const hashes = new Set([
-        fix100.manifest.checkpoint_hash,
-        fix1000.manifest.checkpoint_hash,
-        fix10000.manifest.checkpoint_hash,
-      ])
-      expect(hashes.size).toBe(3)
-    })
   })
 
-  describe('AC4: Geometry, visibility targeting 200 cards, and planned path validation', () => {
-    it('computes exact initial visible cards count of 200 for 1000 and 10000, and 100 for 100', () => {
-      const fix100 = generateBenchmarkFixture(100)
-      const fix1000 = generateBenchmarkFixture(1000)
-      const fix10000 = generateBenchmarkFixture(10000)
+  const edit = (file: string, change: (json: any) => void) => {
+    const json = JSON.parse(readFileSync(file, 'utf8'))
+    change(json)
+    writeFileSync(file, JSON.stringify(json))
+  }
 
-      const vis100 = computeCardVisibility(
-        fix100.checkpoint.editor.cards,
-        fix100.camera
-      )
-      expect(vis100.visibleCount).toBe(100)
-
-      const vis1000 = computeCardVisibility(
-        fix1000.checkpoint.editor.cards,
-        fix1000.camera
-      )
-      expect(vis1000.visibleCount).toBe(200)
-
-      const vis10000 = computeCardVisibility(
-        fix10000.checkpoint.editor.cards,
-        fix10000.camera
-      )
-      expect(vis10000.visibleCount).toBe(200)
-    })
-
-    it('keeps primary (1000) visible cards strictly in [180, 240] throughout pan, zoom, and drag paths', () => {
-      const fix1000 = generateBenchmarkFixture(1000)
-      const result = validatePlannedPathVisibility(fix1000)
-
-      expect(result.initialVisible).toBe(200)
-      expect(result.minVisible).toBeGreaterThanOrEqual(180)
-      expect(result.maxVisible).toBeLessThanOrEqual(240)
-      expect(result.inBand).toBe(true)
-      expect(result.violations).toHaveLength(0)
-    })
-
-    it('keeps large (10000) visible cards strictly in [180, 240] throughout pan, zoom, and drag paths', () => {
-      const fix10000 = generateBenchmarkFixture(10000)
-      const result = validatePlannedPathVisibility(fix10000)
-
-      expect(result.initialVisible).toBe(200)
-      expect(result.minVisible).toBeGreaterThanOrEqual(180)
-      expect(result.maxVisible).toBeLessThanOrEqual(240)
-      expect(result.inBand).toBe(true)
-      expect(result.violations).toHaveLength(0)
-    })
-
-    it('computes connection visibility metrics separating both-endpoints from bounding box', () => {
-      const fix1000 = generateBenchmarkFixture(1000)
-      const cardsById = new Map(
-        fix1000.checkpoint.editor.cards.map((c) => [c.id, c])
-      )
-      const connVis = computeConnectionVisibility(
-        fix1000.checkpoint.editor.connections,
-        cardsById,
-        fix1000.camera
-      )
-
-      expect(connVis.bothEndpointsVisibleCount).toBeGreaterThan(0)
-      expect(connVis.atLeastOneEndpointVisibleCount).toBeGreaterThanOrEqual(
-        connVis.bothEndpointsVisibleCount
-      )
-      expect(connVis.boundingBoxIntersectsCount).toBeGreaterThanOrEqual(
-        connVis.atLeastOneEndpointVisibleCount
-      )
-    })
-
-    it('fails geometry setup if scale z0 falls outside [0.1, 4.0]', () => {
-      expect(() => {
-        computeFixtureGeometry(1000, { width: 100, height: 100 })
-      }).toThrow(/Geometry setup failure: computed z0 .* is outside permitted bounds/)
-    })
+  it('rejects a smaller workload presented as the primary one', () => {
+    const dir = setupDir()
+    const primary = fixtureFilePaths(dir, 1000)
+    const small = fixtureFilePaths(dir, 100)
+    writeFileSync(primary.checkpoint, readFileSync(small.checkpoint))
+    expect(() => readFixtureFiles(contract, dir, 1000)).toThrow(FixtureRejectedError)
   })
 
-  describe('AC6: Rejection of malformed/mismatched fixtures', () => {
-    it('rejects a fixture with mismatched skill IDs in application payload', () => {
-      const valid = generateBenchmarkFixture(100)
-      const invalid = structuredClone(valid) as BenchmarkFixture
-      invalid.checkpoint.application.skills[0].id = 'wrong-id'
+  it('rejects a manifest for another size', () => {
+    const dir = setupDir()
+    writeFileSync(fixtureFilePaths(dir, 1000).manifest, readFileSync(fixtureFilePaths(dir, 100).manifest))
+    expect(() => readFixtureFiles(contract, dir, 1000)).toThrow(/manifest describes 100 cards/)
+  })
 
-      expect(() => validateBenchmarkFixture(invalid)).toThrow(/AC2 Violation/)
-    })
+  it('rejects an orphan card, a moved camera and truncated JSON', () => {
+    const dir = setupDir()
+    const files = fixtureFilePaths(dir, 1000)
+    const original = readFileSync(files.checkpoint)
+    edit(files.checkpoint, (c) => { c.editor.cards[0].id = 'orphan' })
+    expect(() => readFixtureFiles(contract, dir, 1000)).toThrow(FixtureRejectedError)
+    writeFileSync(files.checkpoint, original)
+    edit(files.camera, (c) => { c.offset_x += 1 })
+    expect(() => readFixtureFiles(contract, dir, 1000)).toThrow(/camera differs/)
+    writeFileSync(files.manifest, '{"size": 1000')
+    expect(() => readFixtureFiles(contract, dir, 1000)).toThrow(FixtureRejectedError)
+  })
 
-    it('rejects a fixture with self-connections', () => {
-      const valid = generateBenchmarkFixture(100)
-      const invalid = structuredClone(valid) as BenchmarkFixture
-      invalid.checkpoint.editor.connections[0] = {
-        from_id: 'p1-skill-00000',
-        to_id: 'p1-skill-00000',
-      }
-
-      expect(() => validateBenchmarkFixture(invalid)).toThrow(
-        /AC2 Violation: self-connection/
-      )
-    })
-
-    it('rejects a fixture with backward or cyclic connections', () => {
-      const valid = generateBenchmarkFixture(100)
-      const invalid = structuredClone(valid) as BenchmarkFixture
-      invalid.checkpoint.editor.connections[0] = {
-        from_id: 'p1-skill-00010',
-        to_id: 'p1-skill-00005',
-      }
-
-      expect(() => validateBenchmarkFixture(invalid)).toThrow(
-        /AC2 Violation: backward or cyclic connection/
-      )
-    })
-
-    it('rejects a fixture with dangling connections', () => {
-      const valid = generateBenchmarkFixture(100)
-      const invalid = structuredClone(valid) as BenchmarkFixture
-      invalid.checkpoint.editor.connections[0] = {
-        from_id: 'p1-skill-00000',
-        to_id: 'p1-skill-99999',
-      }
-
-      expect(() => validateBenchmarkFixture(invalid)).toThrow(
-        /AC2 Violation: dangling connection/
-      )
-    })
-
-    it('rejects a fixture with duplicate connections', () => {
-      const valid = generateBenchmarkFixture(100)
-      const invalid = structuredClone(valid) as BenchmarkFixture
-      invalid.checkpoint.editor.connections[1] = {
-        from_id: invalid.checkpoint.editor.connections[0].from_id,
-        to_id: invalid.checkpoint.editor.connections[0].to_id,
-      }
-
-      expect(() => validateBenchmarkFixture(invalid)).toThrow(
-        /AC2 Violation: duplicate connection/
-      )
-    })
-
-    it('rejects a fixture with empty task title or description', () => {
-      const valid = generateBenchmarkFixture(100)
-      const invalid = structuredClone(valid) as BenchmarkFixture
-      invalid.checkpoint.application.skills[0].tasks[0].title = '   '
-
-      expect(() => validateBenchmarkFixture(invalid)).toThrow(
-        /AC1 Violation: task '.*' has empty title/
-      )
-    })
-
-    it('rejects a fixture with a tampered checkpoint hash', () => {
-      const valid = generateBenchmarkFixture(100)
-      const invalid = structuredClone(valid) as BenchmarkFixture
-      invalid.manifest.checkpoint_hash = 'bad-hash'
-
-      expect(() => validateBenchmarkFixture(invalid)).toThrow(
-        /AC1 Violation: checkpoint hash mismatch/
-      )
-    })
+  it('rejects files generated from another contract', () => {
+    const dir = setupDir()
+    edit(fixtureFilePaths(dir, 100).manifest, (m) => { m.contract_sha256 = '0'.repeat(64) })
+    expect(() => readFixtureFiles(contract, dir, 100)).toThrow(/different contract/)
   })
 })

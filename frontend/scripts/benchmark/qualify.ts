@@ -16,7 +16,6 @@ import { spawn, execSync } from 'child_process'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
-import { createHash } from 'crypto'
 import {
   computeProfileHash,
   deriveClockMapping,
@@ -38,6 +37,7 @@ import {
   type TraceEvent,
 } from './collector'
 import { finalizeQualification } from './qualification'
+import { computeBuildHash, resolveChromiumExecutable, waitForServerReady } from './browser'
 import { computeSourceFingerprint } from './sourceFingerprint'
 import { phaseDiagnosticCpu, phaseLabelCommitMs, phaseLatency, type PhaseWindow } from './phases'
 import { runNegativeCases } from './negativeCases'
@@ -113,34 +113,6 @@ function parseArgs(argv: string[]): DriverOptions {
 
 const options = parseArgs(process.argv.slice(2))
 
-function resolveChromiumExecutable(): string {
-  if (process.env.PUPPETEER_EXECUTABLE_PATH) return process.env.PUPPETEER_EXECUTABLE_PATH
-  if (process.env.CHROME_BIN) return process.env.CHROME_BIN
-  const candidates = ['chromium', 'google-chrome-stable', 'google-chrome']
-  for (const bin of candidates) {
-    try {
-      const resolved = execSync(`which ${bin} 2>/dev/null`, { encoding: 'utf8' }).trim()
-      if (resolved && fs.existsSync(resolved)) return resolved
-    } catch {
-      // continue
-    }
-  }
-  throw new Error('Chromium executable not found in PATH.')
-}
-
-async function waitForServerReady(url: string, maxAttempts = 30): Promise<void> {
-  for (let i = 0; i < maxAttempts; i++) {
-    try {
-      const res = await fetch(url)
-      if (res.ok || res.status === 200) return
-    } catch {
-      // continue
-    }
-    await new Promise((resolve) => setTimeout(resolve, 500))
-  }
-  throw new Error(`Server at ${url} failed to respond after ${maxAttempts} attempts.`)
-}
-
 function tryExec(command: string): string | null {
   try {
     const out = execSync(command, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
@@ -210,23 +182,7 @@ function probeDisplay(): { output: string | null; refreshHz: number | null } {
 function getSourceIdentity(): SourceIdentity {
   const commit = tryExec(`git -C ${REPO_ROOT} rev-parse HEAD`) ?? UNKNOWN
   const status = tryExec(`git -C ${REPO_ROOT} status --porcelain`)
-  const serverEntry = path.resolve(FRONTEND_DIR, '.output/server/index.mjs')
-
-  let buildHash: string = UNKNOWN
-  if (fs.existsSync(serverEntry)) {
-    const hash = createHash('sha256')
-    hash.update(fs.readFileSync(serverEntry))
-    const wasmDir = path.resolve(FRONTEND_DIR, 'src/pkg')
-    if (fs.existsSync(wasmDir)) {
-      for (const entry of fs.readdirSync(wasmDir).sort()) {
-        if (entry.endsWith('.wasm') || entry.endsWith('.js')) {
-          hash.update(entry)
-          hash.update(fs.readFileSync(path.resolve(wasmDir, entry)))
-        }
-      }
-    }
-    buildHash = hash.digest('hex')
-  }
+  const buildHash = computeBuildHash(FRONTEND_DIR) ?? UNKNOWN
 
   return {
     commit,

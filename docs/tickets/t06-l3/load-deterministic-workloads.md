@@ -1,6 +1,6 @@
 # T06-L3-02 — Load deterministic benchmark workloads through the existing application
 
-Status: approved execution packet, published as [#35](https://github.com/harkon666/Gurow/issues/35); implementation pending. Parent: [#7](https://github.com/harkon666/Gurow/issues/7). Contract: [gurow-p1-v1](../../benchmarks/p1/contract.md).
+Status: delivered for [#35](https://github.com/harkon666/Gurow/issues/35); fixtures load through the route with every AC observed in the browser fixture check. This is setup evidence only, not a performance result. Parent: [#7](https://github.com/harkon666/Gurow/issues/7). Contract: [gurow-p1-v1](../../benchmarks/p1/contract.md).
 
 Executor recommendation: **Flash candidate**. Blocked by: **Task A contract pinned; no execution-task blocker**. Parent coverage: AC1, AC2, AC3, AC4. User stories: US80, US83, US84.
 
@@ -55,3 +55,11 @@ Fixture generator/loader API, fixture manifests/hashes, browser evidence for all
 Stop/escalate: Existing load path rejects the specified size, viewport geometry cannot fit, or normal loading needs a domain/protocol redesign. Preserve the failure rather than reducing the workload.
 
 Keep one parent T06 harness baseline once implementation starts. Focused worker checks do not replace parent full verification and independent review. Preserve original criteria and source identity.
+
+## Delivered handoff
+
+- API: `frontend/scripts/benchmark/fixture.ts` reads the workloads from `protocol.json` (`loadBenchmarkContract`), generates them for a measured canvas (`generateBenchmarkFixture`), writes them (`writeFixtureFiles`) and accepts files back only when they reproduce the recipe exactly (`readFixtureFiles`); a malformed or smaller workload raises `FixtureRejectedError`.
+- Supported input: sizes 100, 1,000 and 10,000 from contract `gurow-p1-v1`; any settled canvas whose z0 stays in 0.1–4. At the 1200×720 reference viewport with the list and Task panel open the canvas measures 592×628 CSS px (z0 ≈ 0.2617).
+- `fixture-check.ts` builds the current source and writes, under its `--out` directory, the fixture files, `setup-metadata.json` (file SHA-256s, geometry, editor/application identity hashes, source and build identity, browser/adapter) for L3-03, and `fixture-report.json`/`.md` whose verdicts are derived from recorded observations.
+- Visibility counts cards from the engine's delivered screen rects and HTML labels separately: a label box is 24 CSS px tall while a primary card is about 21, so at zoom 0.99 the check sees 200 cards but 210 labels.
+- Limits: the routine check is headless Chromium with emulated DPR on the software WebGPU adapter, so it is functional evidence only; wheel deltas injected under DPR emulation arrive divided by the DPR, so the probe scales them; the planned path is probed in the browser at its extremes only, and connection counts are estimates. Chromium's Vulkan feature flag composites the WebGPU canvas as black here, so the check does not set it.

@@ -1,6 +1,6 @@
 # T06 / #7 — executable L3 breakdown
 
-Status: **Task A measurement-design complete; seven approved execution packets published as sub-issues #34–#40. L3-01 (#34) is closed with an explicit `UNSUPPORTED` collector verdict; the remaining six are not implemented.** Parent [#7](https://github.com/harkon666/Gurow/issues/7) remains the P1 gate. Seven native parent links, seven blocking edges, all issue bodies and `ready-for-agent` labels were read back and verified on 2026-09-28. The parent body and state were not edited.
+Status: **Task A measurement-design complete; seven approved execution packets published as sub-issues #34–#40. L3-01 (#34) is closed with an explicit `UNSUPPORTED` collector verdict; L3-02 (#35) delivers the deterministic workloads; L3-04 (#36) has a local report reducer; the remaining four are not implemented.** Parent [#7](https://github.com/harkon666/Gurow/issues/7) remains the P1 gate. Seven native parent links, seven blocking edges, all issue bodies and `ready-for-agent` labels were read back and verified on 2026-09-28. The parent body and state were not edited.
 
 Primary input-to-visible latency has **no qualified acquisition path**: see [the qualification status record](../../benchmarks/p1/qualification-status.md) and follow-up [#41](https://github.com/harkon666/Gurow/issues/41), which is recorded as a native blocker of L3-03.
 

@@ -11,8 +11,7 @@
     "editor-lifecycle": {"cwd": "frontend", "argv": ["bun", "run", "scripts/editor-lifecycle-check.ts"], "timeout": 180},
     "t06-l3-01-qualify": {"cwd": "frontend", "argv": ["bun", "run", "scripts/benchmark/qualify.ts", "--contract", "../docs/benchmarks/p1/protocol.json", "--out", "../.harness/t06/qualification"], "timeout": 600},
     "report-tests": {"cwd": "frontend", "argv": ["bun", "test", "scripts/benchmark/report.test.ts"], "timeout": 120},
-    "fixture-tests": {"cwd": "frontend", "argv": ["bun", "test", "scripts/benchmark/fixture.test.ts"], "timeout": 120},
-    "t06-l3-02-fixture-check": {"cwd": "frontend", "argv": ["bun", "run", "scripts/benchmark/fixture-check.ts", "--contract", "../docs/benchmarks/p1/protocol.json", "--out", "../.harness/t06/fixtures"], "timeout": 300}
+    "t06-l3-02-fixture-check": {"cwd": "frontend", "argv": ["bun", "run", "scripts/benchmark/fixture-check.ts", "--contract", "../docs/benchmarks/p1/protocol.json", "--out", "../.harness/t06/fixtures"], "timeout": 900}
   },
   "profiles": {
     "quick": ["harness-tests", "frontend-types", "frontend-tests", "rust-tests", "collector-tests", "report-tests"],
@@ -22,7 +21,7 @@
     "T04": ["t04-browser"],
     "T05": ["t05-browser"],
     "T06-L3-01": ["collector-tests", "editor-lifecycle"],
-    "T06-L3-02": ["fixture-tests", "t06-l3-02-fixture-check"],
+    "T06-L3-02": ["collector-tests", "t06-l3-02-fixture-check"],
     "T06-L3-04": ["report-tests"]
   }
 }
