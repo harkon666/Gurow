@@ -73,7 +73,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
         id="skill-detail-panel"
         data-connections={JSON.stringify(connections)}
         data-connections-count={connections.length}
-        className="w-80 border-l border-slate-800 bg-slate-900/60 p-6 flex flex-col justify-center items-center text-center text-slate-400 backdrop-blur-md select-none"
+        className="w-80 shrink-0 h-full border-l border-slate-800 bg-slate-900/60 p-6 flex flex-col justify-center items-center text-center text-slate-400 backdrop-blur-md select-none"
       >
         <div className="w-14 h-14 rounded-2xl bg-slate-800/80 flex items-center justify-center mb-4 text-slate-500 border border-slate-700/50 shadow-inner">
           <svg
@@ -122,7 +122,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
       id="skill-detail-panel"
       data-connections={JSON.stringify(connections)}
       data-connections-count={connections.length}
-      className="w-80 border-l border-slate-800 bg-slate-900/80 p-6 flex flex-col justify-between backdrop-blur-md overflow-y-auto"
+      className="w-80 shrink-0 h-full border-l border-slate-800 bg-slate-900/80 p-6 flex flex-col gap-6 backdrop-blur-md overflow-y-auto"
     >
       <div className="space-y-6">
         {/* Header & Badges */}
@@ -395,7 +395,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
       </div>
 
       {/* Footer Info */}
-      <div className="pt-4 border-t border-slate-800/60 text-[11px] text-slate-500 flex justify-between items-center">
+      <div className="pt-4 border-t border-slate-800/60 text-[11px] text-slate-500 flex justify-between items-center mt-auto shrink-0">
         <span>Owner: Rust Engine</span>
         <span>Render: WebGPU</span>
       </div>

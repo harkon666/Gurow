@@ -279,74 +279,64 @@ function LearningPathEditorPage() {
 
   return (
     <main
-      className="px-4 py-6 max-w-7xl mx-auto flex flex-col gap-5"
+      className="w-full h-full flex flex-col overflow-hidden bg-slate-950 select-none"
       data-checkpoint-saved-at={lastSavedAt ?? ''}
       data-checkpoint-revision={revision}
     >
-      {/* Learning Path Header Info */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/50 p-5 rounded-2xl border border-slate-800/80 backdrop-blur-sm">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              P1 Slice: WebGPU Editor
-            </span>
-            <span className="text-xs text-slate-500 font-mono">
-              US08 • US73 • US76 • US78 • US81 • US82 • US83
-            </span>
+      {/* Top Figma-Style Header Bar */}
+      <header className="h-11 shrink-0 bg-slate-900/90 border-b border-slate-800/80 px-4 flex items-center justify-between z-30 select-none">
+        <div className="flex items-center gap-2.5">
+          <div className="w-5 h-5 rounded bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-[10px] tracking-wider">
+            G
           </div>
-          <h1 className="text-2xl font-bold text-slate-100 tracking-tight">
-            {INITIAL_LEARNING_PATH_FIXTURE.title}
-          </h1>
-          <p className="text-xs text-slate-400 mt-1 max-w-2xl">
-            {INITIAL_LEARNING_PATH_FIXTURE.description}
-          </p>
+          <span className="font-semibold text-xs text-slate-200 tracking-tight">
+            Gurow
+          </span>
+          <span className="text-slate-600 text-xs">/</span>
+          <span className="text-xs text-slate-400 font-medium">
+            Editor
+          </span>
         </div>
 
-        <div className="flex flex-col items-end gap-2">
-          <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
+          <span
+            id="checkpoint-status-badge"
+            className="text-[11px] font-mono text-slate-400 bg-slate-950/80 px-2.5 py-1 rounded-lg border border-slate-800 flex items-center gap-1.5"
+          >
             <span
-              id="checkpoint-status-badge"
-              className="text-[11px] font-mono text-slate-400 bg-slate-950/80 px-2.5 py-1 rounded-lg border border-slate-800 flex items-center gap-1.5"
-            >
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  checkpointError
-                    ? 'bg-red-400'
-                    : lastSavedAt
-                    ? 'bg-emerald-400'
-                    : 'bg-slate-400'
-                }`}
-              />
-              <span>
-                {checkpointError
-                  ? 'Checkpoint Error (Preserved)'
+              className={`w-2 h-2 rounded-full ${
+                checkpointError
+                  ? 'bg-red-400'
                   : lastSavedAt
-                  ? `Saved locally (rev #${revision})`
-                  : 'Default Fixture'}
-              </span>
+                  ? 'bg-emerald-400'
+                  : 'bg-slate-400'
+              }`}
+            />
+            <span>
+              {checkpointError
+                ? 'Checkpoint Error (Preserved)'
+                : lastSavedAt
+                ? `Saved locally (rev #${revision})`
+                : 'Default Fixture'}
             </span>
+          </span>
 
-            <button
-              id="btn-reset-scene"
-              onClick={handleResetScene}
-              className="text-xs text-slate-400 hover:text-slate-200 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/60 px-2.5 py-1 rounded-lg cursor-pointer transition-colors"
-              title="Clear local checkpoint and restore initial fixture"
-            >
-              Reset Scene
-            </button>
-          </div>
-
-          <div className="text-[11px] text-slate-500 font-mono">
-            Boundary: Rust Engine (Wasm) + React Domain Store
-          </div>
+          <button
+            id="btn-reset-scene"
+            onClick={handleResetScene}
+            className="text-xs text-slate-400 hover:text-slate-200 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/60 px-2.5 py-1 rounded-lg cursor-pointer transition-colors"
+            title="Clear local checkpoint and restore initial fixture"
+          >
+            Reset Scene
+          </button>
         </div>
-      </div>
+      </header>
 
       {/* Checkpoint Mismatch Alert Banner */}
       {checkpointError && (
         <div
           id="checkpoint-error-alert"
-          className="bg-red-950/80 border border-red-800 rounded-xl p-3.5 text-xs text-red-200 flex items-center justify-between shadow-lg"
+          className="bg-red-950/90 border-b border-red-800/80 px-4 py-2 text-xs text-red-200 flex items-center justify-between shadow-lg shrink-0 z-40"
         >
           <div className="flex items-center gap-2">
             <span className="font-semibold text-red-400">⚠️ Checkpoint Error:</span>
@@ -364,10 +354,7 @@ function LearningPathEditorPage() {
       {/* Editor Main Canvas & Panel Container */}
       <section
         id="canvas-editor-container"
-        // Below md the three panes stack, so a fixed height would squeeze the
-        // editor to nothing: let the column grow and keep the fixed height for
-        // the side-by-side layout only.
-        className="w-full md:h-[640px] rounded-2xl border border-slate-800 shadow-2xl overflow-hidden bg-slate-950 flex flex-col md:flex-row"
+        className="w-full flex-1 min-h-0 flex flex-row overflow-hidden bg-slate-950 relative"
       >
         {mounted ? (
           <>
@@ -376,7 +363,7 @@ function LearningPathEditorPage() {
               connections={connections}
               selectedSkillId={selectedSkill?.id ?? null}
               onSelectSkill={handleSelectListSkill}
-              className="w-full md:w-64 lg:w-72 md:shrink-0"
+              className="w-64 lg:w-72 shrink-0 h-full border-r border-slate-800/80"
             />
             <WebGpuEditor
               onSelectSkill={setSelectedSkill}

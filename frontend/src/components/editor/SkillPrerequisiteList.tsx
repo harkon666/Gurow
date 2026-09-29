@@ -206,7 +206,7 @@ export const SkillPrerequisiteList: React.FC<SkillPrerequisiteListProps> = ({
       {/* Positioning note per ADR-0017 / AC2 */}
       <div
         id="list-positioning-note"
-        className="p-2 border-t border-slate-800/80 bg-slate-950 text-[10px] text-slate-500 text-center"
+        className="p-2 border-t border-slate-800/80 bg-slate-950 text-[10px] text-slate-500 text-center shrink-0"
       >
         Card positioning remains a canvas operation.
       </div>
