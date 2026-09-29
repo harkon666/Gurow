@@ -1,6 +1,6 @@
 # T06-L3-04 — Turn raw benchmark evidence into reproducible verdicts and reports
 
-Status: approved execution packet, published as [#36](https://github.com/harkon666/Gurow/issues/36); implementation pending. Parent: [#7](https://github.com/harkon666/Gurow/issues/7). Contract: [gurow-p1-v1](../../benchmarks/p1/contract.md).
+Status: report implementation and synthetic checks complete locally for [#36](https://github.com/harkon666/Gurow/issues/36); this does not constitute P1 acceptance evidence. Parent: [#7](https://github.com/harkon666/Gurow/issues/7). Contract: [gurow-p1-v1](../../benchmarks/p1/contract.md).
 
 Executor recommendation: **Flash candidate**. Blocked by: **Task A contract pinned; no execution-task blocker**. Parent coverage: AC2, AC3, AC4, AC5. User stories: US84.
 
@@ -19,11 +19,11 @@ Implement report-v1 types/validation, reducer, CLI and synthetic evidence tests 
 
 ## Source pointers and file ownership
 
-Pointers were inspected at `0a3b9be96a8ef89ce74a22d011ce7e9ba49e996d`; verify current source before editing. New paths below are proposed implementation locations, not claims they exist.
+Original pointers were inspected at `0a3b9be96a8ef89ce74a22d011ce7e9ba49e996d`; verify current source before editing. The report paths below now exist in the local implementation.
 
-- `frontend/scripts/benchmark/report.ts (new; owns report record types)`
-- `frontend/scripts/benchmark/report.test.ts (new)`
-- `frontend/scripts/benchmark/report-cli.ts (new)`
+- `frontend/scripts/benchmark/report.ts` (owns report record types)
+- `frontend/scripts/benchmark/report.test.ts` (synthetic regression cases)
+- `frontend/scripts/benchmark/report-cli.ts` (JSON/Markdown CLI)
 - `docs/benchmarks/p1/protocol.json (read; do not relax)`
 
 ## Acceptance criteria
@@ -38,7 +38,7 @@ Pointers were inspected at `0a3b9be96a8ef89ce74a22d011ce7e9ba49e996d`; verify cu
 
 ## Planned verification commands
 
-These commands for new scripts are an implementation contract; they are not available until the owning task creates them. Run from the repository root unless `cd frontend` is shown.
+The test command is runnable now. The CLI command requires a capture manifest at the indicated path; it is not a P1 evidence run until qualified real inputs exist. Run from the repository root unless `cd frontend` is shown.
 
 ```bash
 cd frontend && bun test scripts/benchmark/report.test.ts
