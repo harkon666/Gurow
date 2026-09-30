@@ -4,7 +4,7 @@ Contract `gurow-p1-v1`. Ticket [#34](https://github.com/harkon666/Gurow/issues/3
 
 **Collector verdict: `UNSUPPORTED`. Collector status: `not_qualified`.** No profile hash may be consumed by L3-03 for acceptance evidence. This file is the in-repo record; the raw artefacts of each attempt stay in ignored `.harness/t06/qualification/` per [the harness workflow](../../agents/harness.md).
 
-> **Superseded 2026-09-30.** Contract [`gurow-p1-v2`](contract.md) and [ADR 0019](../../adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md) replace the presentation-collector and optical requirements with an in-app frame-time and latency proxy. The collector verdict below stays a true historical record of `gurow-p1-v1`; it no longer blocks P1 capture, and #41 is closed as not planned. No v1 result may be combined with v2 results.
+> **Superseded 2026-09-30.** Contract [`gurow-p1-v2`](contract.md) (amended to `gurow-p1-v3`) and [ADR 0019](../../adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md) replace the presentation-collector and optical requirements with an in-app frame-time and latency proxy. The collector verdict below stays a true historical record of `gurow-p1-v1`; it no longer blocks P1 capture, and #41 is closed as not planned. No v1 result may be combined with v2 results.
 
 ## #41 acquisition-path assessment — 2026-09-29
 

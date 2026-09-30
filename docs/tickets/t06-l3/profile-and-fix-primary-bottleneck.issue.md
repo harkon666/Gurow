@@ -4,35 +4,34 @@ https://github.com/harkon666/Gurow/issues/7
 
 ## What to build
 
-One command loads the primary fixture and records three 30-second runs each of pan, zoom and drag through real browser input, producing in-app frame-interval and input-to-frame proxy samples plus a v2 report with per-scenario verdicts, without declaring a final P1 pass.
+The first complete v4 capture (T06-L3-03, 2026-09-30) FAILS every primary scenario on the reference host: pooled frame p50/p95 of 42.5/48.6 ms (pan), 72.8/84.9 ms (zoom) and 60.7/121.2 ms (drag) against a 20 ms p95 limit; drag latency proxy p95 167 ms against 50 ms, and pan/zoom held wheel input back for seconds (about 900 and 640 of 3,600 inputs reached the page). This task profiles that path, names the dominant cost with evidence, fixes it, and records a before/after v4 capture.
 
-Add opt-in in-page instrumentation (input timestamps/revisions, canvas and label commit revisions, rAF frame loop), scenario scheduling and capture orchestration on top of the L3-02 loader, and migrate the L3-04 reducer and fixture code to `protocol-v4.json` / `gurow-p1-report-v4`. No changes to renderer strategy, product behavior or the 20/50 ms limits. No trace-level presentation join or optical capture is required.
+Profile the existing Rust/Wasm/wgpu/React path on the primary workload before changing it. Fix only the bottleneck the profile names, within the existing architecture (ADR 0015, 0017). No speculative culling, binary protocol or new state owner unless the profile shows it is the dominant cost (contract §8). Do not hide or reduce labels, the Skill list or the Task sidebar, and do not change the contract, thresholds or workload.
 
-Stage: P1/T06 L3. Spec coverage: US80, US84. Parent criteria: AC2, AC3, AC5.
+Stage: P1/T06 L3. Spec coverage: US80, US84. Parent criteria: AC2, AC5.
 
 Contract: gurow-p1-v4 (ADR 0019, supersedes gurow-p1-v1 to v3). Primary workload remains 1,000 cards, approximately 200 visible cards, 2,000 connections, HTML labels enabled; p95 frame interval ≤20 ms and p95 input-to-frame latency proxy ≤50 ms, measured in-page (rAF frame intervals; input timeStamp to when the first rAF callback after canvas and label commit runs, plus one refresh interval) in a headed hardware browser. Three 30-second runs per pan/zoom/drag after a 10-second warm-up, pooled per scenario. The proxy does not observe compositor or scanout time and every report says so. Missing/invalid measurement is NOT_MEASURED. Comparison workloads do not carry primary pass thresholds. The contract snapshot below and the local execution packet provide exact settings, source pointers and planned commands.
 
 ## Acceptance criteria
 
-- [ ] Run pan, zoom and drag after a 10s warm-up with three 30s runs each and up to 2s drain, restoring state between runs, with labels/list/sidebar/persistence active in a headed hardware browser.
-- [ ] Emit the nominal 120 Hz absolute schedule through CDP/Puppeteer (never engine shortcuts or synthetic DOM dispatch) without awaiting rendering; record scheduled, sent and page-observed counts; mark a run invalid when fewer than 80% of requests were sent, or on visibility/focus loss, device loss, page or WebGPU error. A run whose page observed fewer than 80% of the schedule (backpressure) stays valid and can FAIL but never PASS.
-- [ ] Compute `frame_interval_ms` from consecutive rAF timestamps and `input_to_frame_proxy_ms` per delivered input (including coalesced pointer events) exactly as contract §6 defines, keeping the raw value without the refresh-interval estimate; unresolved inputs are charged to the drain deadline, never dropped.
-- [ ] Record environment (§3), fixture identity and 2 Hz visibility samples; a run whose median visible card count is outside 150–250 is invalid.
-- [ ] The sanity check passes: an 80 ms injected application delay and, separately, an 80 ms injected label-commit delay each raise the proxy's p50 by at least 60 ms; acceptance runs record that injection was off.
-- [ ] The reducer emits `gurow-p1-report-v4` with pooled per-scenario and per-run n/p50/p95/max and PASS/FAIL/NOT_MEASURED per contract §7; v1 capture manifests are rejected rather than reinterpreted. Tests cover nearest-rank p95, insufficient samples and invalid runs; existing benchmark tests stay green.
+- [ ] Record a profile of each primary scenario on the reference host (Chromium performance trace plus opt-in timers) that attributes frame time to engine dispatch/Wasm, JSON boundary, React label commit and layout, renderer submission and GPU, with the instrumentation's own cost stated.
+- [ ] Name the dominant bottleneck per scenario with that evidence before changing code; a hypothesis the profile does not support is recorded as rejected.
+- [ ] Fix the named bottleneck(s) within the existing architecture, with a focused test or benchmark assertion that fails on the old behavior where practical, and keep labels aligned with cards (US80) and the list/sidebar unchanged.
+- [ ] Re-run `bun run capture:p1` on the same environment series and report before/after pooled p50/p95 frame interval and latency proxy per scenario plus page-delivery counts; reaching PASS is not required by this task.
+- [ ] If a scenario still FAILS, write a follow-up naming the next measured bottleneck; never report a partial improvement as P1 acceptance.
+- [ ] Full harness checks pass on the final source and an independent Standards/Spec review is requested before handoff.
 
 ## Blocked by
 
-- [T06-L3-02 / #35](https://github.com/harkon666/Gurow/issues/35)
-- [T06-L3-04 / #36](https://github.com/harkon666/Gurow/issues/36)
+- [T06-L3-03 / #37](https://github.com/harkon666/Gurow/issues/37)
 
 ## Execution and handoff
 
-Recommended executor: Flash candidate with independent review.
+Recommended executor: Strong model for profiling, then bounded fixes with independent review.
 
-Raw per-run input/frame logs, sanity-check results, manifest hashes and a v2 report for the primary workload; no automatic parent closure.
+Profile artifacts with stage attribution, the named bottleneck and its evidence, the fix with its focused test, and before/after v4 reports on one environment series.
 
-The proxy cannot observe label commit revisions without changing product behavior, the sanity check fails, or the specified load cannot be delivered. Do not redefine the metric.
+The profile shows the cost is inherent to an ADR decision (for example HTML labels at this scale, ADR 0017, or the JSON boundary, ADR 0015). Report the evidence and request a design reassessment instead of working around the decision.
 
 ## Approved measurement contract (self-contained snapshot)
 

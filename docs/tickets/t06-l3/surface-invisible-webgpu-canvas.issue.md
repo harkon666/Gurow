@@ -4,35 +4,33 @@ https://github.com/harkon666/Gurow/issues/7
 
 ## What to build
 
-One command loads the primary fixture and records three 30-second runs each of pan, zoom and drag through real browser input, producing in-app frame-interval and input-to-frame proxy samples plus a v2 report with per-scenario verdicts, without declaring a final P1 pass.
+On the reference host (Hyprland/Wayland, NVIDIA RTX 4050, driver 610.57.04, Chromium 152), Chromium on native Wayland with `--enable-features=Vulkan --use-gl=angle` selects the NVIDIA adapter, but every frame logs `[Invalid Texture] … CreateView` → `BeginRenderPass` → invalid `Submit`. The canvas stays black (0,0,0), with only the HTML labels visible. The editor reports no renderer failure, so the user gets neither a picture nor the ADR 0017 recovery path. With `--use-angle=vulkan` on native Wayland the whole window is blank. Only ANGLE-on-Vulkan through XWayland (`--ozone-platform=x11`) draws the canvas (flag trial, 2026-09-30). After this task, a canvas that cannot render is reported through the existing renderer-failure path, and the native-Wayland configuration is either made to render or documented as unsupported with evidence.
 
-Add opt-in in-page instrumentation (input timestamps/revisions, canvas and label commit revisions, rAF frame loop), scenario scheduling and capture orchestration on top of the L3-02 loader, and migrate the L3-04 reducer and fixture code to `protocol-v4.json` / `gurow-p1-report-v4`. No changes to renderer strategy, product behavior or the 20/50 ms limits. No trace-level presentation join or optical capture is required.
+In the browser, `wgpu::Surface::get_current_texture()` returns `Ok` with an invalid texture, and the WebGPU validation error only reaches the uncaptured-error handler, which logs a console warning. `renderer.render()` therefore succeeds and no `GpuError` event is emitted. Route such failures (uncaptured device errors, or an invalid current texture detected by an error scope) to the existing `GpuError` → recovery/retry → list-navigation path. Investigate why the current texture is invalid on native Wayland (surface configuration, format, alpha mode or usage; Chromium/Dawn limitation) and fix it in the app if possible. Do not change the benchmark contract, and do not suppress real errors.
 
-Stage: P1/T06 L3. Spec coverage: US80, US84. Parent criteria: AC2, AC3, AC5.
+Stage: P1/T06 L3. Spec coverage: US80, US82. Parent criteria: AC1, AC5.
 
 Contract: gurow-p1-v4 (ADR 0019, supersedes gurow-p1-v1 to v3). Primary workload remains 1,000 cards, approximately 200 visible cards, 2,000 connections, HTML labels enabled; p95 frame interval ≤20 ms and p95 input-to-frame latency proxy ≤50 ms, measured in-page (rAF frame intervals; input timeStamp to when the first rAF callback after canvas and label commit runs, plus one refresh interval) in a headed hardware browser. Three 30-second runs per pan/zoom/drag after a 10-second warm-up, pooled per scenario. The proxy does not observe compositor or scanout time and every report says so. Missing/invalid measurement is NOT_MEASURED. Comparison workloads do not carry primary pass thresholds. The contract snapshot below and the local execution packet provide exact settings, source pointers and planned commands.
 
 ## Acceptance criteria
 
-- [ ] Run pan, zoom and drag after a 10s warm-up with three 30s runs each and up to 2s drain, restoring state between runs, with labels/list/sidebar/persistence active in a headed hardware browser.
-- [ ] Emit the nominal 120 Hz absolute schedule through CDP/Puppeteer (never engine shortcuts or synthetic DOM dispatch) without awaiting rendering; record scheduled, sent and page-observed counts; mark a run invalid when fewer than 80% of requests were sent, or on visibility/focus loss, device loss, page or WebGPU error. A run whose page observed fewer than 80% of the schedule (backpressure) stays valid and can FAIL but never PASS.
-- [ ] Compute `frame_interval_ms` from consecutive rAF timestamps and `input_to_frame_proxy_ms` per delivered input (including coalesced pointer events) exactly as contract §6 defines, keeping the raw value without the refresh-interval estimate; unresolved inputs are charged to the drain deadline, never dropped.
-- [ ] Record environment (§3), fixture identity and 2 Hz visibility samples; a run whose median visible card count is outside 150–250 is invalid.
-- [ ] The sanity check passes: an 80 ms injected application delay and, separately, an 80 ms injected label-commit delay each raise the proxy's p50 by at least 60 ms; acceptance runs record that injection was off.
-- [ ] The reducer emits `gurow-p1-report-v4` with pooled per-scenario and per-run n/p50/p95/max and PASS/FAIL/NOT_MEASURED per contract §7; v1 capture manifests are rejected rather than reinterpreted. Tests cover nearest-rank p95, insufficient samples and invalid runs; existing benchmark tests stay green.
+- [ ] A WebGPU validation or device error raised while rendering (including an invalid current texture) produces a `GpuError` and enters the existing recovery path: document preserved, failure reported, retry offered, list navigation usable.
+- [ ] A browser test fails on the current behavior by forcing such an error (for example an injected invalid texture or an error scope in a test hook) and passes after the fix; the existing T05 recovery checks still pass.
+- [ ] Record the root cause of the invalid texture on native Wayland with evidence; if an application-side surface change fixes it, the canvas visibly renders there (screenshot shows the clear color and card geometry) with no WebGPU console errors.
+- [ ] If it is a browser/driver limitation, document the supported configuration (currently XWayland) and the user-visible message; do not claim native Wayland support.
+- [ ] Full harness checks pass and an independent Standards/Spec review is requested before handoff.
 
 ## Blocked by
 
-- [T06-L3-02 / #35](https://github.com/harkon666/Gurow/issues/35)
-- [T06-L3-04 / #36](https://github.com/harkon666/Gurow/issues/36)
+None
 
 ## Execution and handoff
 
-Recommended executor: Flash candidate with independent review.
+Recommended executor: Strong model with WebGPU/wgpu experience; independent review.
 
-Raw per-run input/frame logs, sanity-check results, manifest hashes and a v2 report for the primary workload; no automatic parent closure.
+The failure-surfacing change with its failing-then-passing browser test, root-cause evidence for native Wayland, and either a visible native-Wayland screenshot or a documented unsupported configuration.
 
-The proxy cannot observe label commit revisions without changing product behavior, the sanity check fails, or the specified load cannot be delivered. Do not redefine the metric.
+The fix needs changes in wgpu or Chromium, or conflicts with ADR 0017's recovery behavior. Report the evidence and request a decision.
 
 ## Approved measurement contract (self-contained snapshot)
 

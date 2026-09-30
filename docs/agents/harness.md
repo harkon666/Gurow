@@ -20,13 +20,13 @@ Use this workflow for ticket implementation, review fixes, and review handoff. T
    - **Recovery controls:** activate the actual UI button; assert its visible result and context isolation. Direct storage mutation is appropriate for fault injection, not proof that a reset button works.
 3. Keep assertions capable of failing when the behavior is broken. Preserve existing meaningful tests; explain changed expectations against the spec. Document untested cases instead of marking them passed.
 
-## Opt-in native qualification
+## Opt-in headed P1 capture
 
-Routine `python3 scripts/harness.py check` does not launch the headed T06 native qualification. T06 keeps collector and editor-lifecycle regression checks in the routine full run; native qualification is deliberately excluded from both the full profile and the ticket's automatically appended checks.
+Routine `python3 scripts/harness.py check` does not launch the headed T06 capture, because it takes over a visible desktop window for several minutes. The full profile and the ticket's appended checks run the capture's unit and reducer tests instead.
 
-Run `cd frontend && bun run qualify:native` to re-qualify the collector. This builds the current source and runs the driver with every hardware, presentation, clock and delay gate unchanged; it accepts the headed window the desktop lays out (`--mode collector`) and records the profile as `qualification_only`. Add `--mode acceptance` when the reference window geometry of contract §3 is required, as an L3-03 acceptance series does. Evidence goes to `.harness/t06/qualification/`; previous evidence is not refreshed by routine checks. The in-repo record of the outcome is [the qualification status](../benchmarks/p1/qualification-status.md); update it whenever an attempt produces a new verdict, and pin a verdict with `--expect-verdict` to make a regression fail the check.
+Run `cd frontend && bun run capture:p1` for a primary capture under contract `gurow-p1-v4`. It builds the current source, runs the preflight (hardware adapter, focused on-screen window, AC power, idle rAF matching the display refresh), the delay sanity captures, and the pan/zoom/drag runs, then reduces the evidence. Keep the browser window focused and visible until it exits. Evidence goes to `.harness/t06/primary/`; `--size 100 --headless` gives a diagnostic run that can never qualify P1.
 
-A routine full pass is code/regression evidence only. It does not satisfy T06 native qualification or P1 performance acceptance, unblock L3-03, or replace missing presentation/delay evidence. Report deferred native qualification separately in review handoffs and task notes.
+A routine full pass is code/regression evidence only; it does not establish P1 performance acceptance. Report a skipped headed capture separately in review handoffs and task notes. The v1 collector qualification (`bun run qualify:native:v1`) is historical and is not part of T06 acceptance.
 
 ## Finish and hand off
 

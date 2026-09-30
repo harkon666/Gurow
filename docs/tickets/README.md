@@ -60,13 +60,15 @@ T06 / #7 has a prepared [benchmark contract and L3 execution breakdown](t06-l3/R
 
 | Ticket source | GitHub issue | Stage | Title | Blocked by | What it delivers |
 | --- | --- | --- | --- | --- | --- |
-| [T06-L3-01](t06-l3/qualify-presentation-collector.md) | [#34](https://github.com/harkon666/Gurow/issues/34) | P1 | Qualify input-to-presentation evidence on the reference browser | A | **Closed: explicit `UNSUPPORTED` collector result (v1); not required under contract `gurow-p1-v2`; [#41](https://github.com/harkon666/Gurow/issues/41) closed as not planned** |
+| [T06-L3-01](t06-l3/qualify-presentation-collector.md) | [#34](https://github.com/harkon666/Gurow/issues/34) | P1 | Qualify input-to-presentation evidence on the reference browser | A | **Closed: explicit `UNSUPPORTED` collector result (v1); not required under contract `gurow-p1-v4`; [#41](https://github.com/harkon666/Gurow/issues/41) closed as not planned** |
 | [T06-L3-02](t06-l3/load-deterministic-workloads.md) | [#35](https://github.com/harkon666/Gurow/issues/35) | P1 | Load deterministic benchmark workloads through the existing application | A | Prescribed fixtures load through normal app with correct IDs, Tasks, DAG and visible labels |
-| [T06-L3-03](t06-l3/capture-primary-interactions.md) | [#37](https://github.com/harkon666/Gurow/issues/37) | P1 | Capture the primary pan, zoom and drag workload with in-app timing | L3-02, L3-04 | Nine primary windows produce in-app frame and latency-proxy evidence (contract v2) |
+| [T06-L3-03](t06-l3/capture-primary-interactions.md) | [#37](https://github.com/harkon666/Gurow/issues/37) | P1 | Capture the primary pan, zoom and drag workload with in-app timing | L3-02, L3-04 | **Closed: first complete v4 capture; P1 measured FAIL on pan, zoom and drag** |
 | [T06-L3-04](t06-l3/reduce-and-validate-reports.md) | [#36](https://github.com/harkon666/Gurow/issues/36) | P1 | Turn raw benchmark evidence into reproducible verdicts and reports | A | Evidence reduces to validated JSON/Markdown verdicts; malformed evidence cannot pass |
 | [T06-L3-05](t06-l3/record-comparisons-and-diagnostics.md) | [#38](https://github.com/harkon666/Gurow/issues/38) | P1 | Record comparison workloads and explain benchmark resource costs | L3-03, L3-04 | Comparison workloads and resource/boundary diagnostics feed the report |
 | [T06-L3-06](t06-l3/integrate-functional-and-gate-checks.md) | [#39](https://github.com/harkon666/Gurow/issues/39) | P1 | Complete P1 flow plus T06 acceptance runs from current-source harness | L3-05 | Complete P1 flow plus T06 acceptance runs from current-source harness |
 | [T06-L3-07](t06-l3/review-evidence-and-decide-p1.md) | [#40](https://github.com/harkon666/Gurow/issues/40) | P1 | Independent review and justified parent-gate decision/follow-up | L3-06 | Independent review and justified parent-gate decision/follow-up |
+| [T06-L3-08](t06-l3/profile-and-fix-primary-bottleneck.md) | [#42](https://github.com/harkon666/Gurow/issues/42) | P1 | Profile the primary pan, zoom and drag path and fix the measured bottleneck | L3-03 | Profile names the bottleneck; fix plus before/after v4 capture |
+| [T06-L3-09](t06-l3/surface-invisible-webgpu-canvas.md) | [#43](https://github.com/harkon666/Gurow/issues/43) | P1 | Report a WebGPU canvas that silently renders nothing, and make it render on native Wayland | — | Silent WebGPU failure enters the recovery path; native Wayland renders or is documented |
 
 
 ```mermaid

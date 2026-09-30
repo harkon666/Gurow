@@ -14,11 +14,16 @@ import {
 } from './protocol'
 import type { GpuStatus, SelectedSkillInfo } from './types'
 import { getCanvasDpr, toCanvasBufferSize, cssToLogicalPoint } from './coords'
+import { WheelCoalescer, wheelCommand } from './wheelCoalescer'
 import {
   applyAppDelay,
   beginInput,
+  getBenchmarkHooks,
+  recordBenchmarkFrame,
   recordDispatch,
   recordLabelUpdate,
+  recordNoOpInput,
+  sealBenchmarkCapture,
   type LabelRevision,
 } from './benchmarkHooks'
 
@@ -111,6 +116,30 @@ export function useWasmEditor({
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [recoveryError, setRecoveryError] = useState<string | null>(null)
   const [engineError, setEngineError] = useState<string | null>(null)
+
+  // Wheel events are merged into at most one camera command per animation
+  // frame; flushWheelRef is assigned once dispatch exists.
+  const flushWheelRef = useRef<() => void>(() => {})
+
+  // The driver installs the hooks before navigation. The rAF loop exists only
+  // for opt-in benchmark pages, never as an extra production render loop. It
+  // flushes pending wheel input first, as the editor's own frame callback
+  // would in the same frame, so the frame it records includes that work.
+  useEffect(() => {
+    const hooks = getBenchmarkHooks()
+    if (!hooks) return
+    hooks.seal = sealBenchmarkCapture
+    let frame = 0
+    const tick = (timestamp: number) => {
+      // The endpoint is when this callback starts, read before its own work.
+      const callbackMs = performance.now()
+      flushWheelRef.current()
+      recordBenchmarkFrame(timestamp, callbackMs)
+      frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [])
 
   // Listen for created GPUDevices and attach real device.lost handlers (Spec 2)
   useEffect(() => {
@@ -439,6 +468,8 @@ export function useWasmEditor({
       const canvas = canvasRef.current
       if (!canvas || !editorRef.current) return
 
+      // A wheel merged earlier this frame precedes the press it came before.
+      flushWheelRef.current()
       isPointerDownRef.current = true
       beginInput(e, 'drag')
       try {
@@ -482,6 +513,7 @@ export function useWasmEditor({
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       if (!isPointerDownRef.current) return
       isPointerDownRef.current = false
+      flushWheelRef.current()
       const canvas = canvasRef.current
       if (!canvas || !editorRef.current) return
 
@@ -503,44 +535,47 @@ export function useWasmEditor({
     [canvasRef, dispatch]
   )
 
-  // Native non-passive wheel listener for cursor-anchored zoom & trackpad pan
+  // Native non-passive wheel listener for cursor-anchored zoom & trackpad pan.
+  // The handler only accumulates; one merged camera command per animation frame
+  // keeps a fast wheel from queueing a full render per event.
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
+
+    const wheels = new WheelCoalescer()
+    let frame = 0
+    const flush = () => {
+      if (frame) cancelAnimationFrame(frame)
+      frame = 0
+      const command = wheels.take()
+      if (command) dispatch(command)
+    }
+    flushWheelRef.current = flush
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
       if (!editorRef.current) return
 
-      beginInput(e, e.ctrlKey || e.metaKey ? 'zoom' : 'pan')
       const rect = canvas.getBoundingClientRect()
-      const logicalPt = cssToLogicalPoint(e.clientX, e.clientY, rect)
-
-      if (e.ctrlKey || e.metaKey) {
-        // Cursor-anchored zoom via pinch-to-zoom or Ctrl+wheel
-        const factor = Math.exp(-e.deltaY * 0.005)
-        dispatch({
-          type: 'ZoomAt',
-          screen_x: logicalPt.x,
-          screen_y: logicalPt.y,
-          factor,
-        })
-      } else {
-        // Trackpad 2-finger scroll or wheel pan
-        const deltaX = e.shiftKey ? -e.deltaY : -e.deltaX
-        const deltaY = e.shiftKey ? 0 : -e.deltaY
-        if (Math.abs(deltaX) > 0 || Math.abs(deltaY) > 0) {
-          dispatch({
-            type: 'PanCamera',
-            delta_x: deltaX,
-            delta_y: deltaY,
-          })
-        }
+      const command = wheelCommand(e, cssToLogicalPoint(e.clientX, e.clientY, rect))
+      if (!command) {
+        recordNoOpInput(e)
+        return
       }
+      // Dispatch an unmergeable earlier command before observing this input,
+      // so the input is attributed to the command that carries its effect.
+      const earlier = wheels.add(command)
+      if (earlier) dispatch(earlier)
+      beginInput(e, command.type === 'ZoomAt' ? 'zoom' : 'pan')
+      frame ||= requestAnimationFrame(flush)
     }
 
     canvas.addEventListener('wheel', onWheel, { passive: false })
-    return () => canvas.removeEventListener('wheel', onWheel)
+    return () => {
+      canvas.removeEventListener('wheel', onWheel)
+      if (frame) cancelAnimationFrame(frame)
+      flushWheelRef.current = () => {}
+    }
   }, [canvasRef, dispatch])
 
   // Keyboard shortcuts for Undo and Redo

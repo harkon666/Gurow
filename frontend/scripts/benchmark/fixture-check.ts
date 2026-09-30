@@ -9,7 +9,7 @@
  * NOT_MEASURED, never PASS. No timing is measured here.
  *
  * Usage:
- *   bun run scripts/benchmark/fixture-check.ts --contract ../docs/benchmarks/p1/protocol.json --out ../.harness/t06/fixtures [--headed]
+ *   bun run scripts/benchmark/fixture-check.ts --contract ../docs/benchmarks/p1/protocol-v4.json --out ../.harness/t06/fixtures [--headed]
  */
 
 import { execFileSync, spawn } from 'node:child_process'
@@ -52,6 +52,9 @@ import { computeSourceFingerprint } from './sourceFingerprint'
 const REPO_ROOT = path.resolve(import.meta.dir, '../../..')
 const FRONTEND_DIR = path.resolve(REPO_ROOT, 'frontend')
 const EDITOR_TIMEOUT_MS = 180_000
+// Historical fixture smoke-check layout from reference-environment.json; v2
+// acceptance may use any unobscured canvas meeting minimum_canvas_css.
+const CHECK_VIEWPORT = { width: 1200, height: 720, dpr: 1.5 }
 
 interface CliOptions {
   contractPath: string
@@ -62,7 +65,7 @@ interface CliOptions {
 
 function parseArgs(argv: string[]): CliOptions {
   const options: CliOptions = {
-    contractPath: path.resolve(REPO_ROOT, 'docs/benchmarks/p1/protocol.json'),
+    contractPath: path.resolve(REPO_ROOT, 'docs/benchmarks/p1/protocol-v4.json'),
     outDir: path.resolve(REPO_ROOT, '.harness/t06/fixtures'),
     port: 3474,
     headless: true,
@@ -349,7 +352,6 @@ async function launch(
   chromiumPath: string,
   profileDir: string,
   headless: boolean,
-  contract: BenchmarkContract,
   reset = true
 ): Promise<{ browser: Browser; page: Page }> {
   if (reset) rmSync(profileDir, { recursive: true, force: true })
@@ -365,9 +367,11 @@ async function launch(
   const page = await browser.newPage()
   page.setDefaultTimeout(30_000)
   await page.setViewport({
-    width: contract.viewport_css.width,
-    height: contract.viewport_css.height,
-    deviceScaleFactor: contract.device_pixel_ratio,
+    // Fixture smoke-check uses the recorded reference layout; v2 protocol only
+    // specifies a minimum canvas size, not a fixed viewport or DPR.
+    width: CHECK_VIEWPORT.width,
+    height: CHECK_VIEWPORT.height,
+    deviceScaleFactor: CHECK_VIEWPORT.dpr,
   })
   return { browser, page }
 }
@@ -527,7 +531,7 @@ async function probePlannedPath(
   const dragged = (expected: number): Reached => (s) => ({ expected, observed: s.centre_dx_world * s.camera.zoom, tolerance: 0.5 })
 
   // Wheel deltas injected under DPR emulation reach the page divided by the DPR, so they are scaled up.
-  const dpr = contract.device_pixel_ratio
+  const dpr = CHECK_VIEWPORT.dpr
   await page.mouse.move(canvasCentre.x, canvasCentre.y)
   await measure('pan-positive', () => page.mouse.wheel({ deltaX: -amplitude * dpr }), panned(amplitude))
   await measure('pan-negative', () => page.mouse.wheel({ deltaX: 2 * amplitude * dpr }), panned(-amplitude))
@@ -805,7 +809,7 @@ async function main(): Promise<number> {
 
   try {
     await waitForServerReady(serverUrl)
-    const launched = await launch(chromiumPath, profileDir, options.headless, contract)
+    const launched = await launch(chromiumPath, profileDir, options.headless)
     browser = launched.browser
     const page = launched.page
     state.browserVersion = await browser.version()
@@ -819,8 +823,8 @@ async function main(): Promise<number> {
       const ui = await readUi(page)
       state.canvas = { width: ui.canvas.width, height: ui.canvas.height }
       state.adapter = await readAdapter(page)
-      evidence.expect('AC4', 'window-matches-contract-viewport',
-        { inner_width: contract.viewport_css.width, inner_height: contract.viewport_css.height, device_pixel_ratio: contract.device_pixel_ratio },
+      evidence.expect('AC4', 'window-matches-fixture-smoke-layout',
+        { inner_width: CHECK_VIEWPORT.width, inner_height: CHECK_VIEWPORT.height, device_pixel_ratio: CHECK_VIEWPORT.dpr },
         ui.window)
       console.log(`  canvas ${ui.canvas.width}x${ui.canvas.height} CSS px, adapter ${JSON.stringify(state.adapter)}`)
     })
@@ -879,7 +883,7 @@ async function main(): Promise<number> {
       const key = getCheckpointKey(primary.manifest.account_id, primary.manifest.learning_path_id)
 
       // A second dedicated profile holds the valid primary fixture throughout.
-      const seeded = await launch(chromiumPath, otherProfileDir, options.headless, contract)
+      const seeded = await launch(chromiumPath, otherProfileDir, options.headless)
       let otherBefore: string | null
       try {
         await seeded.page.goto(serverUrl, { waitUntil: 'domcontentloaded' })
@@ -892,7 +896,7 @@ async function main(): Promise<number> {
 
       state.routeRejection = await checkRouteRejection(page, evidence, primary)
 
-      const survivor = await launch(chromiumPath, otherProfileDir, options.headless, contract, false)
+      const survivor = await launch(chromiumPath, otherProfileDir, options.headless, false)
       try {
         await survivor.page.goto(serverUrl, { waitUntil: 'domcontentloaded' })
         await waitForEditorSettled(survivor.page, primary.size)
@@ -956,8 +960,8 @@ async function main(): Promise<number> {
     setup_verdict: overall,
     browser: { executable: chromiumPath, version: state.browserVersion, headless: options.headless, adapter: state.adapter },
     measured_canvas_css: state.canvas,
-    viewport_css: contract.viewport_css,
-    device_pixel_ratio: contract.device_pixel_ratio,
+    viewport_css: { width: CHECK_VIEWPORT.width, height: CHECK_VIEWPORT.height },
+    device_pixel_ratio: CHECK_VIEWPORT.dpr,
     storage: { account_id: primary?.manifest.account_id ?? null, learning_path_id: primary?.manifest.learning_path_id ?? null },
     fixtures: fixtureMetadata,
   }

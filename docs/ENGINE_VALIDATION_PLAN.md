@@ -2,7 +2,7 @@
 
 This records the accepted testing strategy and initial benchmark targets. These are planned checks, not completed tests or demonstrated product capacity. The agreed scopes and acceptance criteria for P1 and P2 are in [PROTOTYPE_PLAN.md](PROTOTYPE_PLAN.md).
 
-The concrete T06 measurement design is in the [P1 benchmark contract](benchmarks/p1/contract.md), with [L3 execution packets](tickets/t06-l3/README.md). Contract `gurow-p1-v2` ([ADR 0019](adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md)) fixes the environment record, workload, in-app metrics, sampling and reporting rules; it replaced the stricter `gurow-p1-v1` presentation-collector/optical design on 2026-09-30. Benchmark execution is still outstanding; the L3 breakdown is published as sub-issues #34–#40. These documents do not establish that P1 has passed.
+The concrete T06 measurement design is in the [P1 benchmark contract](benchmarks/p1/contract.md), with [L3 execution packets](tickets/t06-l3/README.md). Contract `gurow-p1-v4` ([ADR 0019](adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md)) fixes the environment record, workload, in-app metrics, sampling and reporting rules; it replaced the stricter `gurow-p1-v1` presentation-collector/optical design on 2026-09-30. Benchmark execution is still outstanding; the L3 breakdown is published as sub-issues #34–#40. These documents do not establish that P1 has passed.
 
 ## Reference environment and workloads
 

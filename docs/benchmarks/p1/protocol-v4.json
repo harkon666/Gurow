@@ -1,15 +1,15 @@
 {
-  "contract_id": "gurow-p1-v2",
-  "supersedes": "gurow-p1-v1",
+  "contract_id": "gurow-p1-v4",
+  "supersedes": "gurow-p1-v3",
   "decision_record": "docs/adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md",
-  "report_schema": "gurow-p1-report-v2",
+  "report_schema": "gurow-p1-report-v4",
   "parent_issue": 7,
   "revised_at": "2026-09-30",
   "design_status": "complete_approved",
   "benchmark_status": "not_run",
   "metrics": {
     "frame_interval_ms": "consecutive requestAnimationFrame timestamp deltas during the active window",
-    "input_to_frame_proxy_ms": "rAF timestamp of first frame after canvas and label commit of the input's revision, minus event.timeStamp, plus 1000/refresh_hz"
+    "input_to_frame_proxy_ms": "performance.now() when the first rAF callback after canvas and label commit of the input's revision runs, minus event.timeStamp, plus 1000/refresh_hz"
   },
   "thresholds_ms": {
     "frame_p95": 20,
@@ -57,6 +57,7 @@
     "runs_per_scenario": 3,
     "pooling": "per_scenario",
     "input_hz": 120,
+    "minimum_sent_fraction": 0.8,
     "minimum_delivered_fraction": 0.8,
     "minimum_pooled_latency_samples": 1000,
     "minimum_pooled_frame_intervals": 1000,
@@ -85,5 +86,9 @@
       "label_commit"
     ]
   },
-  "unresolved_input_policy": "charge_until_drain_deadline"
+  "unresolved_input_policy": "charge_until_drain_deadline",
+  "validity": {
+    "invalid_run": "driver sent fewer than minimum_sent_fraction of scheduled requests, focus/visibility loss, device loss, page or WebGPU error",
+    "backpressure": "page observed fewer than minimum_delivered_fraction of scheduled inputs: the run stays valid and can FAIL, but a scenario with such a run cannot PASS"
+  }
 }

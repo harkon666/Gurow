@@ -26,7 +26,7 @@ import {
 } from './fixture'
 import { loadCheckpoint } from '../../src/components/editor/checkpoint'
 
-const CONTRACT_PATH = path.resolve(import.meta.dir, '../../../docs/benchmarks/p1/protocol.json')
+const CONTRACT_PATH = path.resolve(import.meta.dir, '../../../docs/benchmarks/p1/protocol-v4.json')
 const contract = loadBenchmarkContract(CONTRACT_PATH)
 /** Canvas measured at 1200x720 with the list and Task panel open (fixture-check). */
 const CANVAS = { width: 592, height: 628 }
@@ -41,16 +41,16 @@ function mutated(fixture: BenchmarkFixture, change: (f: BenchmarkFixture) => voi
 }
 
 describe('benchmark contract', () => {
-  it('reads every workload from protocol.json instead of restating it', () => {
-    expect(contract.contract_id).toBe('gurow-p1-v1')
+  it('reads every workload from protocol-v4.json instead of restating it', () => {
+    expect(contract.contract_id).toBe('gurow-p1-v4')
     expect(contract.primary_size).toBe(1000)
     expect(contract.motion).toEqual({ amplitude_cell_fraction: 0.1, zoom_min_factor: 0.99, zoom_max_factor: 1.01 })
     expect(contract.sha256).toMatch(/^[a-f0-9]{64}$/)
     expect(contract.recipes[1000]).toMatchObject({
       connections: 2000, grid_columns: 25, grid_rows: 40, initial_visible_cards: 200,
-      visibility_band: { min: 180, max: 240 },
+      visibility_band: { min: 150, max: 250 },
     })
-    expect(contract.recipes[10000]).toMatchObject({ connections: 20000, target_rows: 20, visibility_band: { min: 180, max: 240 } })
+    expect(contract.recipes[10000]).toMatchObject({ connections: 20000, target_rows: 20, visibility_band: null })
     expect(contract.recipes[100]).toMatchObject({ connections: 200, target_rows: 10, visibility_band: null })
   })
 
@@ -180,12 +180,12 @@ describe('AC4: geometry and planned-path visibility', () => {
   })
 
   for (const size of [1000, 10000] as const) {
-    it(`keeps ${size} cards inside [180, 240] along the pan, zoom and drag paths`, () => {
+    it(`keeps ${size} cards inside [150, 250] along the pan, zoom and drag paths`, () => {
       const result = validatePlannedPathVisibility(generate(size), contract.motion)
       expect(result.violations).toEqual([])
       expect(result.initial_visible).toBe(200)
-      expect(result.min_visible).toBeGreaterThanOrEqual(180)
-      expect(result.max_visible).toBeLessThanOrEqual(240)
+      expect(result.min_visible).toBeGreaterThanOrEqual(150)
+      expect(result.max_visible).toBeLessThanOrEqual(250)
       expect(result.samples).toBe(3 * 41 + 1)
     })
   }

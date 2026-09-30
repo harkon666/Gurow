@@ -10,12 +10,12 @@ Review and decision based on the completed evidence packet. This packet does not
 
 Stage: P1/T06 L3. Spec coverage: US80, US82, US83, US84. Parent criteria: AC1, AC2, AC3, AC4, AC5.
 
-Contract: gurow-p1-v2 (ADR 0019, supersedes gurow-p1-v1). Primary workload remains 1,000 cards, approximately 200 visible cards, 2,000 connections, HTML labels enabled; p95 frame interval ≤20 ms and p95 input-to-frame latency proxy ≤50 ms, measured in-page (rAF frame intervals; input timeStamp to the first frame after canvas and label commit, plus one refresh interval) in a headed hardware browser. Three 30-second runs per pan/zoom/drag after a 10-second warm-up, pooled per scenario. The proxy does not observe compositor or scanout time and every report says so. Missing/invalid measurement is NOT_MEASURED. Comparison workloads do not carry primary pass thresholds. The contract snapshot below and the local execution packet provide exact settings, source pointers and planned commands.
+Contract: gurow-p1-v4 (ADR 0019, supersedes gurow-p1-v1 to v3). Primary workload remains 1,000 cards, approximately 200 visible cards, 2,000 connections, HTML labels enabled; p95 frame interval ≤20 ms and p95 input-to-frame latency proxy ≤50 ms, measured in-page (rAF frame intervals; input timeStamp to when the first rAF callback after canvas and label commit runs, plus one refresh interval) in a headed hardware browser. Three 30-second runs per pan/zoom/drag after a 10-second warm-up, pooled per scenario. The proxy does not observe compositor or scanout time and every report says so. Missing/invalid measurement is NOT_MEASURED. Comparison workloads do not carry primary pass thresholds. The contract snapshot below and the local execution packet provide exact settings, source pointers and planned commands.
 
 ## Acceptance criteria
 
 - [ ] Review Standards and Spec independently in fresh contexts under the repo workflow, including instrumentation, test changes, the proxy sanity check and raw-to-p95 reproducibility.
-- [ ] Verify each primary scenario's pooled p95 meets both thresholds under contract `gurow-p1-v2`, that the proxy's stated limitation is reported, and that labels, workload, current source and environment evidence are valid; inspect failed/invalid attempts.
+- [ ] Verify each primary scenario's pooled p95 meets both thresholds under contract `gurow-p1-v4`, that the proxy's stated limitation is reported, and that labels, workload, current source and environment evidence are valid; inspect failed/invalid attempts.
 - [ ] Verify AC1 functional paths, AC3 method/environment, AC4 comparisons/diagnostics and AC5 honest failure handling; all planned checks are distinguished from executed evidence.
 - [ ] For a failure, record the bottleneck/evidence and issue a separately bounded corrective task or design reassessment. Do not close #7 or unblock #8 while evidence is missing or fails.
 - [ ] After any code fix, rerun affected checks plus final full verification on the new source and obtain independent review; do not reuse old PASS samples for changed code.
@@ -36,21 +36,21 @@ Any metric computed differently from contract §6, spec conflict, invalid eviden
 ## Approved measurement contract (self-contained snapshot)
 
 <details>
-<summary>gurow-p1-v2 — full contract</summary>
+<summary>gurow-p1-v4 — full contract</summary>
 
 # P1 benchmark contract — T06 / issue #7
 
-Contract ID: `gurow-p1-v2`. Revised 2026-09-30; supersedes `gurow-p1-v1` (prepared 2026-09-28 against source commit `0a3b9be96a8ef89ce74a22d011ce7e9ba49e996d`, retained in Git history). The decision and its trade-offs are recorded in [ADR 0019](../../adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md). No benchmark has run under either contract; P1 remains unproven.
+Contract ID: `gurow-p1-v4`. Revised 2026-09-30. It supersedes `gurow-p1-v3`, which differed only in the §5 validity rule for page delivery; `gurow-p1-v2`, which differed also in the latency endpoint of §6; and `gurow-p1-v1` (prepared 2026-09-28 against source commit `0a3b9be96a8ef89ce74a22d011ce7e9ba49e996d`). All are retained in Git history, and no acceptance series completed under v2 or v3. The decision and its trade-offs are recorded in [ADR 0019](../../adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md). P1 remains unproven.
 
 Parent: [GitHub #7](https://github.com/harkon666/Gurow/issues/7), under [MVP #1](https://github.com/harkon666/Gurow/issues/1). Authority: [prototype scope](../../PROTOTYPE_PLAN.md), [validation plan](../../ENGINE_VALIDATION_PLAN.md), ADRs [0015](../../adr/0015-own-live-editor-state-in-rust.md), [0016](../../adr/0016-save-editor-snapshots-with-revision-checks.md), [0017](../../adr/0017-use-webgpu-geometry-with-html-labels-and-list-navigation.md), [0019](../../adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md). No learning-domain rule, numeric threshold, or P2 prerequisite is changed.
 
-Normative numeric settings are in [protocol-v2.json](protocol-v2.json). The older [protocol.json](protocol.json) is the frozen `gurow-p1-v1` protocol still read by the v1 fixture/report code until #37 migrates it. [Reference environment](reference-environment.json) records the observed host. [L3 execution packets](../../tickets/t06-l3/README.md) map this contract to deliverables and original ACs. Method evidence is in [measurement research](../../research/P1_BENCHMARK_MEASUREMENT.md).
+Normative numeric settings are in [protocol-v4.json](protocol-v4.json). The older [protocol.json](protocol.json) is the frozen `gurow-p1-v1` protocol, read only by the historical v1 qualification driver. [Reference environment](reference-environment.json) records the observed host. [L3 execution packets](../../tickets/t06-l3/README.md) map this contract to deliverables and original ACs. Method evidence is in [measurement research](../../research/P1_BENCHMARK_MEASUREMENT.md).
 
 ## 1. Decisions
 
 - Use the existing application route and Rust/Wasm/wgpu path, including HTML labels, Skill list, Task sidebar, and normal local persistence callbacks. The benchmark must not replace the app with an isolated lightweight renderer or hide labels, list or sidebar.
 - Use a production build, a dedicated Chromium profile, and a headed, visible, hardware-accelerated browser on a real GPU. Headless or software-rendered runs are diagnostic only.
-- Measure two metrics from in-page instrumentation (§6): `frame_interval_ms` from animation-frame timestamps, and `input_to_frame_proxy_ms` from input `timeStamp` to the first frame after canvas and labels committed that input's state, plus one nominal refresh interval. No trace-level presentation join, hardware presentation timestamp or optical rig is required.
+- Measure two metrics from in-page instrumentation (§6): `frame_interval_ms` from animation-frame timestamps, and `input_to_frame_proxy_ms` from input `timeStamp` to when the first rAF callback after canvas and labels committed that input's state runs, plus one nominal refresh interval. No trace-level presentation join, hardware presentation timestamp or optical rig is required.
 - For each of pan, zoom and drag: fixed 10-second warm-up, then three 30-second runs. The three runs are pooled into one per-scenario distribution; each scenario must pass on its own. Per-run p95 is reported, not gated.
 - Evaluate nearest-rank p95 against the original limits: frame interval ≤20 ms and input latency proxy ≤50 ms.
 - Primary fixture: 1,000 cards, 2,000 unique directed connections, about 200 visible cards, HTML labels enabled. Comparison fixtures: 100 cards/200 connections and 10,000 cards/20,000 connections, reported without thresholds and without a capacity promise.
@@ -87,7 +87,7 @@ For each N in order 100 → 1,000 → 10,000, run pan → zoom → drag. For eac
 
 Drive input through Puppeteer/CDP at a nominal 120 Hz using an absolute schedule (`start + k/120 s`) without awaiting rendering, with a triangular 2-second motion. Pan: plain wheel moving camera X between ±0.1 cell pitch. Zoom: Ctrl+wheel at canvas center between 0.99·z0 and 1.01·z0, with deltas from the `exp(-deltaY*0.005)` rule. Drag: real pointer down on the selected center card, horizontal moves between ±0.1 cell pitch, pointer up after the run.
 
-A run is valid when at least 80% of the scheduled inputs (2,880 of 3,600) were delivered to the page, the tab stayed visible and focused, and no device loss or page error occurred. A pooled scenario needs at least 1,000 latency samples and 1,000 frame intervals. Pacing is a load check, not a speed result; an invalid run is rerun, not dropped silently.
+A run is valid when the driver sent at least 80% of the scheduled requests (2,880 of 3,600), the tab stayed visible and focused, and no device loss, page error or WebGPU validation failure occurred. Sending is a load check on the driver, not a speed result; an invalid run is rerun, not dropped silently. Separately record how many inputs the page observed, capped at the requests sent. When the page observed fewer than 80% of the schedule, the browser held input back behind a busy application (backpressure): the run stays valid, its latency counts the queued inputs it did observe, and it can FAIL but never PASS. Requests still unacknowledged at the end of the drain are recorded as backpressure, not as an error. A pooled scenario needs at least 1,000 latency samples and 1,000 frame intervals.
 
 ## 6. Metric definitions
 
@@ -97,11 +97,11 @@ A run is valid when at least 80% of the scheduled inputs (2,880 of 3,600) were d
 
 ### Input latency proxy
 
-For each input event delivered to the page (each `wheel` event; each `pointermove` including its coalesced events via `getCoalescedEvents()`), record `event.timeStamp` and the editor state revision that input produced; coalesced pointer events share the revision of the event that delivered them but keep their own timestamps. Record the revision committed to the canvas (after `dispatch_command` returns) and the revision committed to the HTML labels (after React commits `LabelsUpdated`). In the animation-frame loop, the first frame whose callback runs after both committed revisions are at least the input's revision is that input's endpoint:
+For each input event delivered to the page (each `wheel` event; each `pointermove` including its coalesced events via `getCoalescedEvents()`), record `event.timeStamp` and the editor state revision that input produced; coalesced pointer events share the revision of the event that delivered them but keep their own timestamps. Record the revision committed to the canvas (after `dispatch_command` returns) and the revision committed to the HTML labels (after React commits `LabelsUpdated`). In the animation-frame loop, the first frame whose callback runs after both committed revisions are at least the input's revision is that input's endpoint, timed by `performance.now()` read at the start of that callback:
 
-`input_to_frame_proxy_ms = rAF_timestamp − event.timeStamp + 1000 / refresh_hz`
+`input_to_frame_proxy_ms = callback_start − event.timeStamp + 1000 / refresh_hz`
 
-The added refresh interval is a fixed, documented estimate of presentation; the report also keeps the raw value without it. Inputs that are superseded before any frame are charged against the first frame that includes a later revision. An input with no endpoint by 2 seconds after the window ends is charged the time until that drain deadline. Known no-op inputs (movement clamped at a limit) are counted and excluded by a rule fixed before the run.
+The rAF timestamp is not the endpoint: Chromium stamps a frame when it is issued, so a frame whose callback was delayed by a busy main thread carries a timestamp from before the delay, and the v2 formula (`rAF_timestamp − event.timeStamp`) hid an injected 80 ms label-commit delay (+9.6 ms shift in the v2 sanity capture). The added refresh interval is a fixed, documented estimate of presentation; the report also keeps the raw value without it. Inputs that are superseded before any frame are charged against the first frame that includes a later revision. An input with no endpoint by 2 seconds after the window ends is charged the time until that drain deadline. Known no-op inputs (movement clamped at a limit) are counted and excluded by a rule fixed before the run.
 
 Every report states the limitation: the proxy covers input queueing, application, renderer submission and label commit on the main thread; it does not observe compositor output, scanout or physical pixels.
 
@@ -115,9 +115,9 @@ Chromium trace data (for example EventLatency) may be captured as optional diagn
 
 Use nearest-rank p95: sort n observations ascending and take rank `ceil(0.95*n)`. Do not interpolate or round before comparing. Exactly 20 ms / 50 ms meets the limit. Report per scenario (pooled) and per run: n, duration, p50, p95, max.
 
-Report schema `gurow-p1-report-v2` sections: `identity` (contract ID/hash, source commit, dirty flag, build hash, runner version), `environment` (§3 fields), `fixture` (size, hash, geometry, visibility records), `runs` (attempts, input counts, validity reasons, statistics), `functional` (AC1 results), `diagnostics` (initialization to first render, process RSS, JS heap and Wasm memory when available, draw calls, upload bytes, JSON boundary calls/bytes/duration; null plus reason when unavailable, never a fabricated zero), `comparisons`, `artifacts` (path, SHA-256, role), and `gate` (each original AC verdict and overall verdict).
+Report schema `gurow-p1-report-v4` sections: `identity` (contract ID/hash, source commit, dirty flag, build hash, runner version), `environment` (§3 fields), `fixture` (size, hash, geometry, visibility records), `runs` (attempts, input counts, validity reasons, statistics), `functional` (AC1 results), `diagnostics` (initialization to first render, process RSS, JS heap and Wasm memory when available, draw calls, upload bytes, JSON boundary calls/bytes/duration; null plus reason when unavailable, never a fabricated zero), `comparisons`, `artifacts` (path, SHA-256, role), and `gate` (each original AC verdict and overall verdict).
 
-Verdicts are `PASS`, `FAIL`, `NOT_MEASURED`. A valid pooled scenario over a limit is FAIL. A scenario without enough valid runs or samples is NOT_MEASURED. Overall is FAIL if any required criterion fails, otherwise NOT_MEASURED if anything required is missing, otherwise PASS. A missing comparison or diagnostic leaves AC4 incomplete but does not fail the primary performance criterion.
+Verdicts are `PASS`, `FAIL`, `NOT_MEASURED`. A valid pooled scenario over a limit is FAIL. A scenario without enough valid runs or samples is NOT_MEASURED, and so is a scenario within the limits that includes a backpressured run (§5). Overall is FAIL if any required criterion fails, otherwise NOT_MEASURED if anything required is missing, otherwise PASS. A missing comparison or diagnostic leaves AC4 incomplete but does not fail the primary performance criterion.
 
 ## 8. Functional and harness acceptance
 
@@ -128,21 +128,21 @@ T06 work uses one harness session pinned to parent #7 and its implementation bas
 </details>
 
 <details>
-<summary>Normative numeric protocol (protocol-v2.json)</summary>
+<summary>Normative numeric protocol (protocol-v4.json)</summary>
 
 ```json
 {
-  "contract_id": "gurow-p1-v2",
-  "supersedes": "gurow-p1-v1",
+  "contract_id": "gurow-p1-v4",
+  "supersedes": "gurow-p1-v3",
   "decision_record": "docs/adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md",
-  "report_schema": "gurow-p1-report-v2",
+  "report_schema": "gurow-p1-report-v4",
   "parent_issue": 7,
   "revised_at": "2026-09-30",
   "design_status": "complete_approved",
   "benchmark_status": "not_run",
   "metrics": {
     "frame_interval_ms": "consecutive requestAnimationFrame timestamp deltas during the active window",
-    "input_to_frame_proxy_ms": "rAF timestamp of first frame after canvas and label commit of the input's revision, minus event.timeStamp, plus 1000/refresh_hz"
+    "input_to_frame_proxy_ms": "performance.now() when the first rAF callback after canvas and label commit of the input's revision runs, minus event.timeStamp, plus 1000/refresh_hz"
   },
   "thresholds_ms": {
     "frame_p95": 20,
@@ -190,6 +190,7 @@ T06 work uses one harness session pinned to parent #7 and its implementation bas
     "runs_per_scenario": 3,
     "pooling": "per_scenario",
     "input_hz": 120,
+    "minimum_sent_fraction": 0.8,
     "minimum_delivered_fraction": 0.8,
     "minimum_pooled_latency_samples": 1000,
     "minimum_pooled_frame_intervals": 1000,
@@ -218,7 +219,11 @@ T06 work uses one harness session pinned to parent #7 and its implementation bas
       "label_commit"
     ]
   },
-  "unresolved_input_policy": "charge_until_drain_deadline"
+  "unresolved_input_policy": "charge_until_drain_deadline",
+  "validity": {
+    "invalid_run": "driver sent fewer than minimum_sent_fraction of scheduled requests, focus/visibility loss, device loss, page or WebGPU error",
+    "backpressure": "page observed fewer than minimum_delivered_fraction of scheduled inputs: the run stays valid and can FAIL, but a scenario with such a run cannot PASS"
+  }
 }
 ```
 
@@ -320,7 +325,7 @@ Require calibrated capture cadence, no undocumented frame interpolation/dropping
 
 The fixture generator, raw-record schema, deterministic statistics, and report validator can become bounded tasks for a fast model after the final contract is pinned. Qualifying presentation attribution is a separate specialist task: its deliverable is either a demonstrated collector path or a documented unsupported result with the optical protocol. Do not assign a fast model an open instruction to “measure visible latency” and let it choose a convenient proxy. Only after baseline evidence exists should optimization tasks be scoped.
 
-## Revision 2026-09-30: practical gate (contract `gurow-p1-v2`)
+## Revision 2026-09-30: practical gate (contract `gurow-p1-v2`, amended to `gurow-p1-v3`)
 
 The recommendation above assumed that either a Chromium presentation join or a calibrated optical rig could be acquired. On the reference host neither was available: the qualified-collector attempt found 0/18 attributable input→canvas/label→hardware-presentation chains (#34), and the only camera delivers 30 fps (#41). Under `gurow-p1-v1` the latency criterion therefore could only be `NOT_MEASURED`, independent of engine performance.
 
@@ -331,5 +336,7 @@ Comparable canvas editors do not gate on photon latency:
 - Event Timing still excludes continuous `wheel`/`pointermove` input (see the table above), so no standard browser API measures continuous-interaction latency.
 
 The project therefore adopted [ADR 0019](../adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md): rAF frame intervals and an in-app input-to-frame proxy with a documented presentation estimate, simplified sampling, and a delay-injection sanity check. The limitations recorded in the table above (rAF is not proof of displayed pixels) remain true; v2 reports them as limitations instead of treating them as disqualifying. The sections above describe the superseded `gurow-p1-v1` design.
+
+The first v2 sanity capture then confirmed the rAF limitation in a sharper form: Chromium stamps a frame when it is issued, so a callback delayed by a blocked main thread carries a timestamp from before the delay. An 80 ms injected label-commit delay moved the timestamp-based proxy by only 9.6 ms. Contract `gurow-p1-v3` therefore ends the proxy at `performance.now()` when the resolving callback starts. The first valid headed v3 capture then showed Chromium holding wheel input back behind 42–79 ms frames; contract `gurow-p1-v4` keeps such backpressured runs valid (they can fail, never pass) instead of classifying them as unmeasured.
 
 </details>

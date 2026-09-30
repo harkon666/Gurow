@@ -1,143 +1,133 @@
 import { createHash } from 'node:crypto'
 import { readFileSync, realpathSync } from 'node:fs'
-import { resolve, relative, isAbsolute } from 'node:path'
-import { computeProfileHash, validateCollectorProfile, validateReferenceEnvironment, isSoftwareAdapter, type CollectorProfile, type HostEnvironmentInfo } from './collector'
-import { computeCheckpointHash, generateBenchmarkFixture, loadBenchmarkContract, type BenchmarkContract, type FixtureManifest } from './fixture'
+import { isAbsolute, relative, resolve } from 'node:path'
+import { CONTRACT_ID, computeCheckpointHash, generateBenchmarkFixture, loadBenchmarkContract, type FixtureManifest } from './fixture'
+import { isSoftwareAdapter } from './collector'
+import { nearestRank } from './scenarios'
+import type { Scenario } from '../../src/components/editor/benchmarkHooks'
 
-/** Capture-manifest-v1: all times are milliseconds on the named clock. Every request
- * has exactly one terminal classification; groups contain original input IDs, not
- * already-reduced latencies. Raw evidence is referenced by SHA-256 artifacts. */
+/** The approved gurow-p1-v4 protocol; reducer policy is pinned to these bytes. */
+export const PROTOCOL_PATH = resolve(import.meta.dir, '../../../docs/benchmarks/p1/protocol-v4.json')
+
+/** V2 capture interchange: times are milliseconds on the in-page performance clock.
+ * Preserve every attempt, including invalid attempts; only valid repetitions pool.
+ * Raw samples are never replaced with per-run percentiles by the runner. */
 export type Verdict = 'PASS' | 'FAIL' | 'NOT_MEASURED'
-export type Scenario = 'pan' | 'zoom' | 'drag'
-export type Acquisition = 'chromium' | 'optical'
-export interface Bound { lower_ms: number; upper_ms: number }
-export interface OpticalOnsets { input: Bound; response: Bound }
-export interface OriginalInput {
-  id: string; kind: string; scheduled_ms: number; injection_ms: number | null; origin_ms: number | null
-  classification: 'presented' | 'noop' | 'late' | 'unresolved'
-  reason: string | null
-}
-export interface ResponseGroup {
-  member_ids: string[]; frame_id: string; presentation_ms: number | null
-  provenance: 'platform_presentation_feedback' | 'optical_display' | 'fabricated' | 'missing'
-  frame_link: 'revision_matched' | 'optically_attributed' | 'temporal_next_paint' | 'none'
-  app_revision: number; canvas_revision: number; label_revision: number
-  /** Optical onset uncertainty for the oldest original member, conservatively repeated. */
-  optical_latency: Bound | null
-  /** Onset windows on the calibrated optical clock, before latency reduction. */
-  optical_onsets?: OpticalOnsets | null
-}
-export interface FrameInterval { frame_id: string; bounds: Bound | null; censored: boolean; coherent: boolean
-  /** Consecutive presentation-feedback timestamps on run.clock (Chromium only). */
-  previous_presentation_ms?: number; presentation_ms?: number
-  /** Consecutive calibrated optical display-onset windows (optical only). */
-  optical_onsets?: { previous: Bound; current: Bound } | null
-  /** Optical video frame index, including frames with no input response group. */
-  optical_frame?: { video_artifact: string; capture_frame_index: number } | null }
-export interface CaptureRun {
-  id: string; cards: 100 | 1000 | 10000; scenario: Scenario; repetition: number
-  source_fingerprint: string; profile_hash: string; fixture_hash: string
-  acquisition: Acquisition; clock: string; units: 'ms'
-  warmup_seconds: number; active_seconds: number; drain_seconds: number
-  windows: { warmup_start_ms: number; active_start_ms: number; active_end_ms: number; drain_end_ms: number }
-  scheduled: number; delivered: number; invalid_reasons: string[]
-  visibility: { initial: number; minimum: number; maximum: number; path_verified: boolean; labels_enabled: boolean
-    labels: { initial: number; minimum: number; maximum: number }
-    connections: { initial: number; minimum: number; maximum: number } }
-  inputs: OriginalInput[]; groups: ResponseGroup[]; intervals: FrameInterval[]
-  /** Optical evidence has independent input cadence and capture calibration. */
-  optical_calibration: { qualified: boolean; independent_input_evidence: boolean; raw_video: string; calibration_artifact: string } | null
-}
+export type { Scenario }
 export interface Artifact { path: string; sha256: string; role: string }
 export interface OptionalCounter { value: number | null; unit: string; reason: string | null }
 export interface DiagnosticRecord {
-  initialization_to_first_coherent_render_ms: OptionalCounter
-  browser_process_tree_rss_bytes: OptionalCounter
-  js_heap_bytes: OptionalCounter; wasm_memory_bytes: OptionalCounter; gpu_memory_bytes: OptionalCounter
-  draw_calls: OptionalCounter; upload_bytes: OptionalCounter
-  json_boundary_calls: OptionalCounter; json_boundary_bytes: OptionalCounter; json_boundary_duration_ms: OptionalCounter
+  initialization_to_first_render_ms: OptionalCounter
+  process_rss_bytes: OptionalCounter
+  js_heap_bytes: OptionalCounter
+  wasm_memory_bytes: OptionalCounter
+  draw_calls: OptionalCounter
+  upload_bytes: OptionalCounter
+  json_boundary_calls: OptionalCounter
+  json_boundary_bytes: OptionalCounter
+  json_boundary_duration_ms: OptionalCounter
   limitations: string[]
 }
 export interface FunctionalAssertion {
   id: string; action: string; assertion: string; command_or_log: string
   source_fingerprint: string; result: Verdict; reason: string | null
 }
-export interface ComparisonFixture {
-  cards: 100 | 10000; connections: number; hash: string; manifest_path: string; checkpoint_path: string
+export interface FixtureRecord {
+  cards: 100 | 1000 | 10000; connections: number; hash: string
+  manifest_path: string; checkpoint_path: string; geometry: FixtureManifest['geometry']
+  task_association_verified: boolean
+}
+export interface VisibilitySample { time_ms: number; visible_cards: number; dom_labels: number; submitted_primitives: number }
+export interface CaptureRun {
+  id: string; cards: 100 | 1000 | 10000; scenario: Scenario; repetition: number
+  source_fingerprint: string; fixture_hash: string
+  warmup_seconds: number; active_seconds: number; drain_seconds: number
+  /** Requests the driver actually sent; below the sent minimum the run is invalid. */
+  sent: number
+  /** Inputs observed by the page, at most `sent`; below the delivered minimum the
+   * app held back input (backpressure) and the run can FAIL but never PASS. */
+  scheduled: number; delivered: number; invalid_reasons: string[]
+  /** In-window inputs the editor ignored as no-ops; excluded from latency. */
+  no_op_inputs?: number
+  /** Frame intervals from consecutive rAF timestamps, including terminal open stall. */
+  frame_interval_ms: number[]
+  /** Input timeStamp to first frame after canvas AND label commit, plus 1000/refresh_hz. */
+  input_to_frame_proxy_ms: number[]
+  /** Same input observations without the nominal refresh interval. */
+  input_to_frame_raw_ms: number[]
+  /** Original browser event IDs and one terminal/proxy result per original. */
+  captured_input_ids?: string[]; captured_sample_ids?: string[]
+  visibility: VisibilitySample[]
+  tab_visible: boolean; tab_focused: boolean; device_lost: boolean; page_errors: string[]
+  delays_enabled: boolean
 }
 export interface CaptureManifest {
-  schema: 'gurow-p1-capture-manifest-v1'; synthetic: boolean
+  schema: 'gurow-p1-capture-manifest-v4'; synthetic: boolean
   identity: { contract_id: string; contract_sha256: string; parent_issue: 7
     commit: string; tree_dirty: boolean; source_fingerprint: string; build_hash: string
-    timestamp: string; runner_version: string; parser_version: string; collector_version: string; profile_hash: string }
-  environment: { host: HostEnvironmentInfo; ac_power_online: boolean; cpu_governor: string
-    display_output: string; compositor_scale: number; vrr: boolean; dedicated_profile: boolean
-    production_build: boolean; interruptions: string[] }
-  profile: CollectorProfile
-  fixture: { hash: string; seed: string; algorithm_version: string; cards: 1000; connections: 2000
-    initial_visible_cards: 200; camera_and_cell: Record<string, number>; task_association_verified: boolean
-    manifest_path: string; checkpoint_path: string }
-  comparison_fixtures: ComparisonFixture[]
+    timestamp: string; runner_version: string }
+  environment: { cpu: string; physical_memory_bytes: number; os: string; kernel: string
+    compositor: string; cpu_governor: string; browser_executable: string; browser_version: string
+    browser_flags: string[]; gpu_adapter: string; gpu_driver: string; hardware_gpu: boolean
+    display_refresh_hz: number; window_inner_size: { width: number; height: number }
+    device_pixel_ratio: number; canvas_css: { width: number; height: number }
+    canvas_backing: { width: number; height: number }; browser_zoom_percent: number
+    ac_power_online: boolean; dedicated_profile: boolean; production_build: boolean
+    headed: boolean; canvas_unobscured: boolean; interruptions: string[] }
+  fixture: FixtureRecord; comparison_fixtures: FixtureRecord[]
   runs: CaptureRun[]; functional: FunctionalAssertion[]; diagnostics: DiagnosticRecord
+  sanity_checks: { application_update_p50_shift_ms: number | null; label_commit_p50_shift_ms: number | null }
   artifacts: Artifact[]
 }
 export interface Protocol {
   contract_id: string; report_schema: string; parent_issue: number
-  thresholds_ms: { frame_p95: number; input_to_visible_p95: number }
-  primary: { cards: number; connections: number; initial_visible_cards: number; visible_cards_min: number; visible_cards_max: number; html_labels: boolean }
-  comparisons: { cards: number; connections: number }[]
-  sampling: { warmup_seconds: number; active_seconds: number; drain_seconds: number; repetitions_per_scenario: number
-    minimum_delivered_requests: number; minimum_response_groups: number; minimum_presented_intervals: number }
-  scenarios: Scenario[]; optical_equivalent_input_count_per_30s: { min: number; max: number }
-  percentile: string; latency_statistics_unit: string; censored_tail_policy: string
+  thresholds_ms: { frame_p95: number; input_to_frame_proxy_p95: number }
+  primary: { cards: number; connections: number; initial_visible_cards: number
+    visible_cards_median_min: number; visible_cards_median_max: number; html_labels: boolean }
+  comparisons: { cards: number; connections: number; runs_per_scenario: number }[]
+  minimum_canvas_css: { width: number; height: number }; browser_zoom_percent: number
+  sampling: { warmup_seconds: number; active_seconds: number; drain_seconds: number
+    runs_per_scenario: number; input_hz: number; minimum_sent_fraction: number; minimum_delivered_fraction: number
+    minimum_pooled_latency_samples: number; minimum_pooled_frame_intervals: number
+    visibility_sample_hz: number; motion_period_seconds: number
+    pan_drag_amplitude_cell_fraction: number; zoom_min_factor: number; zoom_max_factor: number }
+  scenarios: Scenario[]; percentile: string
+  sanity_check: { injected_delay_ms: number; minimum_p50_shift_ms: number }
 }
-export interface Statistics { unit: 'ms'; n: number; duration_seconds: number; p50: number | null; p95: number | null; max: number | null; observations: number[] }
-export interface MetricReport { verdict: Verdict; reasons: string[]; lower: Statistics; upper: Statistics }
-export interface RunReport { id: string; cards: number; scenario: Scenario; repetition: number; validity: Verdict; reasons: string[]
-  visibility: CaptureRun['visibility']
-  input_to_visible: MetricReport; presented_editor_frame_interval: MetricReport; group_sizes: number[]; counts: { scheduled: number; delivered: number; classified: number; late: number; unresolved: number } }
+export interface Statistics { unit: 'ms'; n: number; duration_seconds: number; p50: number | null; p95: number | null; max: number | null; over_50_ms: number }
+export interface RunReport {
+  id: string; cards: number; scenario: Scenario; repetition: number; validity: Verdict; reasons: string[]
+  counts: { scheduled: number; sent: number; delivered: number; no_op: number }; backpressured: boolean; visibility_median: number | null
+  frame_interval_ms: Statistics; input_to_frame_proxy_ms: Statistics; input_to_frame_raw_ms: Statistics
+}
+export interface ScenarioReport {
+  scenario: Scenario; verdict: Verdict; reasons: string[]; valid_runs: number
+  frame_interval_ms: Statistics; input_to_frame_proxy_ms: Statistics; input_to_frame_raw_ms: Statistics
+}
 export interface BenchmarkReport {
-  schema: 'gurow-p1-report-v1'; synthetic: boolean; identity: CaptureManifest['identity']; environment: CaptureManifest['environment']
-  fixture: CaptureManifest['fixture']; comparison_fixtures: ComparisonFixture[]; runs: RunReport[]; functional: { verdict: Verdict; assertions: FunctionalAssertion[]; reasons: string[] }
+  schema: 'gurow-p1-report-v4'; synthetic: boolean
+  identity: CaptureManifest['identity']; environment: CaptureManifest['environment']
+  fixture: FixtureRecord; runs: RunReport[]; scenarios: ScenarioReport[]
+  functional: { verdict: Verdict; assertions: FunctionalAssertion[]; reasons: string[] }
   diagnostics: DiagnosticRecord; comparisons: { cards: number; verdict: Verdict; runs: RunReport[]; reasons: string[] }[]
-  artifacts: Artifact[]; metrics: { verdict: Verdict; reasons: string[]; worst_runs: Record<string, string | null> }
+  artifacts: Artifact[]; metrics: { verdict: Verdict; reasons: string[] }
+  limitations: string[]
   gate: { criteria: Record<'AC1' | 'AC2' | 'AC3' | 'AC4' | 'AC5', Verdict>; verdict: Verdict; reasons: string[]; required_follow_up: string[] }
 }
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
-// Changing any normative v1 value requires a versioned contract change, not a
-// caller-supplied JSON file with the same contract_id and relaxed thresholds.
-const APPROVED_V1_SHA256 = '1ffe143745d68eda253d993d8f3dff55043ec042811b3fd2527d03b6ffb72d10'
-// Fixture generator is deterministic and takes no random seed; bind metadata to this implementation.
-const FIXTURE_SEED = 'none-deterministic', FIXTURE_ALGORITHM = 'gurow-grid-gap-v1'
-// Fixture layouts are regenerated from the repository contract file; the canvas they were generated for comes from the manifest.
-let fixtureContract: BenchmarkContract | undefined
-const getFixtureContract = () =>
-  (fixtureContract ??= loadBenchmarkContract(resolve(import.meta.dir, '../../../docs/benchmarks/p1/protocol.json')))
 const good = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n) && n >= 0
 const text = (s: unknown): s is string => typeof s === 'string' && s.trim().length > 0
 const hex = (s: unknown) => typeof s === 'string' && /^[a-f0-9]{64}$/i.test(s)
-const notMeasured = (reasons: string[]) => reasons.length ? 'NOT_MEASURED' as const : 'PASS' as const
+const status = (reasons: string[]): Verdict => reasons.length ? 'NOT_MEASURED' : 'PASS'
 export function combineVerdicts(verdicts: Verdict[]): Verdict {
   return verdicts.includes('FAIL') ? 'FAIL' : verdicts.includes('NOT_MEASURED') ? 'NOT_MEASURED' : 'PASS'
 }
-export function nearestRank(values: number[], fraction: number): number | null {
-  if (!values.length || !values.every(good) || fraction <= 0 || fraction > 1) return null
-  return [...values].sort((a, b) => a - b)[Math.ceil(fraction * values.length) - 1]
-}
+export { nearestRank }
 function stats(values: number[], duration_seconds: number): Statistics {
   return { unit: 'ms', n: values.length, duration_seconds, p50: nearestRank(values, .5), p95: nearestRank(values, .95),
-    max: values.length ? Math.max(...values) : null, observations: values }
+    max: values.length ? Math.max(...values) : null, over_50_ms: values.filter(v => v > 50).length }
 }
-function metric(bounds: Bound[], duration: number, limit: number | null, reasons: string[]): MetricReport {
-  const lower = stats(bounds.map(b => b.lower_ms), duration), upper = stats(bounds.map(b => b.upper_ms), duration)
-  let verdict: Verdict = 'NOT_MEASURED'
-  if (!reasons.length && lower.p95 !== null && upper.p95 !== null) {
-    verdict = limit === null || upper.p95 <= limit ? 'PASS' : lower.p95 > limit ? 'FAIL' : 'NOT_MEASURED'
-    if (verdict === 'NOT_MEASURED') reasons.push('uncertainty_overlaps_limit')
-  }
-  return { verdict, reasons, lower, upper }
-}
-/** No path may escape the manifest directory; all raw references must be verified. */
+/** No artifact may escape the manifest directory, even through a symlink. */
 export function verifyArtifacts(artifacts: Artifact[], directory: string): string[] {
   const errors: string[] = [], paths = new Set<string>()
   if (!Array.isArray(artifacts) || !artifacts.length) return ['Artifact inventory is empty.']
@@ -151,279 +141,163 @@ export function verifyArtifacts(artifacts: Artifact[], directory: string): strin
       const root = realpathSync(directory), target = realpathSync(resolve(directory, a.path))
       if (relative(root, target).startsWith('..') || isAbsolute(relative(root, target))) { errors.push(`Artifact escapes manifest directory: ${a.path}`); continue }
       if (hash(readFileSync(target)) !== a.sha256) errors.push(`Artifact SHA-256 mismatch: ${a.path}`)
-    }
-    catch { errors.push(`Artifact missing/unreadable: ${a.path}`) }
+    } catch { errors.push(`Artifact missing/unreadable: ${a.path}`) }
   }
   return errors
 }
-/** The CLI compares evidence bytes with the exact records being reduced. Merely
- * listing a correctly hashed but unrelated file cannot validate a gate. */
+/** Hashed files must contain the records actually reduced, not unrelated bytes. */
 export function verifyArtifactBindings(m: CaptureManifest, directory: string): string[] {
   if (m.synthetic) return []
   const errors: string[] = []
-  for (const [role, value] of [['collector-profile', m.profile], ['raw-input-frame-log', m.runs], ['functional-log', m.functional]] as const) {
-    const a = m.artifacts?.find(x => x.role === role)
-    if (!a) continue
+  const artifactErrors = verifyArtifacts(m.artifacts, directory)
+  if (artifactErrors.length) return artifactErrors
+  for (const [role, file, value] of [['raw-input-frame-log', 'runs.json', m.runs], ['functional-log', 'functional.json', m.functional]] as const) {
+    const a = m.artifacts?.find(x => x.role === role && x.path === file)
+    if (!a) { errors.push(`Missing ${role} artifact.`); continue }
     try {
-      const contents = JSON.parse(readFileSync(resolve(directory, a.path), 'utf8'))
-      if (JSON.stringify(contents) !== JSON.stringify(value)) errors.push(`${role} content differs from manifest records.`)
+      if (JSON.stringify(JSON.parse(readFileSync(resolve(directory, a.path), 'utf8'))) !== JSON.stringify(value)) errors.push(`${role} content differs from manifest records.`)
     } catch { errors.push(`${role} is not readable JSON.`) }
   }
-  for (const fixture of [m.fixture, ...(m.comparison_fixtures ?? [])]) {
-    if (!fixture) continue
-    const prefix = fixture.cards === 1000 ? 'primary-fixture' : 'comparison-fixture'
-    const manifestArtifact = m.artifacts?.find(a => a.role === `${prefix}-manifest` && a.path === fixture.manifest_path)
-    const checkpointArtifact = m.artifacts?.find(a => a.role === `${prefix}-checkpoint` && a.path === fixture.checkpoint_path)
-    if (!manifestArtifact || !checkpointArtifact) { errors.push(`Fixture ${fixture.cards} manifest/checkpoint artifact missing.`); continue }
+  const contract = loadBenchmarkContract(PROTOCOL_PATH)
+  for (const f of [m.fixture, ...(m.comparison_fixtures ?? [])]) {
+    if (!f) continue
+    const prefix = f.cards === 1000 ? 'primary-fixture' : 'comparison-fixture'
+    const manifestArtifact = m.artifacts?.find(a => a.role === `${prefix}-manifest` && a.path === f.manifest_path)
+    const checkpointArtifact = m.artifacts?.find(a => a.role === `${prefix}-checkpoint` && a.path === f.checkpoint_path)
+    if (!manifestArtifact || !checkpointArtifact) { errors.push(`Fixture ${f.cards} manifest/checkpoint artifact missing.`); continue }
     try {
-      const record = JSON.parse(readFileSync(resolve(directory, manifestArtifact.path), 'utf8')) as FixtureManifest
-      const checkpoint = JSON.parse(readFileSync(resolve(directory, checkpointArtifact.path), 'utf8'))
-      const expected = generateBenchmarkFixture(getFixtureContract(), fixture.cards, {
-        canvasCss: record.geometry.canvas_css, savedAt: record.saved_at,
-      })
-      if (record.contract_id !== m.identity.contract_id || record.size !== fixture.cards || record.card_count !== fixture.cards ||
-        record.connection_count !== fixture.connections || record.checkpoint_hash !== fixture.hash)
-        errors.push(`Fixture ${fixture.cards} raw manifest does not match the reduced workload.`)
-      if (checkpoint?.editor?.cards?.length !== fixture.cards || checkpoint?.editor?.connections?.length !== fixture.connections ||
-        computeCheckpointHash(checkpoint) !== fixture.hash || checkpoint?.application?.learning_path_id !== record.learning_path_id)
-        errors.push(`Fixture ${fixture.cards} checkpoint does not match manifest/count/hash.`)
-      if (JSON.stringify(record) !== JSON.stringify(expected.manifest) || JSON.stringify(checkpoint) !== JSON.stringify(expected.checkpoint))
-        errors.push(`Fixture ${fixture.cards} geometry/checkpoint does not match contracted layout.`)
-      if (fixture.cards === 1000 && ('camera_and_cell' in fixture) &&
-        (fixture.seed !== FIXTURE_SEED || fixture.algorithm_version !== FIXTURE_ALGORITHM ||
-          Object.keys(fixture.camera_and_cell ?? {}).sort().join(',') !== 'offset_x,offset_y,px,py,z0' ||
-          fixture.camera_and_cell.z0 !== expected.manifest.geometry.z0 || fixture.camera_and_cell.px !== expected.manifest.geometry.cell_pitch_world.x ||
-          fixture.camera_and_cell.py !== expected.manifest.geometry.cell_pitch_world.y || fixture.camera_and_cell.offset_x !== expected.manifest.geometry.camera.offset_x ||
-          fixture.camera_and_cell.offset_y !== expected.manifest.geometry.camera.offset_y))
-        errors.push('Primary fixture metadata differs from verified generator geometry and algorithm.')
-    } catch { errors.push(`Fixture ${fixture.cards} manifest/checkpoint unreadable or invalid.`) }
-  }
-  const qualification = m.artifacts?.find(a => a.role === 'qualification-report')
-  if (qualification) try {
-    const record = JSON.parse(readFileSync(resolve(directory, qualification.path), 'utf8'))
-    if (record.verdict !== 'QUALIFIED' || record.profile_hash !== m.profile.hash || record.identity?.source_fingerprint !== m.identity.source_fingerprint || record.identity?.build_hash !== m.identity.build_hash || record.acceptance_profile_validation?.valid !== true || record.controlled_delays?.app_delay_check?.status !== 'PASS' || record.controlled_delays?.label_delay_check?.status !== 'PASS') errors.push('Qualification report does not establish this profile/source with both delay checks.')
-  } catch { errors.push('Qualification report unreadable.') }
-  const build = m.artifacts?.find(a => a.role === 'production-build')
-  if (build && build.sha256 !== m.identity.build_hash) errors.push('Production build artifact digest differs from build identity.')
-  for (const r of m.runs ?? []) if (r.acquisition === 'optical') {
-    const calibration = m.artifacts?.find(a => a.role === 'optical-calibration' && a.path === r.optical_calibration?.calibration_artifact)
-    const video = m.artifacts?.find(a => a.role === 'optical-video' && a.path === r.optical_calibration?.raw_video)
-    if (!calibration || !video) errors.push(`Optical run ${r.id} requires verified calibration and video artifacts.`)
-    else try {
-      const record = JSON.parse(readFileSync(resolve(directory, calibration.path), 'utf8'))
-      if (record.run_id !== r.id || record.source_fingerprint !== m.identity.source_fingerprint || record.video_sha256 !== video.sha256 || record.qualified !== true || record.independent_input_evidence !== true) errors.push(`Optical calibration ${r.id} not bound to source, run and video.`)
-    } catch { errors.push(`Optical calibration ${r.id} unreadable.`) }
+      const record = JSON.parse(readFileSync(resolve(directory, f.manifest_path), 'utf8')) as FixtureManifest
+      const checkpoint = JSON.parse(readFileSync(resolve(directory, f.checkpoint_path), 'utf8'))
+      const expected = generateBenchmarkFixture(contract, f.cards, { canvasCss: record.geometry.canvas_css, savedAt: record.saved_at })
+      if (record.contract_id !== m.identity.contract_id || f.hash !== record.checkpoint_hash || f.connections !== record.connection_count ||
+        JSON.stringify(f.geometry) !== JSON.stringify(record.geometry) || computeCheckpointHash(checkpoint) !== f.hash ||
+        JSON.stringify(record) !== JSON.stringify(expected.manifest) || JSON.stringify(checkpoint) !== JSON.stringify(expected.checkpoint))
+        errors.push(`Fixture ${f.cards} geometry/checkpoint does not match contracted layout.`)
+    } catch { errors.push(`Fixture ${f.cards} manifest/checkpoint unreadable or invalid.`) }
   }
   return errors
 }
 const REQUIRED_FUNCTIONAL = ['create_select', 'pan_zoom_drag', 'connection_cycle_rejection', 'task_edit', 'undo_redo', 'reload', 'keyboard_list_no_webgpu', 'device_loss_recovery_retry'] as const
-function reduceRun(run: CaptureRun, m: CaptureManifest, p: Protocol): RunReport {
-  const reasons: string[] = []
-  const primary = run.cards === p.primary.cards
-  const expectedFixture = primary ? p.primary : p.comparisons.find(c => c.cards === run.cards)
-  const comparison = primary ? null : m.comparison_fixtures?.find(c => c.cards === run.cards)
-  if (!expectedFixture || !hex(run.fixture_hash) ||
-    (primary && run.fixture_hash !== m.fixture?.hash) ||
-    (!primary && (!comparison || comparison.connections !== expectedFixture.connections || !hex(comparison.hash) || run.fixture_hash !== comparison.hash)))
-    reasons.push('Fixture identity/count missing or mismatched.')
-  if (run.source_fingerprint !== m.identity.source_fingerprint || run.profile_hash !== m.identity.profile_hash) reasons.push('Run source/profile identity mismatch.')
-  if (!p.scenarios.includes(run.scenario) || !Number.isInteger(run.repetition) || run.repetition < 1 || run.repetition > p.sampling.repetitions_per_scenario) reasons.push('Run scenario/repetition invalid.')
-  if (run.warmup_seconds !== p.sampling.warmup_seconds || run.active_seconds !== p.sampling.active_seconds || run.drain_seconds > p.sampling.drain_seconds || !good(run.drain_seconds)) reasons.push('Run window lengths invalid.')
-  const w = run.windows
-  if (!w || ![w.warmup_start_ms,w.active_start_ms,w.active_end_ms,w.drain_end_ms].every(good) || w.active_start_ms - w.warmup_start_ms !== run.warmup_seconds * 1000 || w.active_end_ms - w.active_start_ms !== run.active_seconds * 1000 || w.drain_end_ms - w.active_end_ms !== run.drain_seconds * 1000) reasons.push('Warmup/active/drain monotonic windows invalid.')
-  if (run.units !== 'ms' || !text(run.clock) || (run.acquisition === 'chromium' && run.clock !== m.profile.trace_configuration.clock_origin) || (run.acquisition === 'optical' && run.clock !== 'optical_capture_clock')) reasons.push('Unqualified or mixed clock/units.')
-  if (run.acquisition !== 'optical' && run.acquisition !== 'chromium') reasons.push('Acquisition unknown.')
-  if (!Array.isArray(run.invalid_reasons) || run.invalid_reasons.length) reasons.push(...(run.invalid_reasons ?? ['Invalid run reasons missing.']))
-  const v = run.visibility
-  const countsValid = (counts: { initial: number; minimum: number; maximum: number } | undefined, total: number) =>
-    counts && [counts.initial, counts.minimum, counts.maximum].every(Number.isSafeInteger) &&
-    counts.minimum >= 0 && counts.minimum <= counts.initial && counts.initial <= counts.maximum && counts.maximum <= total
-  if (!v || !v.path_verified || !v.labels_enabled || !countsValid(v,run.cards) ||
-    !countsValid(v.labels,run.cards) || !countsValid(v.connections,expectedFixture?.connections ?? 0) || !v.labels.minimum ||
-    (primary && (v.initial !== p.primary.initial_visible_cards || v.minimum < p.primary.visible_cards_min || v.maximum > p.primary.visible_cards_max)))
-    reasons.push('Card/label/connection visibility counts or path invalid or unverified.')
-  if (!Number.isInteger(run.scheduled) || run.scheduled !== 3600 || !Number.isInteger(run.delivered) || run.delivered < 0 || run.delivered > run.scheduled || !Array.isArray(run.inputs) || run.inputs.length !== run.scheduled) reasons.push('Scheduled/delivered/input accounting mismatch.')
-  const ids = new Set<string>(), members = new Set<string>()
-  let delivered = 0, late = 0, unresolved = 0
-  const expectedKinds: Record<Scenario, string[]> = { pan: ['pan', 'pointermove'], zoom: ['zoom', 'wheel'], drag: ['drag', 'pointermove'] }
-  for (const [index, input] of (run.inputs ?? []).entries()) {
-    if (w && Math.abs(input.scheduled_ms - (w.active_start_ms + index * 1000 / 120)) > 0.000001) reasons.push('Original 120 Hz absolute input schedule mismatched.')
-    if (!text(input.id) || ids.has(input.id) || !expectedKinds[run.scenario]?.includes(input.kind) || !['presented','noop','late','unresolved'].includes(input.classification)) reasons.push('Duplicate/malformed/unclassified or scenario-mismatched input.')
-    ids.add(input.id)
-    if (!good(input.scheduled_ms) || (w && (input.scheduled_ms < w.active_start_ms || input.scheduled_ms >= w.active_end_ms)) ||
-      (input.injection_ms !== null && (!good(input.injection_ms) || input.injection_ms < input.scheduled_ms || (input.classification !== 'late' && w && input.injection_ms >= w.active_end_ms))) ||
-      (input.classification !== 'late' && w && good(input.origin_ms) && (input.origin_ms < w.active_start_ms || input.origin_ms >= w.active_end_ms)) ||
-      (run.acquisition === 'chromium' && input.classification !== 'late' && (input.injection_ms === null || (good(input.origin_ms) && input.origin_ms < input.injection_ms)))) reasons.push('Input deadline/injection/origin outside active window or misordered.')
-    if (run.acquisition === 'optical' && input.injection_ms !== null) reasons.push('Physical optical origin cannot use injected-input timestamp.')
-    if (input.classification === 'late') late++
-    else { delivered++; if (!good(input.origin_ms)) reasons.push('Missing/invalid original input origin.'); if (input.classification === 'unresolved') unresolved++ }
-    if (input.classification !== 'presented' && !text(input.reason)) reasons.push('Non-presented input lacks predeclared reason.')
+function reduceRun(r: CaptureRun, m: CaptureManifest, p: Protocol): RunReport {
+  const reasons: string[] = [...(Array.isArray(r.invalid_reasons) ? r.invalid_reasons : ['Invalidation record missing.'])]
+  const fixture = r.cards === p.primary.cards ? m.fixture : m.comparison_fixtures?.find(f => f.cards === r.cards)
+  if (!fixture || fixture.hash !== r.fixture_hash || fixture.cards !== r.cards || !fixture.task_association_verified) reasons.push('Fixture identity mismatch.')
+  if (r.source_fingerprint !== m.identity.source_fingerprint) reasons.push('Run source identity mismatch.')
+  if (!p.scenarios.includes(r.scenario) || !Number.isInteger(r.repetition) || r.repetition < 1 || r.repetition > (r.cards === p.primary.cards ? p.sampling.runs_per_scenario : p.comparisons.find(c => c.cards === r.cards)?.runs_per_scenario ?? 0)) reasons.push('Run scenario/repetition invalid.')
+  if (r.warmup_seconds !== p.sampling.warmup_seconds || r.active_seconds !== p.sampling.active_seconds || !good(r.drain_seconds) || r.drain_seconds > p.sampling.drain_seconds) reasons.push('Run duration invalid.')
+  const scheduled = p.sampling.active_seconds * p.sampling.input_hz
+  if (r.no_op_inputs !== undefined && (!Number.isInteger(r.no_op_inputs) || r.no_op_inputs < 0)) reasons.push('No-op input count invalid.')
+  if (r.scheduled !== scheduled || !Number.isInteger(r.sent) || r.sent < 0 || r.sent > scheduled || r.sent / scheduled < p.sampling.minimum_sent_fraction) reasons.push('Sender delivered below the minimum fraction of the schedule, or schedule invalid.')
+  if (!Number.isInteger(r.delivered) || r.delivered < 0 || r.delivered > r.sent) reasons.push('Page-delivered input count invalid.')
+  const backpressured = Number.isInteger(r.delivered) && r.delivered / scheduled < p.sampling.minimum_delivered_fraction
+  if (r.tab_visible !== true || r.tab_focused !== true || r.device_lost !== false || !Array.isArray(r.page_errors) || r.page_errors.length || r.delays_enabled !== false) reasons.push('Focus/visibility/device/page error or delay injection during run.')
+  for (const name of ['frame_interval_ms', 'input_to_frame_proxy_ms', 'input_to_frame_raw_ms'] as const) if (!Array.isArray(r[name]) || !r[name].every(good)) reasons.push(`Invalid ${name} samples.`)
+  // Coalesced pointer events retain their own timestamps, so there may be more
+  // latency observations than delivered driver events. Never silently accept an
+  // empty run or discard observations to fit the driver count.
+  if (!Array.isArray(r.input_to_frame_proxy_ms) || !Array.isArray(r.input_to_frame_raw_ms) ||
+    !r.input_to_frame_proxy_ms.length || r.input_to_frame_proxy_ms.length !== r.input_to_frame_raw_ms.length) reasons.push('Input sample/raw accounting mismatch.')
+  if (!m.synthetic) {
+    const originals = r.captured_input_ids, samples = r.captured_sample_ids
+    if (!Array.isArray(originals) || !Array.isArray(samples) ||
+      // No-op inputs count as delivered but have no latency observation.
+      originals.length < r.delivered - (r.no_op_inputs ?? 0) || samples.length !== originals.length ||
+      samples.length !== r.input_to_frame_proxy_ms?.length ||
+      new Set(originals).size !== originals.length || new Set(samples).size !== samples.length ||
+      originals.some((id, i) => !text(id) || id !== samples[i]))
+      reasons.push('Per-original input IDs or latency observations missing/duplicated.')
   }
-  if (delivered !== run.delivered || late !== run.scheduled - run.delivered || unresolved) reasons.push('Delivered/late counts mismatch or unresolved responses.')
-  if ((run.inputs ?? []).some(i => i.classification === 'noop')) reasons.push('No-op classification lacks a qualified predeclared collector rule.')
-  if (run.acquisition === 'chromium' && delivered < p.sampling.minimum_delivered_requests) reasons.push('Automated pacing below minimum.')
-  if (run.acquisition === 'optical' && (delivered < p.optical_equivalent_input_count_per_30s.min || delivered > p.optical_equivalent_input_count_per_30s.max || !run.optical_calibration?.qualified || !run.optical_calibration.independent_input_evidence || !text(run.optical_calibration.raw_video) || !m.artifacts.some(a => a.path === run.optical_calibration?.raw_video))) reasons.push('Optical load/calibration/video incomplete.')
-  const responses: Bound[] = []
-  const frameGroups = new Map<string, ResponseGroup>()
-  for (const g of run.groups ?? []) {
-    const prior = frameGroups.get(g.frame_id)
-    if (prior && (prior.presentation_ms !== g.presentation_ms || prior.app_revision !== g.app_revision || prior.canvas_revision !== g.canvas_revision || prior.label_revision !== g.label_revision)) reasons.push('Conflicting presentation time/revision for one frame ID.')
-    else frameGroups.set(g.frame_id, g)
-    if (!g.member_ids?.length || !text(g.frame_id) || !Number.isInteger(g.app_revision) || g.app_revision < 0 || g.canvas_revision !== g.app_revision || g.label_revision !== g.app_revision ||
-      (run.acquisition === 'chromium' && (g.provenance !== 'platform_presentation_feedback' || g.frame_link !== 'revision_matched')) ||
-      (run.acquisition === 'optical' && (g.provenance !== 'optical_display' || g.frame_link !== 'optically_attributed'))) reasons.push('Unqualified/fabricated presentation or revision mismatch.')
-    const origins = g.member_ids.map(id => (run.inputs ?? []).find(i => i.id === id))
-    for (const id of g.member_ids) { if (members.has(id)) reasons.push('Duplicate group member.'); members.add(id) }
-    if (origins.some(i => !i || i.classification !== 'presented' || !good(i.origin_ms))) { reasons.push('Group contains unknown/non-presented member.'); continue }
-    const oldest = Math.min(...origins.map(i => i!.origin_ms!))
-    if (run.acquisition === 'optical') {
-      const onset = g.optical_onsets
-      if (onset && good(onset.response?.lower_ms) && origins.some(i => i!.origin_ms! > onset.response.lower_ms))
-        reasons.push('Optical response precedes a grouped original input.')
-      if (!onset || ![onset.input?.lower_ms, onset.input?.upper_ms, onset.response?.lower_ms, onset.response?.upper_ms].every(good) ||
-        onset.input.lower_ms > onset.input.upper_ms || onset.response.lower_ms > onset.response.upper_ms ||
-        oldest < onset.input.lower_ms || oldest > onset.input.upper_ms ||
-        (w && (onset.input.lower_ms < w.active_start_ms || onset.response.upper_ms > w.drain_end_ms)) ||
-        (g.presentation_ms !== null && (!good(g.presentation_ms) || g.presentation_ms < onset.response.lower_ms || g.presentation_ms > onset.response.upper_ms)) ||
-        g.optical_latency?.lower_ms !== Math.max(0, onset.response.lower_ms - onset.input.upper_ms) ||
-        g.optical_latency?.upper_ms !== onset.response.upper_ms - onset.input.lower_ms) reasons.push('Optical latency not derived from calibrated input/response onset windows.')
-    }
-    const bound = run.acquisition === 'optical' ? g.optical_latency : good(g.presentation_ms) ? { lower_ms: g.presentation_ms - oldest, upper_ms: g.presentation_ms - oldest } : null
-    if (!bound || !good(bound.lower_ms) || !good(bound.upper_ms) || bound.lower_ms > bound.upper_ms || (run.acquisition === 'chromium' && (origins.some(i => i!.origin_ms! > g.presentation_ms!) || (w && g.presentation_ms! > w.drain_end_ms)))) { reasons.push('Missing/negative/misordered response time or optical bound.'); continue }
-    // Collector's pinned rule attributes the oldest original origin to every member.
-    for (const _ of origins) responses.push(bound)
-  }
-  if ((run.groups?.length ?? 0) < p.sampling.minimum_response_groups) reasons.push('Insufficient response groups.')
-  if ((run.inputs ?? []).some(i => i.classification === 'presented' && !members.has(i.id))) reasons.push('Presented input absent from groups.')
-  const frames: Bound[] = []
-  const intervals = run.intervals ?? []
-  for (const [index, interval] of intervals.entries()) {
-    if (!text(interval.frame_id) || !interval.coherent || interval.censored || !interval.bounds || !good(interval.bounds.lower_ms) || !good(interval.bounds.upper_ms) || interval.bounds.lower_ms > interval.bounds.upper_ms) reasons.push('Censored/invalid/noncoherent terminal frame interval.')
-    else if (w && (run.acquisition === 'chromium'
-      ? good(interval.previous_presentation_ms) && good(interval.presentation_ms) &&
-        interval.presentation_ms > w.active_start_ms && interval.previous_presentation_ms < w.active_end_ms
-      : interval.optical_onsets?.current && good(interval.optical_onsets.current.upper_ms) &&
-        good(interval.optical_onsets.previous?.lower_ms) && interval.optical_onsets.current.upper_ms > w.active_start_ms &&
-        interval.optical_onsets.previous.lower_ms < w.active_end_ms)) frames.push(interval.bounds)
-    if (run.acquisition === 'chromium') {
-      const group = frameGroups.get(interval.frame_id)
-      if (!good(interval.previous_presentation_ms) || !good(interval.presentation_ms) ||
-        interval.presentation_ms <= interval.previous_presentation_ms ||
-        interval.bounds?.lower_ms !== interval.presentation_ms - interval.previous_presentation_ms ||
-        interval.bounds.upper_ms !== interval.presentation_ms - interval.previous_presentation_ms ||
-        (index > 0 && intervals[index - 1]?.presentation_ms !== interval.previous_presentation_ms) ||
-        (group && group.presentation_ms !== interval.presentation_ms) ||
-        (w && interval.presentation_ms > w.drain_end_ms)) reasons.push('Frame interval not derived from consecutive coherent presentation timestamps.')
-    } else if (run.acquisition === 'optical') {
-      const onset = interval.optical_onsets, group = frameGroups.get(interval.frame_id)
-      const videoFrame = interval.optical_frame
-      if (!videoFrame || videoFrame.video_artifact !== run.optical_calibration?.raw_video ||
-        !Number.isSafeInteger(videoFrame.capture_frame_index) || videoFrame.capture_frame_index < 0 ||
-        (index > 0 && (!intervals[index - 1]?.optical_frame || videoFrame.capture_frame_index <= intervals[index - 1]!.optical_frame!.capture_frame_index))) reasons.push('Optical interval missing a unique ordered raw video-frame reference.')
-      if (!onset || ![onset.previous?.lower_ms, onset.previous?.upper_ms, onset.current?.lower_ms, onset.current?.upper_ms].every(good) ||
-        onset.previous.lower_ms > onset.previous.upper_ms || onset.current.lower_ms > onset.current.upper_ms ||
-        onset.current.lower_ms <= onset.previous.upper_ms ||
-        interval.bounds?.lower_ms !== Math.max(0, onset.current.lower_ms - onset.previous.upper_ms) ||
-        interval.bounds.upper_ms !== onset.current.upper_ms - onset.previous.lower_ms ||
-        (index > 0 && (intervals[index - 1]?.optical_onsets?.current.lower_ms !== onset.previous.lower_ms || intervals[index - 1]?.optical_onsets?.current.upper_ms !== onset.previous.upper_ms)) ||
-        (group?.optical_onsets && (group.optical_onsets.response.lower_ms !== onset.current.lower_ms || group.optical_onsets.response.upper_ms !== onset.current.upper_ms)) ||
-        (w && onset.current.upper_ms > w.drain_end_ms)) reasons.push('Optical frame interval not derived from consecutive calibrated presentation onset windows.')
-    }
-  }
-  if (w && !intervals.some(i => i.coherent && !i.censored && (run.acquisition === 'chromium'
-    ? good(i.previous_presentation_ms) && good(i.presentation_ms) &&
-      i.previous_presentation_ms <= w.active_end_ms && i.presentation_ms >= w.active_end_ms
-    : i.optical_onsets && good(i.optical_onsets.previous?.lower_ms) && good(i.optical_onsets.current?.lower_ms) &&
-      i.optical_onsets.previous.lower_ms <= w.active_end_ms && i.optical_onsets.current.lower_ms >= w.active_end_ms)))
-    reasons.push('Active-window terminal presentation/stall not accounted for.')
-  const intervalIds = new Set(intervals.map(i => i.frame_id))
-  if (frames.length < p.sampling.minimum_presented_intervals || intervalIds.size !== (run.intervals ?? []).length) reasons.push('Insufficient active-window or duplicate presented intervals.')
-  if ((run.groups ?? []).some(g => !intervalIds.has(g.frame_id))) reasons.push('Response group frame absent from coherent presented intervals.')
-  const input_to_visible = metric(responses, run.active_seconds, primary ? p.thresholds_ms.input_to_visible_p95 : null, [...new Set(reasons)])
-  const presented_editor_frame_interval = metric(frames, run.active_seconds, primary ? p.thresholds_ms.frame_p95 : null, [...new Set(reasons)])
-  return { id: run.id, cards: run.cards, scenario: run.scenario, repetition: run.repetition, validity: notMeasured(reasons), reasons: [...new Set(reasons)], visibility: run.visibility, input_to_visible, presented_editor_frame_interval,
-    group_sizes: (run.groups ?? []).map(g => g.member_ids.length), counts: { scheduled: run.scheduled, delivered: run.delivered, classified: run.inputs?.length ?? 0, late, unresolved } }
+  const refresh = 1000 / m.environment.display_refresh_hz
+  if (!good(refresh) || !Number.isFinite(refresh) || (r.input_to_frame_raw_ms ?? []).some((v, i) => Math.abs((r.input_to_frame_proxy_ms?.[i] ?? NaN) - v - refresh) > 1e-6)) reasons.push('Proxy does not equal raw input latency plus one refresh interval.')
+  if (!Array.isArray(r.visibility) || !r.visibility.length || r.visibility.some(v => !good(v.time_ms) || !Number.isInteger(v.visible_cards) || v.visible_cards < 0 || v.visible_cards > r.cards || !Number.isInteger(v.dom_labels) || v.dom_labels < 0 || !Number.isInteger(v.submitted_primitives) || v.submitted_primitives < 0)) reasons.push('Visibility samples missing or invalid.')
+  const visible = (r.visibility ?? []).map(v => v.visible_cards)
+  const median = nearestRank(visible, .5)
+  if (r.cards === p.primary.cards && (median === null || median < p.primary.visible_cards_median_min || median > p.primary.visible_cards_median_max)) reasons.push('Median visible cards outside primary band.')
+  const count = 1 + p.sampling.active_seconds * p.sampling.visibility_sample_hz
+  if (visible.length < count) reasons.push('Insufficient 2 Hz visibility samples including run start.')
+  return { id: r.id, cards: r.cards, scenario: r.scenario, repetition: r.repetition, validity: status(reasons), reasons: [...new Set(reasons)],
+    counts: { scheduled: r.scheduled, sent: r.sent, delivered: r.delivered, no_op: r.no_op_inputs ?? 0 }, backpressured, visibility_median: median,
+    frame_interval_ms: stats(Array.isArray(r.frame_interval_ms) ? r.frame_interval_ms : [], r.active_seconds),
+    input_to_frame_proxy_ms: stats(Array.isArray(r.input_to_frame_proxy_ms) ? r.input_to_frame_proxy_ms : [], r.active_seconds),
+    input_to_frame_raw_ms: stats(Array.isArray(r.input_to_frame_raw_ms) ? r.input_to_frame_raw_ms : [], r.active_seconds) }
 }
 export function reduceReport(m: CaptureManifest, p: Protocol, contractBytes: Uint8Array, artifactErrors: string[] = []): BenchmarkReport {
-  const structural: string[] = [...artifactErrors]
-  if (!m.synthetic) for (const role of ['raw-input-frame-log', 'collector-profile', 'functional-log', 'production-build', 'primary-fixture-manifest', 'primary-fixture-checkpoint',
-    ...((m.runs ?? []).some(r => r.acquisition === 'chromium') ? ['raw-trace', 'qualification-report'] : [])]) {
-    if (!m.artifacts?.some(a => a.role === role)) structural.push(`Missing required ${role} artifact.`)
-  }
-  if (hash(contractBytes) !== APPROVED_V1_SHA256 || JSON.stringify(p) !== JSON.stringify(JSON.parse(new TextDecoder().decode(contractBytes))) || m.schema !== 'gurow-p1-capture-manifest-v1' || typeof m.synthetic !== 'boolean' || p.contract_id !== 'gurow-p1-v1' || p.report_schema !== 'gurow-p1-report-v1' || p.percentile !== 'nearest_rank_ceil' || p.latency_statistics_unit !== 'each_original_delivered_input' || p.censored_tail_policy !== 'NOT_MEASURED') structural.push('Contract/manifest schema or approved versioned v1 policy mismatched.')
-  if (m.identity.contract_id !== p.contract_id || m.identity.contract_sha256 !== hash(contractBytes) || m.identity.parent_issue !== p.parent_issue || !text(m.identity.commit) || !hex(m.identity.source_fingerprint) || !hex(m.identity.build_hash) || !text(m.identity.timestamp) || !text(m.identity.runner_version) || !text(m.identity.parser_version) || !text(m.identity.collector_version)) structural.push('Contract/source/build/runner identity invalid.')
-  const profile = m.profile
-  const opticalOnly = (m.runs ?? []).length > 0 && m.runs.every(r => r.acquisition === 'optical')
-  if ((m.runs ?? []).some(r => r.acquisition === 'optical') && (m.runs ?? []).some(r => r.acquisition === 'chromium'))
-    structural.push('Mixed optical and Chromium acquisition series; physical and injected origins cannot be combined.')
-  const profileErrors = profile ? opticalOnly
-    ? [...validateReferenceEnvironment(profile.host, { requireReferenceGeometry: true }),
-      ...(profile.hash === computeProfileHash((({ hash: _hash, ...rest }) => rest)(profile)) ? [] : ['Profile hash mismatch.']),
-      ...(profile.geometry_class === 'reference' && !profile.host.is_fallback && !isSoftwareAdapter(profile.host.gpu_adapter) && profile.host.gpu_adapter !== 'unknown' && profile.host.gpu_driver !== 'unknown' && !profile.fault_injection.enabled && !profile.fault_injection.app_delay_ms && !profile.fault_injection.label_delay_ms ? [] : ['Optical reference profile environment/fault injection invalid.'])]
-    : validateCollectorProfile(profile, { requireAcceptanceMode: true, requireReferenceGeometry: true }).errors : ['Collector profile missing.']
-  if (profile && (profile.contract_id !== p.contract_id || profile.hash !== m.identity.profile_hash || profile.identity.commit !== m.identity.commit || profile.identity.tree_dirty !== m.identity.tree_dirty || profile.identity.source_fingerprint !== m.identity.source_fingerprint || profile.identity.build_hash !== m.identity.build_hash || profile.version !== m.identity.collector_version || profile.trace_configuration.parser_version !== m.identity.parser_version)) structural.push('Collector profile/source/parser identity mismatch.')
-  if (profileErrors.length || (!opticalOnly && profile?.status !== 'QUALIFIED')) structural.push('Acquisition/profile not qualified for acceptance: ' + profileErrors.join('; '))
-  if (m.environment?.host?.gpu_adapter !== profile?.host?.gpu_adapter || m.environment?.host?.gpu_driver !== profile?.host?.gpu_driver || m.environment?.host?.browser_version !== profile?.host?.browser_version || !m.environment?.ac_power_online || m.environment.cpu_governor !== 'powersave' || m.environment.display_output !== 'eDP-2' || m.environment.compositor_scale !== 1.5 || m.environment.vrr !== false || !m.environment.dedicated_profile || !m.environment.production_build || m.environment.interruptions?.length) structural.push('Reference environment incomplete/changed/interrupted.')
-  if (!m.fixture || m.fixture.cards !== p.primary.cards || m.fixture.connections !== p.primary.connections || m.fixture.initial_visible_cards !== p.primary.initial_visible_cards || !hex(m.fixture.hash) || m.fixture.seed !== FIXTURE_SEED || m.fixture.algorithm_version !== FIXTURE_ALGORITHM || !m.fixture.task_association_verified || !text(m.fixture.manifest_path) || !text(m.fixture.checkpoint_path) || !Object.values(m.fixture.camera_and_cell ?? {}).every(v => typeof v === 'number' && Number.isFinite(v))) structural.push('Primary fixture invalid.')
-  const comparisonFixtureReasons: string[] = []
-  for (const expected of p.comparisons) {
-    const matches = m.comparison_fixtures?.filter(f => f.cards === expected.cards) ?? []
-    if (matches.length !== 1 || matches[0].connections !== expected.connections || !hex(matches[0].hash) || !text(matches[0].manifest_path) || !text(matches[0].checkpoint_path) ||
-      (!m.synthetic && (!m.artifacts?.some(a => a.role === 'comparison-fixture-manifest' && a.path === matches[0].manifest_path) ||
-        !m.artifacts?.some(a => a.role === 'comparison-fixture-checkpoint' && a.path === matches[0].checkpoint_path))))
-      comparisonFixtureReasons.push(`Comparison fixture ${expected.cards}/${expected.connections} identity or raw manifest missing.`)
-  }
-  if ((m.comparison_fixtures?.length ?? 0) !== p.comparisons.length) comparisonFixtureReasons.push('Unexpected comparison fixture identity.')
-  structural.push(...comparisonFixtureReasons)
+  const structural = [...artifactErrors]
+  const approved = readFileSync(PROTOCOL_PATH)
+  if (hash(contractBytes) !== hash(approved) || JSON.stringify(p) !== JSON.stringify(JSON.parse(new TextDecoder().decode(contractBytes))) ||
+    m.schema !== 'gurow-p1-capture-manifest-v4' || p.contract_id !== CONTRACT_ID || p.report_schema !== 'gurow-p1-report-v4' || p.percentile !== 'nearest_rank_ceil') structural.push('Contract/manifest schema or approved v2 policy mismatched; v1 evidence is historical only.')
+  if (typeof m.synthetic !== 'boolean' || m.identity?.contract_id !== p.contract_id || m.identity?.contract_sha256 !== hash(contractBytes) ||
+    m.identity?.parent_issue !== p.parent_issue || !text(m.identity?.commit) || !hex(m.identity?.source_fingerprint) || !hex(m.identity?.build_hash) ||
+    !text(m.identity?.runner_version) || !text(m.identity?.timestamp)) structural.push('Contract/source/build/runner identity invalid.')
+  const env = m.environment
+  if (!env || !text(env.cpu) || !good(env.physical_memory_bytes) || !text(env.os) || !text(env.kernel) || !text(env.compositor) ||
+    !text(env.cpu_governor) || !text(env.browser_executable) || !text(env.browser_version) || !Array.isArray(env.browser_flags) ||
+    !text(env.gpu_adapter) || isSoftwareAdapter(env.gpu_adapter ?? '') || !text(env.gpu_driver) || env.hardware_gpu !== true || !good(env.display_refresh_hz) ||
+    !good(env.window_inner_size?.width) || !good(env.window_inner_size?.height) || !good(env.device_pixel_ratio) ||
+    !good(env.canvas_css?.width) || env.canvas_css.width < p.minimum_canvas_css.width || !good(env.canvas_css?.height) || env.canvas_css.height < p.minimum_canvas_css.height ||
+    !good(env.canvas_backing?.width) || !good(env.canvas_backing?.height) || env.browser_zoom_percent !== p.browser_zoom_percent ||
+    !env.ac_power_online || !env.dedicated_profile || !env.production_build || !env.headed || !env.canvas_unobscured || !Array.isArray(env.interruptions) || env.interruptions.length) structural.push('Headed hardware environment/geometry incomplete or interrupted.')
+  if (!m.fixture || m.fixture.cards !== p.primary.cards || m.fixture.connections !== p.primary.connections || !hex(m.fixture.hash) || !m.fixture.task_association_verified) structural.push('Primary fixture invalid.')
+  if (!m.synthetic) for (const role of ['raw-input-frame-log', 'functional-log', 'production-build', 'primary-fixture-manifest', 'primary-fixture-checkpoint']) if (!m.artifacts?.some(a => a.role === role)) structural.push(`Missing required ${role} artifact.`)
   const runs = (m.runs ?? []).map(r => reduceRun(r, m, p))
-  const keys = new Set<string>(), metricReasons: string[] = [...structural]
+  const keys = new Set<string>(), metricReasons = [...structural]
   for (const r of runs) { const key = `${r.cards}/${r.scenario}/${r.repetition}`; if (keys.has(key)) metricReasons.push(`Duplicate run ${key}`); keys.add(key) }
-  for (const scenario of p.scenarios) for (let i = 1; i <= p.sampling.repetitions_per_scenario; i++) if (!keys.has(`1000/${scenario}/${i}`)) metricReasons.push(`Missing primary ${scenario} run ${i}`)
-  const primary = runs.filter(r => r.cards === p.primary.cards)
-  const primaryVerdicts = primary.flatMap(r => [r.input_to_visible.verdict, r.presented_editor_frame_interval.verdict])
-  const metricsVerdict = combineVerdicts([notMeasured(metricReasons), ...primaryVerdicts])
+  const scenarios = p.scenarios.map(scenario => {
+    const own = runs.filter(r => r.cards === p.primary.cards && r.scenario === scenario)
+    const valid = own.filter(r => r.validity === 'PASS')
+    const reasons: string[] = []
+    for (let i = 1; i <= p.sampling.runs_per_scenario; i++) if (!own.some(r => r.repetition === i && r.validity === 'PASS')) reasons.push(`Missing or invalid primary ${scenario} run ${i}`)
+    const pooled = (name: 'frame_interval_ms' | 'input_to_frame_proxy_ms' | 'input_to_frame_raw_ms') => valid.flatMap(r => (m.runs ?? []).find(source => source.id === r.id)?.[name] ?? [])
+    const frames = pooled('frame_interval_ms'), proxy = pooled('input_to_frame_proxy_ms')
+    if (frames.length < p.sampling.minimum_pooled_frame_intervals) reasons.push(`Insufficient pooled ${scenario} frame intervals.`)
+    if (proxy.length < p.sampling.minimum_pooled_latency_samples) reasons.push(`Insufficient pooled ${scenario} latency samples.`)
+    const frameStats = stats(frames, valid.reduce((total, r) => total + r.frame_interval_ms.duration_seconds, 0))
+    const proxyStats = stats(proxy, valid.reduce((total, r) => total + r.input_to_frame_proxy_ms.duration_seconds, 0))
+    const rawStats = stats(pooled('input_to_frame_raw_ms'), proxyStats.duration_seconds)
+    const overLimit = frameStats.p95! > p.thresholds_ms.frame_p95 || proxyStats.p95! > p.thresholds_ms.input_to_frame_proxy_p95
+    // An app that held back input cannot pass on the inputs it let through.
+    if (!reasons.length && !overLimit && valid.some(r => r.backpressured)) reasons.push(`${scenario} page delivery fell below the minimum under backpressure; the run can fail but not pass.`)
+    const verdict: Verdict = reasons.length ? 'NOT_MEASURED' : overLimit ? 'FAIL' : 'PASS'
+    return { scenario, verdict, reasons, valid_runs: valid.length, frame_interval_ms: frameStats, input_to_frame_proxy_ms: proxyStats, input_to_frame_raw_ms: rawStats }
+  })
+  metricReasons.push(...scenarios.flatMap(s => s.reasons))
+  const metricsVerdict = combineVerdicts([status(metricReasons), ...scenarios.map(s => s.verdict)])
   const functionalReasons = REQUIRED_FUNCTIONAL.filter(id => !m.functional?.some(f => f.id === id)).map(id => `Missing functional ${id}`)
   for (const f of m.functional ?? []) if (!text(f.action) || !text(f.assertion) || !text(f.command_or_log) || f.source_fingerprint !== m.identity.source_fingerprint || !['PASS','FAIL','NOT_MEASURED'].includes(f.result) || (f.result !== 'PASS' && !text(f.reason))) functionalReasons.push(`Invalid functional assertion ${f.id}`)
-  const functionalVerdict = combineVerdicts([notMeasured(functionalReasons), ...(m.functional ?? []).map(f => f.result)])
-  const comparisons = p.comparisons.map(c => { const subset = runs.filter(r => r.cards === c.cards), reasons: string[] = []
-    for (const s of p.scenarios) for (let i = 1; i <= p.sampling.repetitions_per_scenario; i++) if (!keys.has(`${c.cards}/${s}/${i}`)) reasons.push(`Missing comparison ${c.cards}/${s}/${i}`)
-    if (subset.some(r => r.validity !== 'PASS')) reasons.push(`Invalid comparison ${c.cards} evidence`)
-    return { cards: c.cards, verdict: notMeasured(reasons), runs: subset, reasons }
+  const functionalVerdict = combineVerdicts([status(functionalReasons), ...(m.functional ?? []).map(f => f.result)])
+  const comparisonReasons: string[] = []
+  const comparisons = p.comparisons.map(c => {
+    const fixture = m.comparison_fixtures?.filter(f => f.cards === c.cards) ?? []
+    const subset = runs.filter(r => r.cards === c.cards), reasons: string[] = []
+    if (fixture.length !== 1 || fixture[0].connections !== c.connections || !hex(fixture[0].hash)) reasons.push(`Comparison fixture ${c.cards} missing/invalid.`)
+    for (const s of p.scenarios) for (let i = 1; i <= c.runs_per_scenario; i++) if (!subset.some(r => r.scenario === s && r.repetition === i && r.validity === 'PASS')) reasons.push(`Missing or invalid comparison ${c.cards}/${s}/${i}`)
+    comparisonReasons.push(...reasons)
+    return { cards: c.cards, verdict: status(reasons), runs: subset, reasons }
   })
   const diagnosticReasons: string[] = []
-  const counterNames = ['initialization_to_first_coherent_render_ms','browser_process_tree_rss_bytes','js_heap_bytes','wasm_memory_bytes','gpu_memory_bytes','draw_calls','upload_bytes','json_boundary_calls','json_boundary_bytes','json_boundary_duration_ms'] as const
-  for (const name of counterNames) { const c = m.diagnostics?.[name]; if (!c || !text(c.unit) || (c.value === null ? !text(c.reason) : !good(c.value))) diagnosticReasons.push(`Diagnostic ${name} requires a value or null + reason.`) }
-  const ac4 = notMeasured([...diagnosticReasons, ...comparisonFixtureReasons, ...comparisons.flatMap(c => c.reasons)])
-  const criteria = { AC1: functionalVerdict, AC2: metricsVerdict, AC3: notMeasured(structural), AC4: ac4, AC5: notMeasured([...structural, ...metricReasons.filter(r => r.startsWith('Missing primary'))]) }
+  const names = ['initialization_to_first_render_ms','process_rss_bytes','js_heap_bytes','wasm_memory_bytes','draw_calls','upload_bytes','json_boundary_calls','json_boundary_bytes','json_boundary_duration_ms'] as const
+  for (const name of names) { const c = m.diagnostics?.[name]; if (!c || !text(c.unit) || (c.value === null ? !text(c.reason) : !good(c.value))) diagnosticReasons.push(`Diagnostic ${name} requires a value or null + reason.`) }
+  const sanity = m.sanity_checks
+  if (!sanity || !good(sanity.application_update_p50_shift_ms) || !good(sanity.label_commit_p50_shift_ms) || sanity.application_update_p50_shift_ms < p.sanity_check.minimum_p50_shift_ms || sanity.label_commit_p50_shift_ms < p.sanity_check.minimum_p50_shift_ms) structural.push('Application/label delay sanity checks incomplete or below required shift.')
+  const criteria = { AC1: functionalVerdict, AC2: metricsVerdict, AC3: status(structural), AC4: status([...diagnosticReasons, ...comparisonReasons]), AC5: status([...structural, ...metricReasons]) }
   const verdict = m.synthetic ? 'NOT_MEASURED' : combineVerdicts(Object.values(criteria))
-  const reasons = [...new Set([...structural, ...metricReasons, ...functionalReasons, ...comparisons.flatMap(c => c.reasons), ...diagnosticReasons, ...(m.synthetic ? ['Synthetic evidence cannot satisfy a real gate.'] : [])])]
-  const worst_runs: Record<string, string | null> = {}
-  for (const scenario of p.scenarios) for (const name of ['input_to_visible','presented_editor_frame_interval'] as const) {
-    const eligible = primary.filter(r => r.scenario === scenario && r[name].upper.p95 !== null)
-    worst_runs[`${scenario}/${name}`] = eligible.sort((a,b) => b[name].upper.p95! - a[name].upper.p95!)[0]?.id ?? null
-  }
-  return { schema: 'gurow-p1-report-v1', synthetic: m.synthetic, identity: m.identity, environment: m.environment, fixture: m.fixture, comparison_fixtures: m.comparison_fixtures ?? [], runs,
+  const reasons = [...new Set([...structural, ...metricReasons, ...functionalReasons, ...comparisonReasons, ...diagnosticReasons, ...scenarios.filter(s => s.verdict === 'FAIL').map(s => `${s.scenario} pooled p95 exceeds threshold.`), ...(m.synthetic ? ['Synthetic evidence cannot satisfy a real gate.'] : [])])]
+  return { schema: 'gurow-p1-report-v4', synthetic: m.synthetic, identity: m.identity, environment: m.environment, fixture: m.fixture, runs, scenarios,
     functional: { verdict: functionalVerdict, assertions: m.functional ?? [], reasons: functionalReasons }, diagnostics: m.diagnostics, comparisons,
-    artifacts: m.artifacts ?? [], metrics: { verdict: metricsVerdict, reasons: metricReasons, worst_runs }, gate: { criteria, verdict, reasons, required_follow_up: verdict === 'PASS' ? [] : reasons.length ? reasons : ['Investigate failing metric/functional assertion.'] } }
+    artifacts: m.artifacts ?? [], metrics: { verdict: metricsVerdict, reasons: metricReasons },
+    limitations: ['input_to_frame_proxy_ms covers input queueing, application, renderer submission and HTML label commit on the main thread; the added refresh interval estimates presentation. It does not observe compositor output, scanout or physical pixels.'],
+    gate: { criteria, verdict, reasons, required_follow_up: verdict === 'PASS' ? [] : reasons.length ? reasons : ['Investigate failing metric or functional assertion.'] } }
 }
 export function gateExitCode(report: BenchmarkReport): 0 | 1 | 2 {
   if (report.synthetic) return 2
-  if (report.gate.verdict === 'FAIL') return 1
-  return report.gate.verdict === 'PASS' && !Object.values(report.gate.criteria).includes('NOT_MEASURED') ? 0 : 2
+  return report.gate.verdict === 'PASS' ? 0 : report.gate.verdict === 'FAIL' ? 1 : 2
 }
 export function markdownReport(r: BenchmarkReport): string {
-  const lines = [`# P1 report — ${r.gate.verdict}${r.synthetic ? ' (SYNTHETIC — NOT P1 EVIDENCE)' : ''}`, '', `Contract: ${r.identity.contract_id} (${r.identity.contract_sha256})`, `Source: ${r.identity.commit} / ${r.identity.source_fingerprint}`, `Collector profile: ${r.identity.profile_hash}`, '', `Functional: **${r.functional.verdict}** · Metrics: **${r.metrics.verdict}** · Gate: **${r.gate.verdict}**`, '', '## Gate criteria', ...Object.entries(r.gate.criteria).map(([k,v]) => `- ${k}: ${v}`), '', '## Runs', '| Workload | Scenario | Repetition | Frame p95 upper (ms) | Input p95 upper (ms) | Frame | Input |', '|---|---|---:|---:|---:|---|---|']
-  for (const run of r.runs) lines.push(`| ${run.cards} | ${run.scenario} | ${run.repetition} | ${run.presented_editor_frame_interval.upper.p95 ?? '—'} | ${run.input_to_visible.upper.p95 ?? '—'} | ${run.presented_editor_frame_interval.verdict} | ${run.input_to_visible.verdict} |`)
-  lines.push('', '## Observed visibility (initial / minimum / maximum)', '| Run | Cards | HTML labels | Visible connections | Full path verified |', '|---|---|---|---|---|')
-  for (const run of r.runs) {
-    const counts = (value: { initial: number; minimum: number; maximum: number } | undefined) => value ? `${value.initial} / ${value.minimum} / ${value.maximum}` : 'NOT_MEASURED'
-    lines.push(`| ${run.id} | ${counts(run.visibility)} | ${counts(run.visibility?.labels)} | ${counts(run.visibility?.connections)} | ${run.visibility?.path_verified === true ? 'yes' : 'no'} |`)
-  }
-  lines.push('', '## Per-run statistics (unrounded ms)', '| Run | Metric | n | Active duration (s) | Lower p50 / p95 / max | Upper p50 / p95 / max |', '|---|---|---:|---:|---|---|')
-  for (const run of r.runs) for (const name of ['presented_editor_frame_interval', 'input_to_visible'] as const) {
-    const metric = run[name], values = (s: Statistics) => `${s.p50 ?? '—'} / ${s.p95 ?? '—'} / ${s.max ?? '—'}`
-    lines.push(`| ${run.id} | ${name} | ${metric.upper.n} | ${metric.upper.duration_seconds} | ${values(metric.lower)} | ${values(metric.upper)} |`)
-  }
-  lines.push('', '## Functional', ...r.functional.assertions.map(a => `- ${a.id}: ${a.result} — ${a.action}; ${a.assertion} (${a.command_or_log})`), '', '## Comparisons', ...r.comparisons.map(c => `- ${c.cards}: ${c.verdict}${c.reasons.length ? ' — ' + c.reasons.join('; ') : ''} (no primary thresholds)`), ...r.comparison_fixtures.map(f => `- Fixture ${f.cards} cards / ${f.connections} connections: ${f.manifest_path}, ${f.checkpoint_path} (checkpoint SHA-256 ${f.hash})`), '', '## Diagnostic limitations', ...Object.entries(r.diagnostics ?? {}).filter(([,v]) => v && typeof v === 'object' && 'value' in v && v.value === null).map(([k,v]) => `- ${k}: ${(v as OptionalCounter).reason}`), ...(r.diagnostics?.limitations ?? []).map(x => `- ${x}`), '', '## Raw artifacts (SHA-256)', ...r.artifacts.map(a => `- ${a.role}: ${a.path} — ${a.sha256}`), '', '## Reasons / follow-up', ...(r.gate.required_follow_up.length ? r.gate.required_follow_up.map(x => `- ${x}`) : ['- None']), '')
+  const fmt = (s: Statistics) => `${s.n} / ${s.duration_seconds} / ${s.p50 ?? '—'} / ${s.p95 ?? '—'} / ${s.max ?? '—'}`
+  const lines = [`# P1 report — ${r.gate.verdict}${r.synthetic ? ' (SYNTHETIC — NOT P1 EVIDENCE)' : ''}`, '', `Contract: ${r.identity.contract_id} (${r.identity.contract_sha256})`, `Source: ${r.identity.commit} / ${r.identity.source_fingerprint}`, '', ...r.limitations.map(l => `Limitation: ${l}`), '', `Functional: **${r.functional.verdict}** · Metrics: **${r.metrics.verdict}** · Gate: **${r.gate.verdict}**`, '', '## Gate criteria', ...Object.entries(r.gate.criteria).map(([k,v]) => `- ${k}: ${v}`), '', '## Pooled scenarios', '| Scenario | Verdict | Valid runs | Frame n / s / p50 / p95 / max (ms) | Proxy n / s / p50 / p95 / max (ms) | Raw input n / s / p50 / p95 / max (ms) |', '|---|---|---:|---|---|---|']
+  for (const s of r.scenarios) lines.push(`| ${s.scenario} | ${s.verdict} | ${s.valid_runs} | ${fmt(s.frame_interval_ms)} | ${fmt(s.input_to_frame_proxy_ms)} | ${fmt(s.input_to_frame_raw_ms)} |`)
+  lines.push('', '## Runs (p95 per run is reported, not gated)', '| Run | Scenario | Validity | Page / sent / scheduled | Visible median | Frame n / s / p50 / p95 / max (ms) | Proxy n / s / p50 / p95 / max (ms) |', '|---|---|---|---:|---:|---|---|')
+  for (const run of r.runs) lines.push(`| ${run.id} | ${run.scenario} | ${run.validity} | ${run.counts.delivered} / ${run.counts.sent} / ${run.counts.scheduled} (no-op ${run.counts.no_op}${run.backpressured ? ', backpressure' : ''}) | ${run.visibility_median ?? '—'} | ${fmt(run.frame_interval_ms)} | ${fmt(run.input_to_frame_proxy_ms)} |`)
+  lines.push('', '## Functional', ...r.functional.assertions.map(a => `- ${a.id}: ${a.result} — ${a.action}; ${a.assertion} (${a.command_or_log})`), '', '## Comparisons (no primary thresholds)', ...r.comparisons.map(c => `- ${c.cards}: ${c.verdict}${c.reasons.length ? ' — ' + c.reasons.join('; ') : ''}`), '', '## Diagnostic limitations', ...Object.entries(r.diagnostics ?? {}).filter(([,v]) => v && typeof v === 'object' && 'value' in v && v.value === null).map(([k,v]) => `- ${k}: ${(v as OptionalCounter).reason}`), ...(r.diagnostics?.limitations ?? []).map(x => `- ${x}`), '', '## Raw artifacts (SHA-256)', ...r.artifacts.map(a => `- ${a.role}: ${a.path} — ${a.sha256}`), '', '## Reasons / follow-up', ...(r.gate.required_follow_up.length ? r.gate.required_follow_up.map(x => `- ${x}`) : ['- None']), '')
   return lines.join('\n')
 }

@@ -1,24 +1,18 @@
 #!/usr/bin/env bun
 /**
- * Usage: bun run scripts/benchmark/report-cli.ts --input CAPTURE.json --contract protocol.json --out PREFIX
+ * Usage: bun run scripts/benchmark/report-cli.ts --input CAPTURE.json --contract protocol-v4.json --out PREFIX
  *
- * CAPTURE.json is the gurow-p1-capture-manifest-v1 interface in report.ts.
+ * CAPTURE.json is the gurow-p1-capture-manifest-v4 interface in report.ts.
  * Paths in `artifacts` are relative to CAPTURE.json, SHA-256 hex, and must exist.
- * The embedded `profile` is the actual collector-profile.json shape; its hash,
- * source/build/parser identity and environment are checked by the reducer.
- * `runs` contains all attempts (cards 100, 1000, 10000; pan/zoom/drag; reps 1–3).
- * Each run has 3600 `inputs` with exactly one terminal classification, `groups`
- * with original member IDs and presentation/revision provenance, and `intervals`
- * with bounded coherent frame intervals including any censored terminal record.
- * Chromium intervals carry consecutive presentation timestamps; each group's
- * frame ID/revision/time must match its presented interval. Optical groups carry
- * calibrated input/response onset windows from which latency bounds are derived;
- * every optical interval identifies an ordered frame of the verified video artifact. The approved v1 protocol bytes are pinned.
+ * `runs` preserves all attempts, with raw rAF frame intervals and per-input proxy
+ * and raw latency arrays. Primary repetitions are pooled per scenario; v1
+ * presentation/optical manifests cannot be reinterpreted as v2 evidence.
+ * The normative protocol-v4.json bytes and fixture generator are pinned.
  * See report.test.ts for a complete SYNTHETIC example.
  * Optional --verify-current-source compares capture fingerprint to this checkout;
  * leave off for reproducible historical/offline reduction. Artifact hashes and
- * bindings do not authenticate a self-attested collector or optical calibration;
- * independently review qualification and raw capture before claiming P1 proof.
+ * bindings do not authenticate a self-attested browser capture; independently
+ * review headed hardware, timing hooks and raw capture before claiming P1 proof.
  * Outputs PREFIX.json and PREFIX.md. Exit 0 complete real PASS, 1 proven FAIL,
  * 2 missing/invalid evidence (including synthetic), with reports still written.
  */
@@ -30,7 +24,7 @@ import { computeSourceFingerprint } from './sourceFingerprint'
 export function runCli(args: string[]): number {
   const option = (name: string): string | undefined => { const i = args.indexOf(name); return i < 0 ? undefined : args[i + 1] }
   const input = option('--input'), contract = option('--contract'), out = option('--out')
-  if (!input || !contract || !out) { console.error('Usage: --input CAPTURE.json --contract protocol.json --out PREFIX (see report-cli.ts header for manifest schema)'); return 2 }
+  if (!input || !contract || !out) { console.error('Usage: --input CAPTURE.json --contract protocol-v4.json --out PREFIX (see report-cli.ts header for manifest schema)'); return 2 }
   try {
     const manifest = JSON.parse(readFileSync(input, 'utf8')) as CaptureManifest
     const contractBytes = readFileSync(contract)

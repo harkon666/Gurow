@@ -1,10 +1,10 @@
 # T06 / #7 — executable L3 breakdown
 
-Status: **Task A measurement-design complete; seven approved execution packets published as sub-issues #34–#40. L3-01 (#34) is closed with an explicit `UNSUPPORTED` collector verdict; L3-02 (#35) delivers the deterministic workloads; L3-04 (#36) has a local report reducer; the remaining four are not implemented.** Parent [#7](https://github.com/harkon666/Gurow/issues/7) remains the P1 gate. Seven native parent links, seven blocking edges, all issue bodies and `ready-for-agent` labels were read back and verified on 2026-09-28. The parent body and state were not edited.
+Status: **Nine approved execution packets published as sub-issues #34–#40, #42 and #43. L3-01 (#34) closed `UNSUPPORTED` (v1 only); L3-02 (#35) and L3-04 (#36) delivered; L3-03 (#37) delivered the first complete `gurow-p1-v4` capture on 2026-09-30, and the P1 gate measured **FAIL** on every primary scenario (pooled frame p95 48.6 / 84.9 / 121.2 ms for pan / zoom / drag against 20 ms; drag latency proxy p95 167 ms against 50 ms; pan/zoom wheel backpressure). L3-08 (#42) profiles and fixes that bottleneck; L3-09 (#43) makes a silently non-rendering WebGPU canvas report failure. L3-05 to L3-07 are not implemented.** Parent [#7](https://github.com/harkon666/Gurow/issues/7) remains the P1 gate and is not passed.
 
-**Revised 2026-09-30 to contract `gurow-p1-v2`** ([ADR 0019](../../adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md)). The v1 presentation-collector/optical requirement could not be acquired on the reference host ([qualification status](../../benchmarks/p1/qualification-status.md)); v2 measures frame time and an in-app input-to-frame proxy instead. [#41](https://github.com/harkon666/Gurow/issues/41) is closed as not planned and no longer blocks L3-03; L3-01's `UNSUPPORTED` verdict remains a historical v1 record.
+**Revised 2026-09-30 to contract `gurow-p1-v4`** ([ADR 0019](../../adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md)). The v1 presentation-collector/optical requirement could not be acquired on the reference host ([qualification status](../../benchmarks/p1/qualification-status.md)); v2 measures frame time and an in-app input-to-frame proxy instead. [#41](https://github.com/harkon666/Gurow/issues/41) is closed as not planned and no longer blocks L3-03; L3-01's `UNSUPPORTED` verdict remains a historical v1 record.
 
-Start with [benchmark contract](../../benchmarks/p1/contract.md), [numeric protocol v2](../../benchmarks/p1/protocol-v2.json), and [observed reference host](../../benchmarks/p1/reference-environment.json). The contract is fixed enough to implement. A finished design is not evidence of a passing gate.
+Start with [benchmark contract](../../benchmarks/p1/contract.md), [numeric protocol v4](../../benchmarks/p1/protocol-v4.json), and [observed reference host](../../benchmarks/p1/reference-environment.json). The contract is fixed enough to implement. A finished design is not evidence of a passing gate.
 
 ## Tasks and dependencies
 
@@ -17,6 +17,8 @@ Start with [benchmark contract](../../benchmarks/p1/contract.md), [numeric proto
 | [L3-05](record-comparisons-and-diagnostics.md) / [#38](https://github.com/harkon666/Gurow/issues/38) | Comparison workloads and resource/boundary diagnostics feed the report | L3-03, L3-04 | Flash candidate | US80, US84 |
 | [L3-06](integrate-functional-and-gate-checks.md) / [#39](https://github.com/harkon666/Gurow/issues/39) | Complete P1 flow plus T06 acceptance runs from current-source harness | L3-05 | Flash with independent review | US80, US82, US83, US84 |
 | [L3-07](review-evidence-and-decide-p1.md) / [#40](https://github.com/harkon666/Gurow/issues/40) | Independent review and justified parent-gate decision/follow-up | L3-06 | Strong reviewer / integrator | US80, US82, US83, US84 |
+| [L3-08](profile-and-fix-primary-bottleneck.md) / [#42](https://github.com/harkon666/Gurow/issues/42) | Profile names the measured bottleneck; fix plus before/after v4 capture | L3-03 | Strong profiling, bounded fixes, independent review | US80, US84 |
+| [L3-09](surface-invisible-webgpu-canvas.md) / [#43](https://github.com/harkon666/Gurow/issues/43) | A canvas that renders nothing reports failure; native Wayland renders or is documented unsupported | — | Strong WebGPU/wgpu, independent review | US80, US82 |
 
 ```mermaid
 flowchart LR
@@ -64,4 +66,4 @@ The user approved the breakdown on 2026-09-28. Each `*.issue.md` now exactly mat
 
 All seven have native parent #7, native blockers matching the graph above, and `ready-for-agent`. This label means the specification is agreed within its stated dependencies; collector qualification and P1 acceptance remain unproven. The original #7 body and state were preserved.
 
-Every issue embeds a self-contained copy of the approved contract, numeric protocol, reference environment and measurement research; #37–#40 were republished on 2026-09-30 with the `gurow-p1-v2` snapshot, while closed #34–#36 keep their v1 snapshot. Agents can access the normative contract without unpublished repository links. Source pointers and proposed commands remain in the local execution packets. No benchmark has been run as part of publication.
+Every issue embeds a self-contained copy of the approved contract, numeric protocol, reference environment and measurement research; #37–#40 were republished on 2026-09-30 with the `gurow-p1-v4` snapshot, while closed #34–#36 keep their v1 snapshot. Agents can access the normative contract without unpublished repository links. Source pointers and proposed commands remain in the local execution packets. No benchmark has been run as part of publication.

@@ -1,5 +1,9 @@
 /**
- * T06-L3-01 qualification driver.
+ * T06-L3-01 qualification driver — v1-only, historical.
+ *
+ * Contract gurow-p1-v2 (ADR 0019) retired the presentation collector; T06
+ * acceptance captures use `run.ts`. This driver still reads the frozen v1
+ * `protocol.json` and exists to reproduce the recorded UNSUPPORTED verdict.
  *
  * Drives one controlled pan, zoom and drag through real browser input on the
  * headed reference browser, derives a trace/page clock mapping, and reports
@@ -48,7 +52,7 @@ import {
   writePreflightPass,
   writeRunArtifacts,
   COLLECTOR_VERSION,
-  CONTRACT_ID,
+  V1_CONTRACT_ID,
   type ScenarioWindows,
 } from './artifacts'
 import {
@@ -1094,7 +1098,7 @@ async function main() {
 
     const baseProfile: Omit<CollectorProfile, 'hash'> = {
       version: COLLECTOR_VERSION,
-      contract_id: CONTRACT_ID,
+      contract_id: V1_CONTRACT_ID,
       // Placeholder only; replaced below by the parsed verdict before hashing.
       status: 'NOT_MEASURED',
       identity,

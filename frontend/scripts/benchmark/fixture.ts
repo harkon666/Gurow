@@ -1,6 +1,6 @@
 /**
  * Deterministic benchmark fixtures for P1/T06 (issue #35 / T06-L3-02).
- * Contract: gurow-p1-v1 (docs/benchmarks/p1/contract.md §4 and protocol.json).
+ * Contract: gurow-p1-v4 (docs/benchmarks/p1/contract.md §4 and protocol-v4.json).
  *
  * The numeric workload comes from the contract file, and the camera geometry
  * from the canvas dimensions measured in the settled browser layout, so neither
@@ -27,7 +27,7 @@ import {
   validateCheckpointIntegrity,
 } from '../../src/components/editor/checkpoint'
 import { INITIAL_LEARNING_PATH_FIXTURE } from '../../src/fixtures/learningPath'
-import { CONTRACT_ID } from './artifacts'
+export const CONTRACT_ID = 'gurow-p1-v4'
 
 export const FIXTURE_GENERATOR_VERSION = 'gurow-p1-fixture-v2'
 export const BENCHMARK_SIZES = [100, 1000, 10000] as const
@@ -72,14 +72,13 @@ const ProtocolSchema = z.object({
   }),
   primary: WorkloadSchema.extend({
     initial_visible_cards: z.number().int().positive(),
-    visible_cards_min: z.number().int().positive(),
-    visible_cards_max: z.number().int().positive(),
+    visible_cards_median_min: z.number().int().positive(),
+    visible_cards_median_max: z.number().int().positive(),
     html_labels: z.literal(true),
   }),
   comparisons: z.array(WorkloadSchema),
   card_size_world: SizeSchema,
-  viewport_css: SizeSchema,
-  device_pixel_ratio: z.number().positive(),
+  minimum_canvas_css: SizeSchema,
 })
 
 export interface GridRecipe {
@@ -91,11 +90,11 @@ export interface GridRecipe {
   target_rows: number
   /** Geometric visible cards expected before any interaction. */
   initial_visible_cards: number
-  /** Primary visibility band; null for the comparison without a band. */
+  /** Primary per-run median visibility band; null for either comparison. */
   visibility_band: { min: number; max: number } | null
 }
 
-/** Planned motion extremes (contract §5, protocol.json `sampling`). */
+/** Planned motion extremes (contract §5, protocol-v4.json `sampling`). */
 export interface PlannedMotion {
   /** Pan and drag amplitude as a fraction of one cell pitch. */
   amplitude_cell_fraction: number
@@ -111,17 +110,14 @@ export interface BenchmarkContract {
   primary_size: BenchmarkSize
   motion: PlannedMotion
   card_size_world: Size
-  viewport_css: Size
-  device_pixel_ratio: number
+  minimum_canvas_css: Size
   recipes: Record<BenchmarkSize, GridRecipe>
 }
 
 /**
- * Parses protocol.json into the fixture recipes (contract §1 and §4).
- *
- * The primary and the large comparison target a 10×20 block and share the
- * primary visibility band; the 100-card comparison shows its whole 10×10 grid
- * and carries no band, since comparison workloads have no pass thresholds.
+ * Parses protocol-v4.json into fixture recipes (contract §1 and §4).
+ * Visibility bands are primary-run median limits, not path-extreme gates;
+ * comparisons have no visibility threshold.
  */
 export function parseBenchmarkContract(raw: string): BenchmarkContract {
   const protocol = ProtocolSchema.parse(JSON.parse(raw))
@@ -150,9 +146,9 @@ export function parseBenchmarkContract(raw: string): BenchmarkContract {
       target_columns: TARGET_COLUMNS,
       target_rows: targetRows,
       initial_visible_cards: fullGrid ? size : protocol.primary.initial_visible_cards,
-      visibility_band: fullGrid
-        ? null
-        : { min: protocol.primary.visible_cards_min, max: protocol.primary.visible_cards_max },
+      visibility_band: size === primarySize
+        ? { min: protocol.primary.visible_cards_median_min, max: protocol.primary.visible_cards_median_max }
+        : null,
     }
   }
 
@@ -166,8 +162,7 @@ export function parseBenchmarkContract(raw: string): BenchmarkContract {
       zoom_max_factor: protocol.sampling.zoom_max_factor,
     },
     card_size_world: protocol.card_size_world,
-    viewport_css: protocol.viewport_css,
-    device_pixel_ratio: protocol.device_pixel_ratio,
+    minimum_canvas_css: protocol.minimum_canvas_css,
     recipes,
   }
 }

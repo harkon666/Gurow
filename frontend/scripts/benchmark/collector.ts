@@ -3,7 +3,8 @@ import type { Scenario } from '../../src/components/editor/benchmarkHooks'
 
 /**
  * Collector profile, trace parser and qualification reporting for the P1/T06
- * measurement contract `gurow-p1-v1`.
+ * measurement contract `gurow-p1-v1` — v1-only, historical. Contract
+ * gurow-p1-v2 (ADR 0019) retired this collector; v2 captures use `run.ts`.
  *
  * The parser is deliberately unable to produce a latency it did not observe.
  * Contract gurow-p1-v1 forbids CPU duration, GPU submit completion,

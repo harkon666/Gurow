@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, spyOn } from 'bun:test'
 import {
   applyAppDelay, beginInput, recordDispatch, recordLabelUpdate, recordLabelCommit,
+  recordBenchmarkFrame, recordNoOpInput, sealBenchmarkCapture,
   type BenchmarkHooks,
 } from './benchmarkHooks'
 
@@ -111,6 +112,100 @@ describe('input coalescing evidence', () => {
     recordDispatch('ResizeViewport', 1)
     expect(hooks.dispatches.map(d => d.input_origin_ms)).toEqual([50, null])
     expect(hooks.dispatches.map(d => d.scenario)).toEqual(['zoom', null])
+  })
+})
+
+describe('v3 in-app input-to-frame proxy', () => {
+  function window100to200(hooks: BenchmarkHooks) {
+    hooks.label_delay_ms = 0
+    hooks.capture_start_ms = 100
+    hooks.capture_end_ms = 200
+    hooks.drain_end_ms = 2200
+    hooks.refresh_hz = 60
+  }
+  const commitLabels = (appRevision: number) => recordLabelCommit(recordLabelUpdate(appRevision))
+
+  it('charges each coalesced original timestamp at the first frame after both commits', () => {
+    const hooks = install()
+    window100to200(hooks)
+    // Chromium's coalesced list includes the delivering event itself.
+    beginInput({ type: 'pointermove', timeStamp: 110, nativeEvent: { getCoalescedEvents: () => [{ timeStamp: 105 }, { timeStamp: 108 }, { timeStamp: 110 }] } }, 'drag')
+    expect(hooks.inputs?.map(input => [input.origin_ms, input.event_type])).toEqual([[105, 'pointermove'], [108, 'pointermove'], [110, 'pointermove']])
+    recordDispatch('PointerMove', 2)
+    recordBenchmarkFrame(120, 120)
+    expect(hooks.input_samples ?? []).toHaveLength(0)
+    commitLabels(1)
+    recordBenchmarkFrame(130, 130)
+    expect(hooks.input_samples?.map(sample => sample.raw_ms)).toEqual([25, 22, 20])
+    expect(hooks.input_samples?.[0].proxy_ms).toBeCloseTo(25 + 1000 / 60)
+    expect(hooks.frames?.map(frame => frame.frame_interval_ms)).toEqual([null, 10])
+    expect(hooks.input_samples?.every(sample => !sample.unresolved && sample.revision === 1)).toBe(true)
+  })
+
+  it('ends latency when the resolving callback runs, not at its earlier rAF timestamp', () => {
+    const hooks = install()
+    window100to200(hooks)
+    beginInput({ type: 'wheel', timeStamp: 110 }, 'pan')
+    recordDispatch('PanCamera', 1)
+    // An 80 ms label commit blocks the main thread; Chromium had already
+    // stamped the next frame at 120, but its callback only runs at 206.
+    clock = spyOn(performance, 'now').mockReturnValue(205)
+    commitLabels(1)
+    recordBenchmarkFrame(120, 206)
+    expect(hooks.input_samples?.map(sample => sample.raw_ms)).toEqual([96])
+    expect(hooks.frames?.map(frame => [frame.timestamp_ms, frame.callback_ms])).toEqual([[120, 206]])
+  })
+
+  it('collects no input outside a measured window, even when the driver clears it with null', () => {
+    const hooks = install()
+    Object.assign(hooks, { capture_start_ms: null, capture_end_ms: null, drain_end_ms: null, refresh_hz: 60 })
+    beginInput({ type: 'wheel', timeStamp: 5 }, 'pan')
+    recordDispatch('PanCamera', 1)
+    recordBenchmarkFrame(10, 10)
+    sealBenchmarkCapture()
+    expect(hooks.inputs ?? []).toEqual([])
+    expect(hooks.frames ?? []).toEqual([])
+    expect(hooks.input_samples ?? []).toEqual([])
+  })
+
+  it('counts a no-op input without letting it hold back later inputs', () => {
+    const hooks = install()
+    window100to200(hooks)
+    recordNoOpInput({ type: 'wheel', timeStamp: 105 })
+    recordNoOpInput({ type: 'wheel', timeStamp: 250 })
+    beginInput({ type: 'wheel', timeStamp: 110 }, 'pan')
+    recordDispatch('PanCamera', 1)
+    commitLabels(1)
+    recordBenchmarkFrame(130, 130)
+    expect(hooks.no_op_inputs).toBe(1)
+    expect(hooks.pending_inputs).toEqual([])
+    expect(hooks.input_samples?.map(sample => sample.unresolved)).toEqual([false])
+  })
+
+  it('retains the open frame stall and charges unresolved input until drain deadline', () => {
+    const hooks = install()
+    window100to200(hooks)
+    recordBenchmarkFrame(110, 110)
+    beginInput({ type: 'wheel', timeStamp: 150 }, 'pan')
+    recordDispatch('PanCamera', 1)
+    recordBenchmarkFrame(210, 210)
+    expect(hooks.frames?.at(-1)?.frame_interval_ms).toBe(90)
+    sealBenchmarkCapture()
+    sealBenchmarkCapture()
+    expect(hooks.input_samples).toEqual([{
+      input_id: hooks.inputs![0].input_id, origin_ms: 150, revision: 1,
+      raw_ms: 2050, proxy_ms: 2050 + 1000 / 60, unresolved: true,
+    }])
+  })
+
+  it('seals a window whose rAF stopped mid-run at the window end and drain deadline', () => {
+    const hooks = install()
+    window100to200(hooks)
+    recordBenchmarkFrame(104, 104)
+    beginInput({ type: 'wheel', timeStamp: 120 }, 'pan')
+    sealBenchmarkCapture()
+    expect(hooks.frames?.map(frame => [frame.timestamp_ms, frame.frame_interval_ms])).toEqual([[104, null], [200, 96]])
+    expect(hooks.input_samples?.map(sample => [sample.raw_ms, sample.revision, sample.unresolved])).toEqual([[2080, null, true]])
   })
 })
 

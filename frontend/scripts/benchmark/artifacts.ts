@@ -29,7 +29,8 @@ import type { PhaseWindow } from './phases'
 import { SCENARIOS, type DispatchRecord, type Scenario } from '../../src/components/editor/benchmarkHooks'
 
 export const COLLECTOR_VERSION = 'gurow-collector-v3'
-export const CONTRACT_ID = 'gurow-p1-v1'
+/** v1-only: the retired presentation-collector contract (see ADR 0019). */
+export const V1_CONTRACT_ID = 'gurow-p1-v1'
 export const PARSER_VERSION = '3.0.0'
 
 /** Page-clock bounds of one driven scenario. */
@@ -81,7 +82,7 @@ export function writePreflightFailureArtifacts(options: {
 
   const base: Omit<CollectorProfile, 'hash'> = {
     version: COLLECTOR_VERSION,
-    contract_id: CONTRACT_ID,
+    contract_id: V1_CONTRACT_ID,
     status: 'NOT_MEASURED',
     unsupported_reason: reasons.join(' '),
     identity,

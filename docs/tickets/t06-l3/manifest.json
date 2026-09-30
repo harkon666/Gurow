@@ -1,6 +1,6 @@
 {
   "parent_issue": 7,
-  "contract": "gurow-p1-v2",
+  "contract": "gurow-p1-v4",
   "status": "approved",
   "publication": "published_verified",
   "tasks": [
@@ -149,6 +149,42 @@
       ],
       "issue_number": 40,
       "issue_url": "https://github.com/harkon666/Gurow/issues/40"
+    },
+    {
+      "id": "T06-L3-08",
+      "slug": "profile-and-fix-primary-bottleneck",
+      "title": "Profile the primary pan, zoom and drag path and fix the measured bottleneck",
+      "depends": [
+        "T06-L3-03"
+      ],
+      "model": "Strong model for profiling, then bounded fixes with independent review",
+      "stories": [
+        80,
+        84
+      ],
+      "acs": [
+        2,
+        5
+      ],
+      "issue_number": 42,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/42"
+    },
+    {
+      "id": "T06-L3-09",
+      "slug": "surface-invisible-webgpu-canvas",
+      "title": "Report a WebGPU canvas that silently renders nothing, and make it render on native Wayland",
+      "depends": [],
+      "model": "Strong model with WebGPU/wgpu experience; independent review",
+      "stories": [
+        80,
+        82
+      ],
+      "acs": [
+        1,
+        5
+      ],
+      "issue_number": 43,
+      "issue_url": "https://github.com/harkon666/Gurow/issues/43"
     }
   ],
   "published_on": "2026-09-28",
@@ -165,6 +201,20 @@
     {
       "id": "gurow-p1-v2",
       "since": "2026-09-30",
+      "decision_record": "docs/adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md",
+      "status": "superseded"
+    },
+    {
+      "id": "gurow-p1-v3",
+      "since": "2026-09-30",
+      "change": "latency proxy endpoint is the resolving rAF callback start (performance.now()), not the rAF timestamp",
+      "decision_record": "docs/adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md",
+      "status": "superseded"
+    },
+    {
+      "id": "gurow-p1-v4",
+      "since": "2026-09-30",
+      "change": "a run is invalid only when the driver sends fewer than 80% of requests; page delivery below 80% is backpressure: valid, can FAIL, never PASS",
       "decision_record": "docs/adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md"
     }
   ]

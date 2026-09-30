@@ -1,6 +1,6 @@
 # T06-L3-07 — Review the evidence and decide the P1 gate without hiding failures
 
-Status: approved execution packet, published as [#40](https://github.com/harkon666/Gurow/issues/40); implementation pending. Revised 2026-09-30 for contract `gurow-p1-v2`. Parent: [#7](https://github.com/harkon666/Gurow/issues/7). Contract: [gurow-p1-v2](../../benchmarks/p1/contract.md).
+Status: approved execution packet, published as [#40](https://github.com/harkon666/Gurow/issues/40); implementation pending. Revised 2026-09-30 for contract `gurow-p1-v4`. Parent: [#7](https://github.com/harkon666/Gurow/issues/7). Contract: [gurow-p1-v4](../../benchmarks/p1/contract.md).
 
 Executor recommendation: **Strong independent reviewer / integrator**. Blocked by: **T06-L3-06**. Parent coverage: AC1, AC2, AC3, AC4, AC5. User stories: US80, US82, US83, US84.
 
@@ -30,7 +30,7 @@ Pointers were inspected at `0a3b9be96a8ef89ce74a22d011ce7e9ba49e996d`; verify cu
 ## Acceptance criteria
 
 - [ ] Review Standards and Spec independently in fresh contexts under the repo workflow, including instrumentation, test changes, the proxy sanity check and raw-to-p95 reproducibility.
-- [ ] Verify each primary scenario's pooled p95 meets both thresholds under contract `gurow-p1-v2`, that the proxy's stated limitation is reported, and that labels, workload, current source and environment evidence are valid; inspect failed/invalid attempts.
+- [ ] Verify each primary scenario's pooled p95 meets both thresholds under contract `gurow-p1-v4`, that the proxy's stated limitation is reported, and that labels, workload, current source and environment evidence are valid; inspect failed/invalid attempts.
 - [ ] Verify AC1 functional paths, AC3 method/environment, AC4 comparisons/diagnostics and AC5 honest failure handling; all planned checks are distinguished from executed evidence.
 - [ ] For a failure, record the bottleneck/evidence and issue a separately bounded corrective task or design reassessment. Do not close #7 or unblock #8 while evidence is missing or fails.
 - [ ] After any code fix, rerun affected checks plus final full verification on the new source and obtain independent review; do not reuse old PASS samples for changed code.

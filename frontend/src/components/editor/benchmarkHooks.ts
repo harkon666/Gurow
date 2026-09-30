@@ -5,9 +5,12 @@
  * `window.__gurowBenchmarkHooks` with `enabled: true` before navigation, so
  * production bundles carry only these guard checks and expose no engine seam.
  *
- * The hooks record the *pre-dispatch* browser input timestamp as the origin of
- * each interaction, because contract gurow-p1-v1 forbids beginning a latency
- * measurement at handler entry or after `dispatch_command`.
+ * The hooks retain browser event timestamps, synchronous canvas submission,
+ * React label commits and subsequent animation-frame callbacks. Contract
+ * gurow-p1-v4 calls this an in-app proxy, not a hardware presentation time.
+ * Its endpoint is when the resolving rAF callback actually runs, not the rAF
+ * timestamp: Chromium stamps a frame when it is issued, so a frame delayed by a
+ * busy main thread carries a timestamp from before the delay.
  */
 
 /** The three timed interactions the contract measures. */
@@ -22,6 +25,27 @@ export interface PendingInput {
   /** `event.timeStamp`, i.e. the `performance.now()` domain, before dispatch. */
   origin_ms: number
   scenario: Scenario
+  /** DOM event type that delivered this input, e.g. `wheel` or `pointermove`. */
+  event_type: string
+  revision?: number
+}
+
+export interface CapturedFrame {
+  timestamp_ms: number
+  /** `performance.now()` when this rAF callback started, after any main-thread delay. */
+  callback_ms: number
+  frame_interval_ms: number | null
+  canvas_revision: number
+  label_app_revision: number
+}
+
+export interface CapturedInputSample {
+  input_id: string
+  origin_ms: number
+  revision: number | null
+  raw_ms: number
+  proxy_ms: number
+  unresolved: boolean
 }
 
 /** One engine dispatch correlated to the input that caused it. */
@@ -69,6 +93,13 @@ export interface LabelCommitRecord {
   commit_duration_ms: number
 }
 
+/** A focus or visibility transition observed during a capture window. */
+export interface FocusRecord {
+  at_ms: number
+  focused: boolean
+  visible: DocumentVisibilityState
+}
+
 /** A `performance.now()` / trace-clock pair used to derive the clock mapping. */
 export interface ClockSyncRecord {
   index: number
@@ -98,6 +129,35 @@ export interface BenchmarkHooks {
   app_delays_applied: number
   /** Times the injected label delay actually executed. */
   label_delays_applied: number
+  /**
+   * Driver-owned capture window. Null or absent outside a measured window
+   * (production, warm-up); every reader treats both the same.
+   */
+  capture_start_ms?: number | null
+  capture_end_ms?: number | null
+  drain_end_ms?: number | null
+  refresh_hz?: number | null
+  inputs?: PendingInput[]
+  frames?: CapturedFrame[]
+  input_samples?: CapturedInputSample[]
+  last_frame_ms?: number
+  next_input_index?: number
+  /** Highest app revision any committed label geometry has observed. */
+  label_committed_app_revision?: number
+  /** In-window inputs the editor ignored because they request no change. */
+  no_op_inputs?: number
+  focus_events?: FocusRecord[]
+  /** Installed by the editor: closes the window even if rAF has stopped. */
+  seal?: () => void
+}
+
+interface CaptureWindow { start: number; end: number; deadline: number; refreshHz: number }
+
+/** The active measured window, or undefined outside one. */
+function captureWindow(hooks: BenchmarkHooks): CaptureWindow | undefined {
+  const { capture_start_ms: start, capture_end_ms: end, drain_end_ms: deadline, refresh_hz: refreshHz } = hooks
+  if (start == null || end == null || deadline == null || !refreshHz) return undefined
+  return { start, end, deadline, refreshHz }
 }
 
 /**
@@ -127,23 +187,48 @@ function mark(name: string): void {
  * {@link recordDispatch}; an input that never reaches a dispatch stays
  * queued and is therefore visible as a dropped input in the raw log.
  */
-export function beginInput(
-  event: { timeStamp: number },
-  scenario: Scenario
-): string | undefined {
+export interface ObservedEvent {
+  type?: string
+  timeStamp: number
+  getCoalescedEvents?: () => Array<{ timeStamp: number }>
+  nativeEvent?: { getCoalescedEvents?: () => Array<{ timeStamp: number }> }
+}
+
+function inWindow(hooks: BenchmarkHooks, timestamp: number): boolean {
+  const capture = captureWindow(hooks)
+  return !!capture && timestamp >= capture.start && timestamp < capture.end
+}
+
+export function beginInput(event: ObservedEvent, scenario: Scenario): string | undefined {
   const hooks = getBenchmarkHooks()
   if (!hooks) return undefined
 
-  const inputId =
-    `input-${scenario}-${hooks.dispatches.length}-${hooks.pending_inputs.length}-` +
-    `${Math.round(event.timeStamp * 1000)}`
-  hooks.pending_inputs.push({
-    input_id: inputId,
-    origin_ms: event.timeStamp,
-    scenario,
-  })
-  mark(`gurow:input_observed:${inputId}`)
-  return inputId
+  // A trusted pointermove's coalesced list contains the delivering event
+  // itself, so it alone lists every original input with its own timestamp.
+  // Other events have no list and are one original input each.
+  const coalesced = event.nativeEvent?.getCoalescedEvents?.() ?? event.getCoalescedEvents?.()
+  const timestamps = coalesced?.length ? coalesced.map(e => e.timeStamp) : [event.timeStamp]
+  const eventType = event.type ?? 'unknown'
+  let firstId: string | undefined
+  for (const timestamp of timestamps) {
+    const inputId = `input-${scenario}-${hooks.dispatches.length}-${hooks.pending_inputs.length}-${Math.round(timestamp * 1000)}`
+    const input: PendingInput = { input_id: inputId, origin_ms: timestamp, scenario, event_type: eventType }
+    hooks.pending_inputs.push(input)
+    if (inWindow(hooks, timestamp)) (hooks.inputs ??= []).push(input)
+    firstId ??= inputId
+    mark(`gurow:input_observed:${inputId}`)
+  }
+  return firstId
+}
+
+/**
+ * Counts an input the editor ignores because it requests no change, such as a
+ * zero-travel wheel event. It never joins the dispatch queue, so it cannot hold
+ * back later inputs, and is excluded from latency by this fixed rule.
+ */
+export function recordNoOpInput(event: ObservedEvent): void {
+  const hooks = getBenchmarkHooks()
+  if (hooks && inWindow(hooks, event.timeStamp)) hooks.no_op_inputs = (hooks.no_op_inputs ?? 0) + 1
 }
 
 /**
@@ -199,6 +284,7 @@ export function recordDispatch(commandType: string, cpuWorkMs: number): number |
 
   const pending = hooks.pending_inputs
   hooks.pending_inputs = []
+  for (const input of pending) input.revision = hooks.app_revision
   const attributed = pending[0]
 
   const inputId = attributed?.input_id ?? `dispatch-${hooks.app_revision}`
@@ -255,6 +341,7 @@ export function recordLabelCommit(revision: LabelRevision | undefined): void {
     commit_duration_ms: commitEnd - commitStart,
   }
   hooks.label_commits.push(commit)
+  hooks.label_committed_app_revision = Math.max(hooks.label_committed_app_revision ?? 0, commit.app_revision)
   for (const dispatch of hooks.dispatches) {
     if (dispatch.label_revision === null && dispatch.app_revision <= commit.app_revision) {
       dispatch.label_revision = commit.label_revision
@@ -263,4 +350,76 @@ export function recordLabelCommit(revision: LabelRevision | undefined): void {
     }
   }
   mark(`gurow:labels_committed:${commit.label_revision}`)
+}
+
+/** Keeps a stall still open at the active-window boundary in the distribution. */
+function closeOpenStall(hooks: BenchmarkHooks, end: number): void {
+  if (hooks.last_frame_ms === undefined || hooks.last_frame_ms >= end) return
+  ;(hooks.frames ??= []).push({ timestamp_ms: end, callback_ms: end, frame_interval_ms: end - hooks.last_frame_ms,
+    canvas_revision: hooks.canvas_revision, label_app_revision: hooks.label_committed_app_revision ?? 0 })
+  hooks.last_frame_ms = end
+}
+
+function recordSample(hooks: BenchmarkHooks, input: PendingInput, endpoint: number, refreshHz: number, unresolved: boolean): void {
+  const raw = Math.max(0, endpoint - input.origin_ms)
+  ;(hooks.input_samples ??= []).push({ input_id: input.input_id, origin_ms: input.origin_ms,
+    revision: input.revision ?? null, raw_ms: raw, proxy_ms: raw + 1000 / refreshHz, unresolved })
+}
+
+/**
+ * Called by the editor's opt-in rAF loop after any frame-aligned editor work.
+ * An input resolves at the first callback that runs after both its canvas
+ * submission and its label commit, read live at callback time, and its endpoint
+ * is `callbackMs`, when that callback started. Frame intervals use the rAF
+ * timestamps. rAF is NOT presentation.
+ */
+export function recordBenchmarkFrame(timestamp: number, callbackMs = performance.now()): void {
+  const hooks = getBenchmarkHooks()
+  const capture = hooks && captureWindow(hooks)
+  if (!hooks || !capture || timestamp < capture.start) return
+  if (timestamp > capture.deadline) {
+    sealBenchmarkCapture()
+    return
+  }
+  if (timestamp < capture.end) {
+    const previous = hooks.last_frame_ms
+    ;(hooks.frames ??= []).push({
+      timestamp_ms: timestamp,
+      callback_ms: callbackMs,
+      frame_interval_ms: previous === undefined ? null : timestamp - previous,
+      canvas_revision: hooks.canvas_revision,
+      label_app_revision: hooks.label_committed_app_revision ?? 0,
+    })
+    hooks.last_frame_ms = timestamp
+  } else {
+    closeOpenStall(hooks, capture.end)
+  }
+  const labelRevision = hooks.label_committed_app_revision ?? 0
+  const inputs = hooks.inputs ?? []
+  let index = hooks.next_input_index ?? 0
+  while (index < inputs.length) {
+    const input = inputs[index]
+    if (input.revision === undefined || hooks.canvas_revision < input.revision || labelRevision < input.revision) break
+    recordSample(hooks, input, callbackMs, capture.refreshHz, false)
+    index++
+  }
+  hooks.next_input_index = index
+  if (timestamp === capture.deadline) sealBenchmarkCapture()
+}
+
+/**
+ * Closes the capture: keeps an open stall at the window end and charges every
+ * still-unresolved original input to the fixed drain deadline. Idempotent, and
+ * callable by the driver when rAF has stopped (for example, an occluded window).
+ */
+export function sealBenchmarkCapture(): void {
+  const hooks = getBenchmarkHooks()
+  const capture = hooks && captureWindow(hooks)
+  if (!hooks || !capture) return
+  closeOpenStall(hooks, capture.end)
+  const inputs = hooks.inputs ?? []
+  for (let i = hooks.next_input_index ?? 0; i < inputs.length; i++) {
+    recordSample(hooks, inputs[i], capture.deadline, capture.refreshHz, true)
+  }
+  hooks.next_input_index = inputs.length
 }
