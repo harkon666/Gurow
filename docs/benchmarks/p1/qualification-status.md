@@ -4,6 +4,17 @@ Contract `gurow-p1-v1`. Ticket [#34](https://github.com/harkon666/Gurow/issues/3
 
 **Collector verdict: `UNSUPPORTED`. Collector status: `not_qualified`.** No profile hash may be consumed by L3-03 for acceptance evidence. This file is the in-repo record; the raw artefacts of each attempt stay in ignored `.harness/t06/qualification/` per [the harness workflow](../../agents/harness.md).
 
+> **Superseded 2026-09-30.** Contract [`gurow-p1-v2`](contract.md) and [ADR 0019](../../adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md) replace the presentation-collector and optical requirements with an in-app frame-time and latency proxy. The collector verdict below stays a true historical record of `gurow-p1-v1`; it no longer blocks P1 capture, and #41 is closed as not planned. No v1 result may be combined with v2 results.
+
+## #41 acquisition-path assessment — 2026-09-29
+
+**Primary input-to-visible latency: `NOT_MEASURED` (`no_qualified_acquisition_path`).** This is an evidence-availability verdict, not a measured performance failure or a change to the 50 ms threshold. Neither proposed path is qualified on the currently accessible setup:
+
+- **Chromium collector:** the qualification below remains `UNSUPPORTED`. In its recorded run, 0/18 input-originated chains carried an attributable canvas/label revision join to a real hardware presentation timestamp. The local Chromium (152.0.7977.82), Hyprland (0.56.2), NVIDIA driver (610.57.04) and kernel (7.2.5-3-omarchy) were rechecked on 2026-09-29; matching version strings do not constitute a new native qualification or prove unchanged hardware/runtime behavior. No collector fix or newly demonstrated revision join exists.
+- **Optical alternative:** on 2026-09-29, `v4l2-ctl --list-devices` enumerated one accessible ACER HD User Facing camera (`/dev/video0`, `/dev/video1`, `/dev/media0`). `v4l2-ctl --device=/dev/video0 --list-formats-ext` advertised MJPEG at no more than 30 fps (1280×720, 640×480, 640×360), and YUYV at 10 fps (1280×720) or 30 fps (640×480, 640×360). `/dev/video1` advertised no capture formats. These modes cannot meet the contract §6 minimum of **calibrated ≥240 fps**, let alone establish physical-input onset, 3,420–3,780 independent input updates per 30-second window, ≥300 response groups and presented intervals, or rolling-shutter/exposure/scanout bounds. This is a check of currently accessible capture interfaces, **not** a claim that no external high-speed camera or actuator can be provided later. No optical profile, calibration artefacts, or acceptance video exist.
+
+**Decision:** keep the contract's optical path as the defined alternative, but do **not** select it as a qualified P1 acquisition method without an external setup that satisfies every §6 gate. Otherwise a collector fix must first demonstrate the canvas/label revision join with a real hardware presentation timestamp and rerun `qualify:native`. Do not mix physical and injected-input series or substitute CPU/rAF/next-paint timing. No new nine-window primary run was attempted; no p95 latency or frame-time verdict is claimed here. Issue [#41](https://github.com/harkon666/Gurow/issues/41) stays open as a native blocker of [#37](https://github.com/harkon666/Gurow/issues/37); parent [#7](https://github.com/harkon666/Gurow/issues/7) remains unpassed. Remove that blocker only after one acquisition path is qualified, then separately solve the reference-window geometry for acceptance.
+
 ## The qualification run
 
 | Field | Value |

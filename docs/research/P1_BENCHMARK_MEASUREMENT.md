@@ -53,3 +53,15 @@ Require calibrated capture cadence, no undocumented frame interpolation/dropping
 ## Delegation consequence
 
 The fixture generator, raw-record schema, deterministic statistics, and report validator can become bounded tasks for a fast model after the final contract is pinned. Qualifying presentation attribution is a separate specialist task: its deliverable is either a demonstrated collector path or a documented unsupported result with the optical protocol. Do not assign a fast model an open instruction to “measure visible latency” and let it choose a convenient proxy. Only after baseline evidence exists should optimization tasks be scoped.
+
+## Revision 2026-09-30: practical gate (contract `gurow-p1-v2`)
+
+The recommendation above assumed that either a Chromium presentation join or a calibrated optical rig could be acquired. On the reference host neither was available: the qualified-collector attempt found 0/18 attributable input→canvas/label→hardware-presentation chains (#34), and the only camera delivers 30 fps (#41). Under `gurow-p1-v1` the latency criterion therefore could only be `NOT_MEASURED`, independent of engine performance.
+
+Comparable canvas editors do not gate on photon latency:
+
+- Figma gates editor performance on frame time (average and maximum) and CPU profiles, running a headless Chromium in GPU-enabled VMs on every pull request with a 20% regression margin, plus a small set of real laptops. Its public write-up does not describe input-to-photon or optical measurement. [Keeping Figma Fast](https://www.figma.com/blog/keeping-figma-fast/); [Figma, faster](https://www.figma.com/blog/figma-faster/).
+- tldraw reports per-interaction `fps` and `p95FrameTime`, with Long Animation Frame attribution where available. [tldraw performance](https://tldraw.dev/sdk-features/performance).
+- Event Timing still excludes continuous `wheel`/`pointermove` input (see the table above), so no standard browser API measures continuous-interaction latency.
+
+The project therefore adopted [ADR 0019](../adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md): rAF frame intervals and an in-app input-to-frame proxy with a documented presentation estimate, simplified sampling, and a delay-injection sanity check. The limitations recorded in the table above (rAF is not proof of displayed pixels) remain true; v2 reports them as limitations instead of treating them as disqualifying. The sections above describe the superseded `gurow-p1-v1` design.

@@ -64,7 +64,7 @@ All required P1 flow steps must work. The following checks make the result revie
 | Recovery | Exercising renderer failure does not discard the CPU-side document; recovery redraws it, or retry and list navigation remain available |
 | Keyboard/list path | The user can select a Skill and reach its sidebar Task through the list when the canvas is unavailable |
 | Frame time | On the primary workload, p95 is at most 20 ms during pan/zoom/drag |
-| Visible response | On the primary workload, p95 input-to-visible-response latency is at most 50 ms |
+| Input response | On the primary workload, p95 input-to-frame latency (in-app proxy, [ADR 0019](adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md)) is at most 50 ms |
 
 The primary workload is 1,000 cards, approximately 200 visible cards, and 2,000 total connections. The reference environment, interaction sequence, visible counts, and measurement method must be reported as specified in [ENGINE_VALIDATION_PLAN.md](ENGINE_VALIDATION_PLAN.md). Workloads with 100 and 10,000 cards are comparisons; the latter is exploratory rather than a release-capacity promise.
 

@@ -10,7 +10,7 @@ Add a T06 browser functional scenario and harness commands, reusing meaningful T
 
 Stage: P1/T06 L3. Spec coverage: US80, US82, US83, US84. Parent criteria: AC1, AC2, AC3, AC4, AC5.
 
-Contract: gurow-p1-v1. Primary workload remains 1,000 cards, approximately 200 visible cards, 2,000 connections, HTML labels enabled; p95 frame interval ≤20 ms and p95 input-to-visible response ≤50 ms. Use three 30-second active windows per pan/zoom/drag after fixed 10-second warm-up, reference headed hardware browser and qualified presentation evidence. CPU/rAF/queue-completion timings cannot substitute for visible response. Missing/invalid measurement is NOT_MEASURED. Comparison workloads do not carry primary pass thresholds. The reviewed contract and local execution packet provide exact numeric settings, source pointers and planned commands.
+Contract: gurow-p1-v2 (ADR 0019, supersedes gurow-p1-v1). Primary workload remains 1,000 cards, approximately 200 visible cards, 2,000 connections, HTML labels enabled; p95 frame interval ≤20 ms and p95 input-to-frame latency proxy ≤50 ms, measured in-page (rAF frame intervals; input timeStamp to the first frame after canvas and label commit, plus one refresh interval) in a headed hardware browser. Three 30-second runs per pan/zoom/drag after a 10-second warm-up, pooled per scenario. The proxy does not observe compositor or scanout time and every report says so. Missing/invalid measurement is NOT_MEASURED. Comparison workloads do not carry primary pass thresholds. The contract snapshot below and the local execution packet provide exact settings, source pointers and planned commands.
 
 ## Acceptance criteria
 
@@ -18,7 +18,7 @@ Contract: gurow-p1-v1. Primary workload remains 1,000 cards, approximately 200 v
 - [ ] Exercise no-WebGPU keyboard/list path plus actual GPU device loss, automatic success, controlled failed recovery and actual retry UI while preserving CPU document and Task data.
 - [ ] Map all five parent ACs to observable assertions/logs, with explicit gaps; legacy T04/T05 success alone cannot assert new T06 requirements.
 - [ ] Register T06-specific commands with argument arrays and realistic timeout for all warm-ups/windows; build current source before browser checks and keep source/profile/artifact hashes coherent.
-- [ ] A stale build, unqualified collector, missing comparison, missing functional result or failed performance metric makes the acceptance command nonzero. Reporting-only success cannot make harness acceptance green.
+- [ ] A stale build, failed sanity check, missing comparison, missing functional result or failed performance metric makes the acceptance command nonzero. Reporting-only success cannot make harness acceptance green.
 - [ ] Resume one parent T06 session and preserve its baseline across subtasks/review fixes. Run full checks on the final source and produce actual harness status/review artifacts; no author checklist is called independent review.
 
 ## Blocked by
@@ -31,150 +31,122 @@ Recommended executor: Flash candidate with independent acceptance review.
 
 Complete AC mapping, full-check logs, current-source gate report, fixed base/source fingerprint and review packet. A nonpassing gate is explicitly incomplete for parent #7.
 
-Missing physical/qualified measurement environment, unresolved acceptance coverage, failures requiring architectural changes, or two unsuccessful correction cycles. Retain evidence and escalate.
+No headed hardware-accelerated browser available, unresolved acceptance coverage, failures requiring architectural changes, or two unsuccessful correction cycles. Retain evidence and escalate.
 
 ## Approved measurement contract (self-contained snapshot)
 
 <details>
-<summary>gurow-p1-v1 — full contract</summary>
+<summary>gurow-p1-v2 — full contract</summary>
 
 # P1 benchmark contract — T06 / issue #7
 
-Contract ID: `gurow-p1-v1`. Prepared 2026-09-28 against source commit `0a3b9be96a8ef89ce74a22d011ce7e9ba49e996d`. Task A is complete as a measurement-design deliverable. No collector has been qualified and no benchmark has run under this contract; P1 remains unproven. The user approved this contract and the L3 breakdown for publication on 2026-09-28.
+Contract ID: `gurow-p1-v2`. Revised 2026-09-30; supersedes `gurow-p1-v1` (prepared 2026-09-28 against source commit `0a3b9be96a8ef89ce74a22d011ce7e9ba49e996d`, retained in Git history). The decision and its trade-offs are recorded in [ADR 0019](../../adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md). No benchmark has run under either contract; P1 remains unproven.
 
-Parent: [GitHub #7](https://github.com/harkon666/Gurow/issues/7), under [MVP #1](https://github.com/harkon666/Gurow/issues/1). Authority: prototype scope, validation plan, ADRs 0015, 0016, 0017. No learning-domain rule, threshold, or P2 prerequisite is changed.
+Parent: [GitHub #7](https://github.com/harkon666/Gurow/issues/7), under [MVP #1](https://github.com/harkon666/Gurow/issues/1). Authority: [prototype scope](../../PROTOTYPE_PLAN.md), [validation plan](../../ENGINE_VALIDATION_PLAN.md), ADRs [0015](../../adr/0015-own-live-editor-state-in-rust.md), [0016](../../adr/0016-save-editor-snapshots-with-revision-checks.md), [0017](../../adr/0017-use-webgpu-geometry-with-html-labels-and-list-navigation.md), [0019](../../adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md). No learning-domain rule, numeric threshold, or P2 prerequisite is changed.
 
-Normative numeric settings are in protocol.json. Reference environment separates observed host facts from run-time requirements. L3 execution packets map this contract to deliverables and original ACs. Method evidence and links are in measurement research.
+Normative numeric settings are in [protocol-v2.json](protocol-v2.json). The older [protocol.json](protocol.json) is the frozen `gurow-p1-v1` protocol still read by the v1 fixture/report code until #37 migrates it. [Reference environment](reference-environment.json) records the observed host. [L3 execution packets](../../tickets/t06-l3/README.md) map this contract to deliverables and original ACs. Method evidence is in [measurement research](../../research/P1_BENCHMARK_MEASUREMENT.md).
 
-## 1. Decisions fixed by A
+## 1. Decisions
 
-- Use the existing application route and Rust/Wasm/wgpu path, including HTML labels, Skill list, Task sidebar, and normal local persistence callbacks. The benchmark must not replace the app with an isolated lightweight renderer.
-- Use a dedicated Chromium profile and a production build from the recorded source. The acceptance run is headed, visible, hardware accelerated, on the local reference laptop and its current 165 Hz internal display. Headless/software runs are diagnostic or functional evidence only.
-- Attempt a qualified Chromium presentation collector first. Qualification must demonstrate input → state → canvas and HTML label presentation for all three interactions. If that chain cannot be demonstrated, the primary latency remains `NOT_MEASURED`; optical evidence is the defined alternate acquisition path. There is no fallback to rAF, CPU duration, queue completion, or assumed next paint for a passing result.
-- Use three separate 30-second windows for each of pan, zoom, and drag after a fixed 10-second warm-up. Every primary scenario/run must pass; averaging runs or pooling scenarios cannot hide a failure.
-- Evaluate nearest-rank p95 against the original limits: frame interval ≤20 ms and input-to-visible response ≤50 ms. Report other statistics without adding product pass thresholds.
-- Primary fixture: 1,000 cards, 2,000 unique directed connections, initially 200 geometrically visible cards, HTML labels enabled. The permitted 180–240 visibility band operationalizes “approximately 200” during motion. This is a workload-validity rule, not a new product-capacity claim.
-- Comparison fixtures: 100 cards/200 connections and 10,000 cards/20,000 connections. Report them without applying the primary thresholds. A slow comparison is a result; missing comparison evidence leaves AC4 incomplete.
+- Use the existing application route and Rust/Wasm/wgpu path, including HTML labels, Skill list, Task sidebar, and normal local persistence callbacks. The benchmark must not replace the app with an isolated lightweight renderer or hide labels, list or sidebar.
+- Use a production build, a dedicated Chromium profile, and a headed, visible, hardware-accelerated browser on a real GPU. Headless or software-rendered runs are diagnostic only.
+- Measure two metrics from in-page instrumentation (§6): `frame_interval_ms` from animation-frame timestamps, and `input_to_frame_proxy_ms` from input `timeStamp` to the first frame after canvas and labels committed that input's state, plus one nominal refresh interval. No trace-level presentation join, hardware presentation timestamp or optical rig is required.
+- For each of pan, zoom and drag: fixed 10-second warm-up, then three 30-second runs. The three runs are pooled into one per-scenario distribution; each scenario must pass on its own. Per-run p95 is reported, not gated.
+- Evaluate nearest-rank p95 against the original limits: frame interval ≤20 ms and input latency proxy ≤50 ms.
+- Primary fixture: 1,000 cards, 2,000 unique directed connections, about 200 visible cards, HTML labels enabled. Comparison fixtures: 100 cards/200 connections and 10,000 cards/20,000 connections, reported without thresholds and without a capacity promise.
 
-These sampling and reference-device choices are project-specific protocol decisions. Primary sources establish the API limitations, not these numeric choices. Changing this protocol requires a versioned explanation before the next acceptance series; old and new results must not be silently combined.
+Changing this protocol again requires a new contract ID and a recorded reason before the next acceptance series; results from different contract IDs are never combined.
 
 ## 2. Current path and instrumentation boundaries
 
-At the inspected commit, `useWasmEditor.ts` sends JSON commands synchronously to `WasmEditor.dispatch_command`. `render_and_serialize_events` applies the CPU document change, invokes the renderer, then returns events. `WgpuRenderer.render` writes buffers, builds connection geometry, submits work and calls `present()`. React handles `LabelsUpdated` later. Therefore, return from `dispatch_command` does not establish that canvas pixels and HTML labels reached the display together.
+`useWasmEditor.ts` sends JSON commands synchronously to `WasmEditor.dispatch_command`. `render_and_serialize_events` applies the CPU document change, invokes the renderer, then returns events. `WgpuRenderer.render` writes buffers, builds connection geometry, submits work and calls `present()`. React commits `LabelsUpdated` afterwards. Therefore return from `dispatch_command` alone does not show that labels have caught up; the proxy endpoint in §6 waits for both.
 
-The route saves camera changes and completed operations through normal local persistence. Keep those costs enabled. Existing T05 browser checks launch headless Chromium at DPR 1; they remain functional regression checks and are not the reference performance environment. Existing `harness.json` registers T04/T05 only; T06 acceptance registration is a deliverable of L3-06.
+Normal local persistence for camera changes and completed operations stays enabled. Existing T05 browser checks (headless, DPR 1) remain functional regression checks only. Instrumentation is opt-in through the existing benchmark hooks and must not add GPU readback or queue waits to the timed path.
 
-Exact source pointers, allowed edits and planned test paths belong to the local execution packets, pinned to the inspected commit. A worker checks live files before relying on a pointer. Graphify can locate candidates; live source, issue requirements and actual logs decide acceptance.
+## 3. Environment
 
-## 3. Reference environment
+Run on the reference laptop in `reference-environment.json`, on AC power, with the internal display at its native refresh rate. Record at run start: CPU, physical RAM, OS/kernel, compositor, CPU governor, browser executable/version and flags, the GPU adapter actually selected by WebGPU and its driver, whether it is hardware, display refresh rate, window inner size, `devicePixelRatio`, canvas CSS bounds and backing size. These are recorded facts, not locked settings; a changed adapter, browser major version or refresh rate starts a new series.
 
-Use the laptop described in `reference-environment.json`, AC power connected, CPU governor `powersave`, internal display eDP-2 at 1920×1200, 165 Hz, compositor scale 1.5, VRR off. Keep these settings; do not silently switch to 60 Hz, another display or a different governor for a faster result. Record deviations as a separate environment/series.
-
-Browser viewport: 1200×720 CSS pixels, browser zoom 100%, actual `devicePixelRatio` 1.5. Record actual inner size, screen properties, canvas CSS bounds and backing size; device emulation cannot substitute for validating the actual headed window. Scroll the full canvas into view and keep it unobscured. Select the designated fixture Skill and open its Task panel before freezing the viewport/camera. Do not hide the list, Task panel or label nodes to improve timing. If that configuration cannot fit the visible desktop, qualification fails with a geometry report instead of measuring a clipped canvas.
-
-Chromium observed at design time: 152.0.7977.82. Record executable/version, command line, browser backend, compositor version, kernel, GPU adapter actually selected by wgpu, its hardware/software status, driver, CPU, physical RAM, refresh rate and DPR at run start. The machine exposes both Intel UHD and NVIDIA RTX 4050; PCI presence and `HighPerformance` preference do not prove which adapter Chromium uses. The actual adapter must be captured and locked for a comparison series. A version/adapter/driver change starts a new series and requires qualification again.
-
-Use a dedicated browser profile, foreground tab, no CPU/network throttling, no DevTools UI or unrelated GPU/CPU workloads. Log interruptions, focus/visibility changes, thermal/power observations and memory pressure. Do not kill unrelated user applications. Pause the attempt when contention prevents a controlled run. No OS/browser installation, GPU-driver repair or desktop reconfiguration is part of these packets.
+Use whatever headed window the desktop provides, provided the canvas is fully visible and unobscured and its CSS size is at least 960×540. Keep browser zoom at 100%. Select the designated fixture Skill and open its Task panel before the timed runs. Use a foreground tab, no DevTools UI, no throttling, and avoid unrelated heavy workloads; log focus/visibility changes and interruptions.
 
 ## 4. Fixture contract
 
-The fixture generator returns editor cards/connections, separate application Skill/Task payload, initial camera, and a manifest containing count/hash/geometry parameters. Stable IDs: `p1-skill-00000` etc.; one deterministic Task per Skill with nonempty title/description. Card size is 180×80 world units. Keep current HTML label style and text density. Set no progress/Review/XP data inside editor snapshots.
+The fixture generator (delivered by #35) returns editor cards/connections, separate application Skill/Task payload, initial camera, and a manifest with count/hash/geometry parameters. Stable IDs `p1-skill-00000` etc.; one deterministic Task per Skill with nonempty title/description. Card size is 180×80 world units. No progress/Review/XP data inside editor snapshots.
 
-For 100/1,000/10,000 cards use grids 10×10, 25×40, 100×100 respectively, in row-major ID order. Add forward edges by enumerating increasing gap `g=1,2,...`, then source `i=0..N-g-1`, taking `(i,i+g)` until `2*N` edges exist. No duplicate, self, cross-Path or cyclic edge is possible; validate these properties through the normal loading boundary as well as fixture checks.
+For 100/1,000/10,000 cards use grids 10×10, 25×40, 100×100 in row-major ID order. Add forward edges by increasing gap `g=1,2,...`, source `i=0..N-g-1`, taking `(i,i+g)` until `2*N` edges exist. No duplicate, self, cross-Path or cyclic edge is possible; validate through the normal loading boundary.
 
-With settled canvas CSS dimensions W,H, target a 10-column ×20-row viewport for primary/large workloads. Set `z0 = min(1, W/(10*220), H/(20*120))`; fail geometry setup if z0 is outside 0.1–4. Let world cell pitch be `px=W/(10*z0)`, `py=H/(20*z0)`, and center each 180×80 card inside its cell. Center the viewport on a contiguous interior 10×20 block (start indices `floor((cols-10)/2)`, `floor((rows-20)/2)`). The 100-card comparison instead uses a centered 10×10 block and substitutes 10 for the row target. Persist exact W,H,z0,pitches,start indices and resulting camera offsets. Do not regenerate a different layout after seeing its speed.
+With settled canvas CSS size W,H, target a 10-column × 20-row viewport: `z0 = min(1, W/(10*220), H/(20*120))`, failing setup if z0 is outside 0.1–4. Cell pitch `px=W/(10*z0)`, `py=H/(20*z0)`, each card centered in its cell, viewport centered on the interior 10×20 block (the 100-card comparison uses a centered 10×10 block). Persist W, H, z0, pitches, start indices and camera offsets.
 
-For setup only, seed the normal checkpoint and camera storage in the dedicated profile using the current validated envelope/keys, then load `/` normally. Do not copy local user storage. Application path/account identity must match current route constants; benchmark isolation comes from the dedicated profile. Read-back on the live engine and UI must match the fixture hash/identities. Timed interactions go through browser input, never direct engine commands.
+Seed the normal checkpoint and camera storage in the dedicated profile, then load `/` normally; read-back must match the fixture hash. Timed interactions go through browser input, never direct engine commands.
 
-Visibility means positive-area intersection with the actual clipped canvas rectangle. Record card and HTML-label bounds separately, total DOM label count, submitted primitive count, and connection-mesh/viewport intersection count. For connections use the renderer's actual tessellated geometry or equivalent recorded segment geometry; label conservative bounding-box counts as estimates and do not call them exact intersections. Record min/max/median counts and counts across phase boundaries. Validate the complete scripted path and actual delivered camera/card states against geometric visibility outside timing; 10 Hz observations alone do not establish an uninterrupted visibility band. Unknown intervening geometry makes the visibility result incomplete. Avoid synchronous DOM reads/GPU readback on every hot-path event; qualify instrumentation cost and sample independently at 10 Hz, with full deterministic geometry validation outside the timed run. If visibility leaves the primary band, the whole attempt is invalid; do not discard only expensive samples.
+Visibility is a workload sanity check. Record visible card count, DOM label count and submitted primitive count at the start of each run and at 2 Hz during it (cheap bounding-box intersection with the canvas rectangle is sufficient). A primary run is invalid if the median visible card count lies outside 150–250.
 
 ## 5. Interaction sequence and sampling
 
-For each N in order 100 → 1,000 → 10,000, run scenarios in order pan → zoom → drag. Each scenario has three separately initialized repetitions. Load the same fixture/camera, select/open the designated center Skill, settle readiness, warm up for 10 seconds using that scenario, restore initial state outside timing, settle, then capture 30 seconds. Reset before every repetition. Preserve all attempts and reasons for invalidation; never select the fastest three attempts.
+For each N in order 100 → 1,000 → 10,000, run pan → zoom → drag. For each scenario: load the fixture, select/open the center Skill, settle, warm up for 10 seconds with that scenario, restore the initial camera/card state, then capture three 30-second runs, restoring state between runs. Comparison fixtures may use one run per scenario. Keep every attempt and its invalidation reason; do not pick the fastest attempts.
 
-Define an intended 120 Hz input schedule with an absolute monotonic clock: input k has deadline `start + k/120 seconds`. Drive a triangular motion with period 2 seconds. Pan uses ordinary wheel input (no Ctrl/Meta), deltas that move camera X between ±0.1 of one screen-space cell pitch. Zoom uses Ctrl+wheel at canvas center to move camera zoom between 0.99*z0 and 1.01*z0; derive wheel deltas from the existing `exp(-deltaY*0.005)` rule. Drag starts on the selected center card, preserves its grab offset, and moves horizontally between ±0.1 cell pitch while the button remains down; release after the active window and record the operation save separately. No teleporting via `SetCamera` during timing.
+Drive input through Puppeteer/CDP at a nominal 120 Hz using an absolute schedule (`start + k/120 s`) without awaiting rendering, with a triangular 2-second motion. Pan: plain wheel moving camera X between ±0.1 cell pitch. Zoom: Ctrl+wheel at canvas center between 0.99·z0 and 1.01·z0, with deltas from the `exp(-deltaY*0.005)` rule. Drag: real pointer down on the selected center card, horizontal moves between ±0.1 cell pitch, pointer up after the run.
 
-Use browser input injection via Puppeteer/CDP, with Ctrl explicitly pressed/released for zoom and actual pointer down/move/up for drag. Do not dispatch synthetic DOM events or call engine commands for the timed workload. Record scheduled time, injection-call time, browser input timestamp, actual delivery times, queueing and any coalescing. Do not await rendering before scheduling the next event. Do not replace missed deadlines with an unrecorded burst. Input dispatch latency and recorder lag remain visible in the raw log.
+A run is valid when at least 80% of the scheduled inputs (2,880 of 3,600) were delivered to the page, the tab stayed visible and focused, and no device loss or page error occurred. A pooled scenario needs at least 1,000 latency samples and 1,000 frame intervals. Pacing is a load check, not a speed result; an invalid run is rerun, not dropped silently.
 
-For an automated run, require at least 3,420 of the intended 3,600 input requests to enter the browser during the active 30-second window (95% pacing validity). Keep late/missing counts and all response tails. This checks load generation, not application speed. Failure to meet the pacing rule is `NOT_MEASURED`, unless an independent input driver establishes the required load. A hung or overloaded app cannot earn PASS by slowing down the sender. Retained coalesced groups can have fewer entries than requests; require at least 300 response groups and 300 presented intervals per run for a valid distribution. These are predeclared sampling-validity rules, not statistical confidence claims.
-
-Keep all long intervals, GC pauses and stalls. Drain for up to 2 seconds after the active window to account for in-flight input; draining does not extend the emission window. Retain an unfinished stall as a right-censored interval and unresolved response as missing evidence, never silently drop it. Browser errors, device loss during timing, backgrounding, trace loss or changed environment invalidate the run. The separate functional recovery test intentionally injects device loss outside performance windows.
-
-## 6. Metric definitions and acquisition qualification
+## 6. Metric definitions
 
 ### Frame interval
 
-`presented_editor_frame_interval_ms` is elapsed time between consecutive distinct, coherent editor-content presentations during active motion. Include dropped/stale-frame time in the gap to the next update. Do not count unrelated compositor frames, cursor-only updates or animated measurement overlays. Record canvas-only/label-only transitional frames and their time until coherent presentation. CPU render duration, GPU queue duration and rAF cadence are separate diagnostic fields. This pins the user-visible frame-cadence interpretation of the parent target.
+`frame_interval_ms` is the difference between consecutive `requestAnimationFrame` timestamps during the active window. Long tasks, GC pauses and stalls appear as long intervals and are kept. A stall still open at the end of the window is recorded as the time until the window ends. Report p50, p95, max and the count of intervals over 50 ms.
 
-### Input-to-visible response
+### Input latency proxy
 
-The primary automated input origin is the browser-recorded original injected input timestamp before main-thread dispatch, on a demonstrated trace clock. It includes browser queueing and application/render/compositor work; it does not claim physical mouse-switch/USB latency. Never begin at handler entry or after `dispatch_command`. Optical acquisition starts from observed physical input and reports that distinct, wider boundary; results from different boundaries are not pooled. It may support acceptance only under the equivalent-load rule below.
+For each input event delivered to the page (each `wheel` event; each `pointermove` including its coalesced events via `getCoalescedEvents()`), record `event.timeStamp` and the editor state revision that input produced; coalesced pointer events share the revision of the event that delivered them but keep their own timestamps. Record the revision committed to the canvas (after `dispatch_command` returns) and the revision committed to the HTML labels (after React commits `LabelsUpdated`). In the animation-frame loop, the first frame whose callback runs after both committed revisions are at least the input's revision is that input's endpoint:
 
-The endpoint is the first presented frame containing the intended camera/card state and matching HTML labels. If they appear at different times, use the later coherent presentation. Record causality through input ID, state revision, canvas and label revision, and presented-frame ID. Timestamp proximity, an rAF number or the next generic paint is insufficient.
+`input_to_frame_proxy_ms = rAF_timestamp − event.timeStamp + 1000 / refresh_hz`
 
-The acceptance statistical unit is each original delivered input. An input response group provides attribution only: a singleton contains one input; a demonstrated browser/app coalescing group contains all superseded/combined updates incorporated into its final requested state. Map every original member to the first coherent presentation of the net state and calculate its own original-input-to-presentation latency. If only the oldest group timestamp is trustworthy, assign that conservative oldest-to-presentation latency to every member; never count a large group as one acceptance sample. Preserve every member, timestamps, event kind and reason; do not choose the newest timestamp to hide queueing. Unweighted group percentiles are diagnostic only, since they can hide many slow inputs in one large group. Coalescing rules must be fixed in the collector's qualification, not invented by the report reducer. Every emitted request must be classified as presented-group member, known predeclared no-op, late/not-delivered, or unresolved. Unknown/lost responses make the run ineligible for PASS. A frozen app producing one group for a whole run fails sampling validity. Report group-size distribution and max/p95 latency alongside dropped/late counts.
+The added refresh interval is a fixed, documented estimate of presentation; the report also keeps the raw value without it. Inputs that are superseded before any frame are charged against the first frame that includes a later revision. An input with no endpoint by 2 seconds after the window ends is charged the time until that drain deadline. Known no-op inputs (movement clamped at a limit) are counted and excluded by a rule fixed before the run.
 
-### Qualified collector requirements
+Every report states the limitation: the proxy covers input queueing, application, renderer submission and label commit on the main thread; it does not observe compositor output, scanout or physical pixels.
 
-L3-01 must demonstrate the mapping separately for ordinary wheel pan, Ctrl+wheel zoom and pointer drag in the actual application. Pin trace categories, browser build, parser version and timestamp units/clock conversions in a collector profile with a hash. Chromium/Perfetto APIs for native scrolling are only candidate tools: they do not guarantee mapping for this custom canvas. Inspect platform presentation-feedback flags; synthesized/estimated/unknown presentation times cannot satisfy this profile.
+### Sanity check
 
-Keep raw traces and a hand-auditable example for each interaction. Validate the chain with controlled 80 ms application delay and independent 80 ms HTML-label delay; the affected latency and delayed component must appear in the trace-derived endpoint. Injection must be disabled in acceptance runs. Also reject fabricated, missing, negative, misordered, duplicate and mismatched clock/revision/frame records. Delaying tests is a falsification check, not a replacement for real presentation provenance.
+Before an acceptance series, run one short pan capture with an 80 ms delay injected into the application update, and another with an 80 ms delay injected into label commit, using the existing benchmark hooks. Each must raise the proxy's p50 by at least 60 ms relative to an undelayed capture. Delays are disabled during acceptance runs and the report records that they were off.
 
-If the installed stack cannot expose this chain, L3-01 delivers a documented `UNSUPPORTED` collector result. L3-02 and L3-04 may still progress. L3-03 cannot fabricate primary metrics. Use the optical path below or escalate measurement feasibility; #7 stays open. This is an explicit runtime qualification outcome, not an undecided metric definition.
-
-### Optical acquisition alternative
-
-Use a calibrated external high-speed camera or equivalent hardware observing physical input onset and the actual display in the same clock domain. A page-rendered marker is not input onset. Capture card geometry and corresponding HTML label at fixed screen regions, including reversals during continuous pan/zoom/drag. Preserve native video, frame timestamps, camera mode/exposure, frame-drop/interpolation checks, scanout/rolling-shutter treatment and calibration artefacts. Nominal 240 fps alone is insufficient.
-
-Before capture, the qualified optical profile fixes the same workload/30-second windows/three runs, reproducible physical or actuator motion corresponding to the scenario path, and identifies at least 300 response groups plus 300 content intervals per run. Require a calibrated physical/actuator input-load profile equivalent to the 120 Hz injected protocol: 3,420–3,780 original input updates within each 30-second active window, matching movement amplitude and scenario path, with each original update accounted for in latency statistics. Use independent input evidence to establish cadence and causal grouping. Lower-rate or otherwise non-equivalent optical runs are diagnostic only and cannot replace acceptance evidence. Never pool physical and injected-input series. If the optical setup cannot support this acquisition or attribution, report `NOT_MEASURED` rather than relaxing the sample rule after seeing results.
-
-For input onset `[a,b]` and response onset `[c,d]`, latency bounds are `[max(0,c-b), d-a]`, incorporating clock/capture/scanout uncertainty. For frame intervals use analogous onset bounds. If coalescing is only resolved at group granularity, conservatively repeat the oldest group latency bound for every member, as for automated acquisition. Compute lower- and upper-bound percentiles separately. PASS requires upper-bound p95 within the original threshold. FAIL requires lower-bound p95 beyond it. An interval straddling the threshold is `NOT_MEASURED` with reason `uncertainty_overlaps_limit`. Raw video must allow another reviewer to repeat the annotation. No optical equipment availability is assumed in this contract.
+Chromium trace data (for example EventLatency) may be captured as optional diagnostics; it is never required and never substitutes for the proxy.
 
 ## 7. Statistics, verdict and report contract
 
-Acceptance latency uses the per-original-input observations above, never an unweighted group distribution. Any unresolved terminal frame interval or input response makes the metric NOT_MEASURED, even when its record is retained in raw logs. Do not exclude censored tails to compute a passing verdict. Use nearest-rank p95: sort n complete observations ascending and select one-based rank `ceil(0.95*n)`. Never interpolate, average run percentiles or round before comparing to thresholds. Report units, n, duration, p50, p95, max, raw observations and worst run for each scenario. Keep pooled summaries supplementary. Exactly 20 ms/50 ms meets its respective limit.
+Use nearest-rank p95: sort n observations ascending and take rank `ceil(0.95*n)`. Do not interpolate or round before comparing. Exactly 20 ms / 50 ms meets the limit. Report per scenario (pooled) and per run: n, duration, p50, p95, max.
 
-Report schema version `gurow-p1-report-v1` has required sections:
+Report schema `gurow-p1-report-v2` sections: `identity` (contract ID/hash, source commit, dirty flag, build hash, runner version), `environment` (§3 fields), `fixture` (size, hash, geometry, visibility records), `runs` (attempts, input counts, validity reasons, statistics), `functional` (AC1 results), `diagnostics` (initialization to first render, process RSS, JS heap and Wasm memory when available, draw calls, upload bytes, JSON boundary calls/bytes/duration; null plus reason when unavailable, never a fabricated zero), `comparisons`, `artifacts` (path, SHA-256, role), and `gate` (each original AC verdict and overall verdict).
 
-- `identity`: contract ID/hash, parent #7, source commit/tree, dirty flag + diff/input fingerprint where applicable, production build hash, timestamp, runner/parser/collector profile versions and hashes.
-- `environment`: all reference-device/run fields, adapter/driver evidence, hardware acceleration, visible headed state, viewport/canvas/backing geometry and power/display configuration.
-- `fixture`: size, edge count, hash, seed/algorithm version, cell/camera parameters, Task association and visibility records.
-- `runs`: attempts with scenario, warm-up/active/drain intervals, scheduled/delivered/classified input counts, group membership, presented frames, sample bounds, validity reasons, per-metric statistics and verdicts.
-- `functional`: each AC1 subscenario's action, assertion, command/log, result and source identity; no inferred result from an older ticket's CLOSED state.
-- `diagnostics`: initialization-to-first-coherent-render, browser process-tree RSS, JS heap when available, Wasm memory when available, GPU memory when supported, draw calls, upload bytes and JSON boundary calls/bytes/duration. Use null + reason for unavailable optional counters, never fabricated zero. Record actual driver/platform measurements separately from instrumented counters; GPU readback waits must not be inserted in the timed production path.
-- `comparisons`: all 100/10,000 attempts and outcomes, including slow runs/resource limits and limitations; no product-capacity conclusion.
-- `artifacts`: relative path, SHA-256 and role for each trace, raw input/frame log, profile, video if used, functional log and generated report.
-- `gate`: each original AC verdict, overall verdict, reasons and required follow-up. Unknown fields/samples must not become PASS by default.
-
-Verdicts are `PASS`, `FAIL`, `NOT_MEASURED`. Preserve metric-level distinctions: valid over-limit samples yield FAIL; missing, invalid or uncertain evidence yields NOT_MEASURED. Overall is FAIL if any required valid criterion fails, otherwise NOT_MEASURED if anything required is missing/invalid, otherwise PASS. Missing optional diagnostic counters must be explicitly explained and reviewed against AC4; they are not invented product thresholds. Missing comparison runs leave AC4 NOT_MEASURED; a completed slow comparison does not fail the primary performance gate.
-
-All three primary scenarios and all three repetitions must satisfy both thresholds on the same source/environment series. Functional AC1, environment/method evidence AC3, comparison/diagnostic reporting AC4 and honest failure handling AC5 are also required. Neither three fast samples, passing fixture tests, nor a closed child issue closes #7.
+Verdicts are `PASS`, `FAIL`, `NOT_MEASURED`. A valid pooled scenario over a limit is FAIL. A scenario without enough valid runs or samples is NOT_MEASURED. Overall is FAIL if any required criterion fails, otherwise NOT_MEASURED if anything required is missing, otherwise PASS. A missing comparison or diagnostic leaves AC4 incomplete but does not fail the primary performance criterion.
 
 ## 8. Functional and harness acceptance
 
-AC1 requires real browser actions covering create/select, pan/zoom/drag, a valid connection and unchanged graph on rejected cycle, Task edit, one-step drag undo/redo, semantic reload of IDs/positions/connections/Task contents, keyboard/list navigation without WebGPU, real GPU device loss and successful/failed recovery/retry. Run the functional scenario outside latency windows. Browser initialization errors and dynamic IDs must be exercised, not just the original four hardcoded Skills. Reuse useful T04/T05 assertions, then inspect freshly loaded UI and engine state.
+AC1 requires real browser actions covering create/select, pan/zoom/drag, a valid connection and unchanged graph on a rejected cycle, Task edit, one-step drag undo/redo, semantic reload of IDs/positions/connections/Task contents, keyboard/list navigation without WebGPU, and real GPU device loss with recovery and retry. Run it outside the timed windows, reusing T04/T05 assertions where useful.
 
-Future T06 work resumes or starts one harness session pinned to the parent #7 and its implementation base. It must not replace `.harness/` merely to author this contract; current T05 evidence is retained. Subtasks identify their own source commits and artifacts under that parent session. Register T06 acceptance commands, build current source before browser checks, and keep all original ACs in the mapping. Full checks and independent Standards/Spec review remain required before implementation readiness.
-
-Use isolated output under `.harness/` for working evidence. Publishing a final report requires a recorded source identity and reviewed artifacts. Do not use working notes or older test reports as current proof. After a measured failure, write a new bounded optimization task naming the observed bottleneck and regression proof; do not add speculative culling, binary protocols or new state owners before measurement. Parent #7 and downstream #8 remain gated until the actual required evidence passes.
+T06 work uses one harness session pinned to parent #7 and its implementation base, per [the harness workflow](../../agents/harness.md). Register T06 acceptance commands, build current source before browser checks, keep working evidence under `.harness/`, and require full checks plus independent review before claiming readiness. After a measured failure, open a bounded optimization task naming the observed bottleneck; do not add speculative optimizations first. Parent #7 and downstream #8 stay gated until the required evidence passes.
 
 </details>
 
 <details>
-<summary>Normative numeric protocol</summary>
+<summary>Normative numeric protocol (protocol-v2.json)</summary>
 
 ```json
 {
-  "contract_id": "gurow-p1-v1",
-  "report_schema": "gurow-p1-report-v1",
+  "contract_id": "gurow-p1-v2",
+  "supersedes": "gurow-p1-v1",
+  "decision_record": "docs/adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md",
+  "report_schema": "gurow-p1-report-v2",
   "parent_issue": 7,
-  "source_commit_at_design": "0a3b9be96a8ef89ce74a22d011ce7e9ba49e996d",
+  "revised_at": "2026-09-30",
   "design_status": "complete_approved",
-  "collector_status": "not_qualified",
   "benchmark_status": "not_run",
+  "metrics": {
+    "frame_interval_ms": "consecutive requestAnimationFrame timestamp deltas during the active window",
+    "input_to_frame_proxy_ms": "rAF timestamp of first frame after canvas and label commit of the input's revision, minus event.timeStamp, plus 1000/refresh_hz"
+  },
   "thresholds_ms": {
     "frame_p95": 20,
-    "input_to_visible_p95": 50
+    "input_to_frame_proxy_p95": 50
   },
   "primary": {
     "cards": 1000,
@@ -182,44 +154,46 @@ Use isolated output under `.harness/` for working evidence. Publishing a final r
     "grid_columns": 25,
     "grid_rows": 40,
     "initial_visible_cards": 200,
-    "visible_cards_min": 180,
-    "visible_cards_max": 240,
-    "html_labels": true
+    "html_labels": true,
+    "visible_cards_median_min": 150,
+    "visible_cards_median_max": 250
   },
   "comparisons": [
     {
       "cards": 100,
       "connections": 200,
       "grid_columns": 10,
-      "grid_rows": 10
+      "grid_rows": 10,
+      "runs_per_scenario": 1
     },
     {
       "cards": 10000,
       "connections": 20000,
       "grid_columns": 100,
-      "grid_rows": 100
+      "grid_rows": 100,
+      "runs_per_scenario": 1
     }
   ],
   "card_size_world": {
     "width": 180,
     "height": 80
   },
-  "viewport_css": {
-    "width": 1200,
-    "height": 720
+  "minimum_canvas_css": {
+    "width": 960,
+    "height": 540
   },
-  "device_pixel_ratio": 1.5,
-  "display_refresh_hz": 165,
+  "browser_zoom_percent": 100,
   "sampling": {
     "warmup_seconds": 10,
     "active_seconds": 30,
     "drain_seconds": 2,
-    "repetitions_per_scenario": 3,
+    "runs_per_scenario": 3,
+    "pooling": "per_scenario",
     "input_hz": 120,
-    "minimum_delivered_requests": 3420,
-    "minimum_response_groups": 300,
-    "minimum_presented_intervals": 300,
-    "visibility_sample_hz": 10,
+    "minimum_delivered_fraction": 0.8,
+    "minimum_pooled_latency_samples": 1000,
+    "minimum_pooled_frame_intervals": 1000,
+    "visibility_sample_hz": 2,
     "motion_period_seconds": 2,
     "pan_drag_amplitude_cell_fraction": 0.1,
     "zoom_min_factor": 0.99,
@@ -231,19 +205,20 @@ Use isolated output under `.harness/` for working evidence. Publishing a final r
     "drag"
   ],
   "percentile": "nearest_rank_ceil",
-  "run_verdicts": [
+  "verdicts": [
     "PASS",
     "FAIL",
     "NOT_MEASURED"
   ],
-  "qualification_delay_ms": 80,
-  "latency_statistics_unit": "each_original_delivered_input",
-  "coalesced_fallback": "repeat_oldest_group_latency_for_every_member",
-  "censored_tail_policy": "NOT_MEASURED",
-  "optical_equivalent_input_count_per_30s": {
-    "min": 3420,
-    "max": 3780
-  }
+  "sanity_check": {
+    "injected_delay_ms": 80,
+    "minimum_p50_shift_ms": 60,
+    "targets": [
+      "application_update",
+      "label_commit"
+    ]
+  },
+  "unresolved_input_policy": "charge_until_drain_deadline"
 }
 ```
 
@@ -282,7 +257,6 @@ Use isolated output under `.harness/` for working evidence. Publishing a final r
   "must_capture_during_qualification": ["actual WebGPU adapter and fallback status", "actual adapter driver", "compositor version", "headed browser backend and flags", "viewport and canvas geometry after selection", "trace categories and parser version", "presentation feedback provenance", "clock mapping", "collector profile hash"],
   "qualification_result": "NOT_RUN"
 }
-
 ```
 
 </details>
@@ -292,7 +266,7 @@ Use isolated output under `.harness/` for working evidence. Publishing a final r
 
 # P1 benchmark measurement research
 
-Researched 2026-09-28 for issue #7, contract task A. This is measurement research and a protocol recommendation, not an executed benchmark or evidence that P1 passes. The normative project thresholds remain in ENGINE_VALIDATION_PLAN.md: primary workload p95 frame time ≤20 ms and p95 input-to-visible-response ≤50 ms during pan, zoom, and drag. A subsequent contract can pin the concrete reference device and interaction sequence.
+Researched 2026-09-28 for issue #7, contract task A. This is measurement research and a protocol recommendation, not an executed benchmark or evidence that P1 passes. The normative project thresholds remain in [ENGINE_VALIDATION_PLAN.md](../ENGINE_VALIDATION_PLAN.md): primary workload p95 frame time ≤20 ms and p95 input-to-visible-response ≤50 ms during pan, zoom, and drag. A subsequent contract can pin the concrete reference device and interaction sequence.
 
 ## Findings from primary sources
 
@@ -345,5 +319,17 @@ Require calibrated capture cadence, no undocumented frame interpolation/dropping
 ## Delegation consequence
 
 The fixture generator, raw-record schema, deterministic statistics, and report validator can become bounded tasks for a fast model after the final contract is pinned. Qualifying presentation attribution is a separate specialist task: its deliverable is either a demonstrated collector path or a documented unsupported result with the optical protocol. Do not assign a fast model an open instruction to “measure visible latency” and let it choose a convenient proxy. Only after baseline evidence exists should optimization tasks be scoped.
+
+## Revision 2026-09-30: practical gate (contract `gurow-p1-v2`)
+
+The recommendation above assumed that either a Chromium presentation join or a calibrated optical rig could be acquired. On the reference host neither was available: the qualified-collector attempt found 0/18 attributable input→canvas/label→hardware-presentation chains (#34), and the only camera delivers 30 fps (#41). Under `gurow-p1-v1` the latency criterion therefore could only be `NOT_MEASURED`, independent of engine performance.
+
+Comparable canvas editors do not gate on photon latency:
+
+- Figma gates editor performance on frame time (average and maximum) and CPU profiles, running a headless Chromium in GPU-enabled VMs on every pull request with a 20% regression margin, plus a small set of real laptops. Its public write-up does not describe input-to-photon or optical measurement. [Keeping Figma Fast](https://www.figma.com/blog/keeping-figma-fast/); [Figma, faster](https://www.figma.com/blog/figma-faster/).
+- tldraw reports per-interaction `fps` and `p95FrameTime`, with Long Animation Frame attribution where available. [tldraw performance](https://tldraw.dev/sdk-features/performance).
+- Event Timing still excludes continuous `wheel`/`pointermove` input (see the table above), so no standard browser API measures continuous-interaction latency.
+
+The project therefore adopted [ADR 0019](../adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md): rAF frame intervals and an in-app input-to-frame proxy with a documented presentation estimate, simplified sampling, and a delay-injection sanity check. The limitations recorded in the table above (rAF is not proof of displayed pixels) remain true; v2 reports them as limitations instead of treating them as disqualifying. The sections above describe the superseded `gurow-p1-v1` design.
 
 </details>

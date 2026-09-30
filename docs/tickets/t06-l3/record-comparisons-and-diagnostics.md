@@ -1,6 +1,6 @@
 # T06-L3-05 — Record comparison workloads and explain benchmark resource costs
 
-Status: approved execution packet, published as [#38](https://github.com/harkon666/Gurow/issues/38); implementation pending. Parent: [#7](https://github.com/harkon666/Gurow/issues/7). Contract: [gurow-p1-v1](../../benchmarks/p1/contract.md).
+Status: approved execution packet, published as [#38](https://github.com/harkon666/Gurow/issues/38); implementation pending. Revised 2026-09-30 for contract `gurow-p1-v2`. Parent: [#7](https://github.com/harkon666/Gurow/issues/7). Contract: [gurow-p1-v2](../../benchmarks/p1/contract.md).
 
 Executor recommendation: **Flash candidate**. Blocked by: **T06-L3-03, T06-L3-04**. Parent coverage: AC3, AC4, AC5. User stories: US80, US84.
 
@@ -30,11 +30,11 @@ Pointers were inspected at `0a3b9be96a8ef89ce74a22d011ce7e9ba49e996d`; verify cu
 
 ## Acceptance criteria
 
-- [ ] 100/10,000 workloads retain exact graph counts and use the same scenario/repetition settings as primary; report all attempts, timeouts/resource limits and source/environment identity.
+- [ ] 100/10,000 workloads retain exact graph counts and use the primary scenario settings with at least one run per scenario; report all attempts, timeouts/resource limits and source/environment identity.
 - [ ] Report initialization to first coherent render, process-tree memory and available JS/Wasm/GPU memory counters with units, scope and collection method; unavailable optional counters are null with reasons.
 - [ ] Report actual renderer draw calls, upload bytes and boundary call counts/JSON byte sizes/durations. Static estimates are labeled estimates and cannot masquerade as measured counters.
 - [ ] Keep diagnostics and acceptance timing modes distinguishable; quantify instrumentation differences and never insert queue-wait/readback work into acceptance merely to obtain a counter.
-- [ ] Produce a capture manifest consumable by L3-04. Slow comparisons do not fail the primary target or advertise a 10,000-card capacity promise; missing runs remain visible.
+- [ ] Produce a capture manifest consumable by the v2 reducer. Slow comparisons do not fail the primary target or advertise a 10,000-card capacity promise; missing runs remain visible.
 - [ ] Counter/report tests cover zero activity versus unavailable measurement, correct units/byte counts, and resource failure. Browser evidence demonstrates comparison paths use real fixtures and labels.
 
 ## Planned verification commands
@@ -43,7 +43,7 @@ These commands for new scripts are an implementation contract; they are not avai
 
 ```bash
 cd frontend && bun test scripts/benchmark/diagnostics.test.ts
-cd frontend && bun run scripts/benchmark/run.ts --all-sizes --diagnostics --contract ../docs/benchmarks/p1/protocol.json --collector-profile ../.harness/t06/qualification/profile.json --out ../.harness/t06/series
+cd frontend && bun run scripts/benchmark/run.ts --all-sizes --diagnostics --contract ../docs/benchmarks/p1/protocol-v2.json --out ../.harness/t06/series
 ```
 
 ## Handoff and escalation

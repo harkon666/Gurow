@@ -1,6 +1,6 @@
 {
   "parent_issue": 7,
-  "contract": "gurow-p1-v1",
+  "contract": "gurow-p1-v2",
   "status": "approved",
   "publication": "published_verified",
   "tasks": [
@@ -45,13 +45,12 @@
     {
       "id": "T06-L3-03",
       "slug": "capture-primary-interactions",
-      "title": "Capture the primary pan, zoom and drag workload with qualified timing",
+      "title": "Capture the primary pan, zoom and drag workload with in-app timing",
       "depends": [
-        "T06-L3-01",
         "T06-L3-02",
         "T06-L3-04"
       ],
-      "model": "Flash candidate after a QUALIFIED collector handoff",
+      "model": "Flash candidate with independent review",
       "stories": [
         80,
         84
@@ -152,5 +151,21 @@
       "issue_url": "https://github.com/harkon666/Gurow/issues/40"
     }
   ],
-  "published_on": "2026-09-28"
+  "published_on": "2026-09-28",
+  "contract_history": [
+    {
+      "id": "gurow-p1-v1",
+      "status": "superseded",
+      "applies_to": [
+        "T06-L3-01",
+        "T06-L3-02",
+        "T06-L3-04"
+      ]
+    },
+    {
+      "id": "gurow-p1-v2",
+      "since": "2026-09-30",
+      "decision_record": "docs/adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md"
+    }
+  ]
 }

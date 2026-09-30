@@ -1,6 +1,6 @@
 # T06-L3-07 — Review the evidence and decide the P1 gate without hiding failures
 
-Status: approved execution packet, published as [#40](https://github.com/harkon666/Gurow/issues/40); implementation pending. Parent: [#7](https://github.com/harkon666/Gurow/issues/7). Contract: [gurow-p1-v1](../../benchmarks/p1/contract.md).
+Status: approved execution packet, published as [#40](https://github.com/harkon666/Gurow/issues/40); implementation pending. Revised 2026-09-30 for contract `gurow-p1-v2`. Parent: [#7](https://github.com/harkon666/Gurow/issues/7). Contract: [gurow-p1-v2](../../benchmarks/p1/contract.md).
 
 Executor recommendation: **Strong independent reviewer / integrator**. Blocked by: **T06-L3-06**. Parent coverage: AC1, AC2, AC3, AC4, AC5. User stories: US80, US82, US83, US84.
 
@@ -16,7 +16,7 @@ Review and decision based on the completed evidence packet. This packet does not
 
 - Canonical #7 and its original five ACs, not only child checklists.
 - L3-06 harness packet and all raw/profile/source artifacts.
-- Collector qualification and synthetic reducer rejection cases, including preserved unsuccessful attempts.
+- The v2 sanity-check results and synthetic reducer rejection cases, including preserved unsuccessful attempts.
 
 ## Source pointers and file ownership
 
@@ -29,8 +29,8 @@ Pointers were inspected at `0a3b9be96a8ef89ce74a22d011ce7e9ba49e996d`; verify cu
 
 ## Acceptance criteria
 
-- [ ] Review Standards and Spec independently in fresh contexts under the repo workflow, including instrumentation, test changes, trace qualification and raw-to-p95 reproducibility.
-- [ ] Verify all primary scenarios/runs meet both original thresholds and that real presentation, labels, workload, current source and environment evidence are valid; inspect failed/invalid attempts.
+- [ ] Review Standards and Spec independently in fresh contexts under the repo workflow, including instrumentation, test changes, the proxy sanity check and raw-to-p95 reproducibility.
+- [ ] Verify each primary scenario's pooled p95 meets both thresholds under contract `gurow-p1-v2`, that the proxy's stated limitation is reported, and that labels, workload, current source and environment evidence are valid; inspect failed/invalid attempts.
 - [ ] Verify AC1 functional paths, AC3 method/environment, AC4 comparisons/diagnostics and AC5 honest failure handling; all planned checks are distinguished from executed evidence.
 - [ ] For a failure, record the bottleneck/evidence and issue a separately bounded corrective task or design reassessment. Do not close #7 or unblock #8 while evidence is missing or fails.
 - [ ] After any code fix, rerun affected checks plus final full verification on the new source and obtain independent review; do not reuse old PASS samples for changed code.
@@ -49,6 +49,6 @@ python3 scripts/harness.py review
 
 Independent review outcomes, final source-bound evidence report and explicit parent-gate verdict, plus concrete corrective task descriptions if necessary.
 
-Stop/escalate: Any unresolved metric provenance, spec conflict, invalid evidence or architecture question. Keep parent gate blocked and request focused review with raw evidence.
+Stop/escalate: Any metric computed differently from contract §6, spec conflict, invalid evidence or architecture question. Keep parent gate blocked and request focused review with raw evidence.
 
 Keep one parent T06 harness baseline once implementation starts. Focused worker checks do not replace parent full verification and independent review. Preserve original criteria and source identity.

@@ -2,7 +2,7 @@
 
 This records the accepted testing strategy and initial benchmark targets. These are planned checks, not completed tests or demonstrated product capacity. The agreed scopes and acceptance criteria for P1 and P2 are in [PROTOTYPE_PLAN.md](PROTOTYPE_PLAN.md).
 
-The concrete T06 measurement design is in the [P1 benchmark contract](benchmarks/p1/contract.md), with [L3 execution packets](tickets/t06-l3/README.md). It fixes the reference setup, workload, acquisition qualification, sampling and reporting rules. The design is complete; collector qualification and benchmark execution are still outstanding, and the approved L3 breakdown is published as sub-issues #34–#40. These documents do not establish that P1 has passed.
+The concrete T06 measurement design is in the [P1 benchmark contract](benchmarks/p1/contract.md), with [L3 execution packets](tickets/t06-l3/README.md). Contract `gurow-p1-v2` ([ADR 0019](adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md)) fixes the environment record, workload, in-app metrics, sampling and reporting rules; it replaced the stricter `gurow-p1-v1` presentation-collector/optical design on 2026-09-30. Benchmark execution is still outstanding; the L3 breakdown is published as sub-issues #34–#40. These documents do not establish that P1 has passed.
 
 ## Reference environment and workloads
 
@@ -15,9 +15,9 @@ For the primary workload during pan, zoom, and drag, the initial targets are:
 | Metric | Target |
 | --- | --- |
 | 95th-percentile frame time | At most 20 ms |
-| 95th-percentile input-to-visible-response latency | At most 50 ms |
+| 95th-percentile input-to-frame latency (in-app proxy) | At most 50 ms |
 
-Report sampling duration, sample count, warm-up treatment, and the measurement method. Distinguish event-processing or render-submission time from the time at which a change is visible, and document limitations in the measurement. Failure to meet a target prompts evaluation of label or renderer strategy rather than a claim that the target was achieved.
+Report sampling duration, sample count, warm-up treatment, and the measurement method. Frame time comes from animation-frame intervals. Input latency is measured from the input timestamp to the first frame after both canvas and HTML labels committed the input's state, plus one refresh interval as a presentation estimate; report that this proxy does not observe compositor or scanout time, and document other limitations. Failure to meet a target prompts evaluation of label or renderer strategy rather than a claim that the target was achieved.
 
 ## Test layers
 

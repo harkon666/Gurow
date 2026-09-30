@@ -2,17 +2,17 @@
 
 Status: **Task A measurement-design complete; seven approved execution packets published as sub-issues #34–#40. L3-01 (#34) is closed with an explicit `UNSUPPORTED` collector verdict; L3-02 (#35) delivers the deterministic workloads; L3-04 (#36) has a local report reducer; the remaining four are not implemented.** Parent [#7](https://github.com/harkon666/Gurow/issues/7) remains the P1 gate. Seven native parent links, seven blocking edges, all issue bodies and `ready-for-agent` labels were read back and verified on 2026-09-28. The parent body and state were not edited.
 
-Primary input-to-visible latency has **no qualified acquisition path**: see [the qualification status record](../../benchmarks/p1/qualification-status.md) and follow-up [#41](https://github.com/harkon666/Gurow/issues/41), which is recorded as a native blocker of L3-03.
+**Revised 2026-09-30 to contract `gurow-p1-v2`** ([ADR 0019](../../adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md)). The v1 presentation-collector/optical requirement could not be acquired on the reference host ([qualification status](../../benchmarks/p1/qualification-status.md)); v2 measures frame time and an in-app input-to-frame proxy instead. [#41](https://github.com/harkon666/Gurow/issues/41) is closed as not planned and no longer blocks L3-03; L3-01's `UNSUPPORTED` verdict remains a historical v1 record.
 
-Start with [benchmark contract A](../../benchmarks/p1/contract.md), [numeric protocol](../../benchmarks/p1/protocol.json), and [observed reference host](../../benchmarks/p1/reference-environment.json). The contract is fixed enough to implement; presentation collection still requires a real qualification run. A finished design is not evidence of a passing gate.
+Start with [benchmark contract](../../benchmarks/p1/contract.md), [numeric protocol v2](../../benchmarks/p1/protocol-v2.json), and [observed reference host](../../benchmarks/p1/reference-environment.json). The contract is fixed enough to implement. A finished design is not evidence of a passing gate.
 
 ## Tasks and dependencies
 
 | ID | Independently verifiable outcome | Blocked by | Executor | User stories |
 | --- | --- | --- | --- | --- |
-| [L3-01](qualify-presentation-collector.md) / [#34](https://github.com/harkon666/Gurow/issues/34) — **CLOSED, `UNSUPPORTED`** | Real-app collector qualification, or explicit unsupported result | A | Strong / measurement specialist | US80, US84 |
+| [L3-01](qualify-presentation-collector.md) / [#34](https://github.com/harkon666/Gurow/issues/34) — **CLOSED, `UNSUPPORTED` (v1 only; not required under v2)** | Real-app collector qualification, or explicit unsupported result | A | Strong / measurement specialist | US80, US84 |
 | [L3-02](load-deterministic-workloads.md) / [#35](https://github.com/harkon666/Gurow/issues/35) | Prescribed fixtures load through normal app with correct IDs, Tasks, DAG and visible labels | A | Flash candidate | US80, US83, US84 |
-| [L3-03](capture-primary-interactions.md) / [#37](https://github.com/harkon666/Gurow/issues/37) | Nine primary windows produce complete input/presentation evidence | L3-01 **QUALIFIED** (not met: #34 is UNSUPPORTED, see [#41](https://github.com/harkon666/Gurow/issues/41)), L3-02, L3-04 | Flash after collector contract | US80, US84 |
+| [L3-03](capture-primary-interactions.md) / [#37](https://github.com/harkon666/Gurow/issues/37) | Nine primary windows produce in-app frame and latency-proxy evidence and a v2 report | L3-02, L3-04 | Flash with independent review | US80, US84 |
 | [L3-04](reduce-and-validate-reports.md) / [#36](https://github.com/harkon666/Gurow/issues/36) | Evidence reduces to validated JSON/Markdown verdicts; malformed evidence cannot pass | A | Flash candidate | US84 |
 | [L3-05](record-comparisons-and-diagnostics.md) / [#38](https://github.com/harkon666/Gurow/issues/38) | Comparison workloads and resource/boundary diagnostics feed the report | L3-03, L3-04 | Flash candidate | US80, US84 |
 | [L3-06](integrate-functional-and-gate-checks.md) / [#39](https://github.com/harkon666/Gurow/issues/39) | Complete P1 flow plus T06 acceptance runs from current-source harness | L3-05 | Flash with independent review | US80, US82, US83, US84 |
@@ -23,8 +23,8 @@ flowchart LR
     A["A: benchmark contract"] --> Q["L3-01: qualify collector"]
     A --> F["L3-02: real-app fixtures"]
     A --> R["L3-04: report validator"]
-    Q -->|QUALIFIED| C["L3-03: capture primary"]
-    F --> C
+    Q -.->|v1 only, UNSUPPORTED| X["retired by v2"]
+    F --> C["L3-03: capture primary"]
     R --> C
     C --> D["L3-05: comparisons and diagnostics"]
     R --> D
@@ -34,7 +34,7 @@ flowchart LR
 
 L3-01, L3-02 and L3-04 can start independently. L3-04 owns report record types; collector/runner workers coordinate against those types and the frozen contract before integration. No worker concurrently edits another worker's files. L3-03 starts after all three initial handoffs, so its record types and validity rules are already available. Later instrumentation tasks run sequentially because they can touch the same editor/Wasm files.
 
-L3-01 ending UNSUPPORTED is a completed investigation with an unmet execution dependency. Do not treat its CLOSED state alone as enough to start L3-03. Record an optical-acquisition or collector-fix follow-up as a native blocker of L3-03 before closing a published L3-01 with UNSUPPORTED, and keep #7 blocked until qualified evidence exists. The remaining independent fixture/report work may continue.
+Under v1, L3-01 ending UNSUPPORTED left L3-03 blocked on #41. Contract v2 removes that dependency: L3-03 measures in-page and needs only the L3-02 loader and the L3-04 reducer (migrated to v2 inside L3-03). #7 still stays blocked until the v2 evidence passes.
 
 ## Parent acceptance coverage
 
@@ -43,7 +43,7 @@ Original criteria are referenced by their order in #7, not rewritten:
 | Parent criterion | Required evidence | Responsible packets |
 | --- | --- | --- |
 | AC1 — full actual P1 functional path | Browser actions and semantic restored state, dynamic identities, graph rejection, keyboard/list and actual renderer recovery | L3-02, L3-06, L3-07 |
-| AC2 — primary workload and ≤20/≤50 ms p95 | Exact fixture, qualified presentation chain, complete per-original-input/continuous-frame records, validated per-run verdicts | L3-01, L3-02, L3-03, L3-04, L3-06, L3-07 |
+| AC2 — primary workload and ≤20/≤50 ms p95 | Exact fixture, rAF frame intervals and in-app input-to-frame proxy per contract v2, passing sanity check, validated per-scenario verdicts | L3-02, L3-03, L3-04, L3-06, L3-07 |
 | AC3 — environment and measurement limitations | Source/build/profile identity, hardware/display/viewport/DPR, input sequence, counts/durations/warm-up and limitations | L3-01, L3-02, L3-03, L3-04, L3-05, L3-07 |
 | AC4 — comparisons and diagnostics | 100/10,000-card results, startup/memory/draw/upload/boundary data, unavailable counters explained | L3-02, L3-04, L3-05, L3-06, L3-07 |
 | AC5 — failures fixed or surfaced; P2 stays gated | Fail-closed reducer/harness, raw unsuccessful attempts, explicit gaps and bounded follow-up, independent review | L3-01, L3-03, L3-04, L3-05, L3-06, L3-07 |
@@ -64,4 +64,4 @@ The user approved the breakdown on 2026-09-28. Each `*.issue.md` now exactly mat
 
 All seven have native parent #7, native blockers matching the graph above, and `ready-for-agent`. This label means the specification is agreed within its stated dependencies; collector qualification and P1 acceptance remain unproven. The original #7 body and state were preserved.
 
-Every issue embeds a self-contained copy of the approved contract, numeric protocol, reference environment and measurement research. Agents can access the normative contract without unpublished repository links. Source pointers and proposed commands remain in the local execution packets. No benchmark has been run as part of publication.
+Every issue embeds a self-contained copy of the approved contract, numeric protocol, reference environment and measurement research; #37–#40 were republished on 2026-09-30 with the `gurow-p1-v2` snapshot, while closed #34–#36 keep their v1 snapshot. Agents can access the normative contract without unpublished repository links. Source pointers and proposed commands remain in the local execution packets. No benchmark has been run as part of publication.

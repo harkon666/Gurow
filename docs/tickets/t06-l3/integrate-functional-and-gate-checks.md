@@ -1,6 +1,6 @@
 # T06-L3-06 — Exercise the complete P1 flow and wire T06 acceptance into the harness
 
-Status: approved execution packet, published as [#39](https://github.com/harkon666/Gurow/issues/39); implementation pending. Parent: [#7](https://github.com/harkon666/Gurow/issues/7). Contract: [gurow-p1-v1](../../benchmarks/p1/contract.md).
+Status: approved execution packet, published as [#39](https://github.com/harkon666/Gurow/issues/39); implementation pending. Revised 2026-09-30 for contract `gurow-p1-v2`. Parent: [#7](https://github.com/harkon666/Gurow/issues/7). Contract: [gurow-p1-v2](../../benchmarks/p1/contract.md).
 
 Executor recommendation: **Flash candidate with independent acceptance review**. Blocked by: **T06-L3-05**. Parent coverage: AC1, AC2, AC3, AC4, AC5. User stories: US80, US82, US83, US84.
 
@@ -35,7 +35,7 @@ Pointers were inspected at `0a3b9be96a8ef89ce74a22d011ce7e9ba49e996d`; verify cu
 - [ ] Exercise no-WebGPU keyboard/list path plus actual GPU device loss, automatic success, controlled failed recovery and actual retry UI while preserving CPU document and Task data.
 - [ ] Map all five parent ACs to observable assertions/logs, with explicit gaps; legacy T04/T05 success alone cannot assert new T06 requirements.
 - [ ] Register T06-specific commands with argument arrays and realistic timeout for all warm-ups/windows; build current source before browser checks and keep source/profile/artifact hashes coherent.
-- [ ] A stale build, unqualified collector, missing comparison, missing functional result or failed performance metric makes the acceptance command nonzero. Reporting-only success cannot make harness acceptance green.
+- [ ] A stale build, failed sanity check, missing comparison, missing functional result or failed performance metric makes the acceptance command nonzero. Reporting-only success cannot make harness acceptance green.
 - [ ] Resume one parent T06 session and preserve its baseline across subtasks/review fixes. Run full checks on the final source and produce actual harness status/review artifacts; no author checklist is called independent review.
 
 ## Planned verification commands
@@ -53,6 +53,6 @@ python3 scripts/harness.py review
 
 Complete AC mapping, full-check logs, current-source gate report, fixed base/source fingerprint and review packet. A nonpassing gate is explicitly incomplete for parent #7.
 
-Stop/escalate: Missing physical/qualified measurement environment, unresolved acceptance coverage, failures requiring architectural changes, or two unsuccessful correction cycles. Retain evidence and escalate.
+Stop/escalate: No headed hardware-accelerated browser available, unresolved acceptance coverage, failures requiring architectural changes, or two unsuccessful correction cycles. Retain evidence and escalate.
 
 Keep one parent T06 harness baseline once implementation starts. Focused worker checks do not replace parent full verification and independent review. Preserve original criteria and source identity.
