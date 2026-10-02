@@ -1,0 +1,351 @@
+{
+  "capturedAt": "2026-10-02T11:28:34.112Z",
+  "sourceCommit": "999538a42c629d04489910cb48d5aaefecc3e812",
+  "buildHash": "5fbb1bb9a80e638dacfd2eac2b7825fc5c54286244b123206ebc6e779d7e718d",
+  "browser": "Chromium 152.0.7977.82 Arch Linux",
+  "results": [
+    {
+      "name": "wayland-default",
+      "flags": [
+        "--no-sandbox",
+        "--enable-unsafe-webgpu",
+        "--disable-dev-shm-usage",
+        "--use-gl=angle",
+        "--ozone-platform=wayland"
+      ],
+      "state": {
+        "configs": [
+          {
+            "format": "rgba8unorm",
+            "alphaMode": "opaque",
+            "usage": 16,
+            "viewFormats": [],
+            "width": 800,
+            "height": 312
+          },
+          {
+            "format": "rgba8unorm",
+            "alphaMode": "opaque",
+            "usage": 16,
+            "viewFormats": [],
+            "width": 800,
+            "height": 312
+          }
+        ],
+        "errors": [
+          "Requested allocation size (1024000) is smaller than the image requires (1228800).\n    at ImportMemory (../../third_party/dawn/src/dawn/native/vulkan/external_memory/MemoryServiceImplementationOpaqueFD.cpp:132)\n",
+          "[Invalid Texture] is invalid due to a previous error.\n - While calling [Invalid Texture].CreateView([TextureViewDescriptor]).\n",
+          "[Invalid TextureView] is invalid due to a previous error.\n - While validating colorAttachments[0].\n - While encoding [CommandEncoder \"Render Encoder\"].BeginRenderPass([RenderPassDescriptor \"\"Editor Render Pass\"\"]).\n - While finishing [CommandEncoder \"Render Encoder\"].\n",
+          "[Invalid CommandBuffer \"Render Encoder\" from CommandEncoder \"Render Encoder\"] is invalid due to a previous error.\n - While calling [Queue].Submit([[Invalid CommandBuffer \"Render Encoder\" from CommandEncoder \"Render Encoder\"]])\n",
+          "Requested allocation size (1024000) is smaller than the image requires (1228800).\n    at ImportMemory (../../third_party/dawn/src/dawn/native/vulkan/external_memory/MemoryServiceImplementationOpaqueFD.cpp:132)\n",
+          "[Invalid Texture] is invalid due to a previous error.\n - While calling [Invalid Texture].CreateView([TextureViewDescriptor]).\n",
+          "[Invalid TextureView] is invalid due to a previous error.\n - While validating colorAttachments[0].\n - While encoding [CommandEncoder \"Render Encoder\"].BeginRenderPass([RenderPassDescriptor \"\"Editor Render Pass\"\"]).\n - While finishing [CommandEncoder \"Render Encoder\"].\n",
+          "[Invalid CommandBuffer \"Render Encoder\" from CommandEncoder \"Render Encoder\"] is invalid due to a previous error.\n - While calling [Queue].Submit([[Invalid CommandBuffer \"Render Encoder\" from CommandEncoder \"Render Encoder\"]])\n",
+          "[Invalid Texture] is invalid due to a previous error.\n - While calling [Invalid Texture].CreateView([TextureViewDescriptor]).\n",
+          "[Invalid TextureView] is invalid due to a previous error.\n - While validating colorAttachments[0].\n - While encoding [CommandEncoder \"Render Encoder\"].BeginRenderPass([RenderPassDescriptor \"\"Editor Render Pass\"\"]).\n - While finishing [CommandEncoder \"Render Encoder\"].\n",
+          "[Invalid CommandBuffer \"Render Encoder\" from CommandEncoder \"Render Encoder\"] is invalid due to a previous error.\n - While calling [Queue].Submit([[Invalid CommandBuffer \"Render Encoder\" from CommandEncoder \"Render Encoder\"]])\n"
+        ],
+        "adapters": [
+          {
+            "vendor": "nvidia",
+            "architecture": "lovelace",
+            "description": ""
+          }
+        ],
+        "badge": "WebGPU Rust Editor",
+        "labels": 4,
+        "canvas": {
+          "x": 0,
+          "y": 655.3333740234375,
+          "width": 611.3333740234375,
+          "height": 312,
+          "backingWidth": 800,
+          "backingHeight": 312,
+          "dpr": 1.5
+        }
+      },
+      "raw": {
+        "format": "rgba8unorm",
+        "width": 300,
+        "height": 200,
+        "scopedError": "Requested allocation size (286720) is smaller than the image requires (311296).\n    at ImportMemory (../../third_party/dawn/src/dawn/native/vulkan/external_memory/MemoryServiceImplementationOpaqueFD.cpp:132)\n",
+        "errors": []
+      },
+      "client": {
+        "address": "0x594840343f50",
+        "mapped": true,
+        "hidden": false,
+        "visible": true,
+        "acceptsInput": true,
+        "at": [
+          647,
+          38
+        ],
+        "size": [
+          621,
+          750
+        ],
+        "workspace": {
+          "id": 1,
+          "name": "1"
+        },
+        "floating": false,
+        "monitor": 0,
+        "class": "chromium",
+        "title": "Gurow - Chromium",
+        "initialClass": "chromium",
+        "initialTitle": "Gurow - Chromium",
+        "pid": 491712,
+        "xwayland": false,
+        "pinned": false,
+        "pinFullscreened": false,
+        "fullscreen": 0,
+        "fullscreenClient": 0,
+        "fullscreenHandler": "default",
+        "allowedOverFullscreen": true,
+        "grouped": [],
+        "tags": [
+          "chromium-based-browser*"
+        ],
+        "swallowing": "0x0",
+        "focusHistoryID": 0,
+        "inhibitingIdle": false,
+        "xdgTag": "",
+        "xdgDescription": "",
+        "contentType": "none",
+        "tearingHint": false,
+        "stableId": "18000024"
+      },
+      "compositorCapture": "/home/harkon666/Dev/experiment/Gurow/.harness/t43/platform-fullscreen/wayland-default-screen.png",
+      "consoleLog": [
+        "error: Failed to load resource: the server responded with a status of 404 ()",
+        "warn: Requested allocation size (1024000) is smaller than the image requires (1228800).\n    at ImportMemory (../../third_party/dawn/src/dawn/native/vulkan/external_memory/MemoryServiceImplementationOpaqueFD.cpp:132)\n",
+        "warn: [Invalid Texture] is invalid due to a previous error.\n - While calling [Invalid Texture].CreateView([TextureViewDescriptor]).\n",
+        "warn: [Invalid TextureView] is invalid due to a previous error.\n - While validating colorAttachments[0].\n - While encoding [CommandEncoder \"Render Encoder\"].BeginRenderPass([RenderPassDescriptor \"\"Editor Render Pass\"\"]).\n - While finishing [CommandEncoder \"Render Encoder\"].\n",
+        "warn: [Invalid CommandBuffer \"Render Encoder\" from CommandEncoder \"Render Encoder\"] is invalid due to a previous error.\n - While calling [Queue].Submit([[Invalid CommandBuffer \"Render Encoder\" from CommandEncoder \"Render Encoder\"]])\n",
+        "warn: Requested allocation size (1024000) is smaller than the image requires (1228800).\n    at ImportMemory (../../third_party/dawn/src/dawn/native/vulkan/external_memory/MemoryServiceImplementationOpaqueFD.cpp:132)\n",
+        "warn: [Invalid Texture] is invalid due to a previous error.\n - While calling [Invalid Texture].CreateView([TextureViewDescriptor]).\n",
+        "warn: [Invalid TextureView] is invalid due to a previous error.\n - While validating colorAttachments[0].\n - While encoding [CommandEncoder \"Render Encoder\"].BeginRenderPass([RenderPassDescriptor \"\"Editor Render Pass\"\"]).\n - While finishing [CommandEncoder \"Render Encoder\"].\n",
+        "warn: [Invalid CommandBuffer \"Render Encoder\" from CommandEncoder \"Render Encoder\"] is invalid due to a previous error.\n - While calling [Queue].Submit([[Invalid CommandBuffer \"Render Encoder\" from CommandEncoder \"Render Encoder\"]])\n",
+        "warn: [Invalid Texture] is invalid due to a previous error.\n - While calling [Invalid Texture].CreateView([TextureViewDescriptor]).\n",
+        "warn: [Invalid TextureView] is invalid due to a previous error.\n - While validating colorAttachments[0].\n - While encoding [CommandEncoder \"Render Encoder\"].BeginRenderPass([RenderPassDescriptor \"\"Editor Render Pass\"\"]).\n - While finishing [CommandEncoder \"Render Encoder\"].\n",
+        "warn: [Invalid CommandBuffer \"Render Encoder\" from CommandEncoder \"Render Encoder\"] is invalid due to a previous error.\n - While calling [Queue].Submit([[Invalid CommandBuffer \"Render Encoder\" from CommandEncoder \"Render Encoder\"]])\n",
+        "warn: Real WebGPU device lost: Device was destroyed."
+      ]
+    },
+    {
+      "name": "xwayland-vulkan",
+      "flags": [
+        "--no-sandbox",
+        "--enable-unsafe-webgpu",
+        "--disable-dev-shm-usage",
+        "--use-angle=vulkan",
+        "--ozone-platform=x11"
+      ],
+      "state": {
+        "configs": [
+          {
+            "format": "rgba8unorm",
+            "alphaMode": "opaque",
+            "usage": 16,
+            "viewFormats": [],
+            "width": 356,
+            "height": 890
+          },
+          {
+            "format": "rgba8unorm",
+            "alphaMode": "opaque",
+            "usage": 16,
+            "viewFormats": [],
+            "width": 356,
+            "height": 890
+          }
+        ],
+        "errors": [],
+        "adapters": [
+          {
+            "vendor": "nvidia",
+            "architecture": "lovelace",
+            "description": ""
+          }
+        ],
+        "badge": "WebGPU Rust Editor",
+        "labels": 4,
+        "canvas": {
+          "x": 256,
+          "y": 92,
+          "width": 356,
+          "height": 890,
+          "backingWidth": 356,
+          "backingHeight": 890,
+          "dpr": 1
+        }
+      },
+      "raw": {
+        "format": "rgba8unorm",
+        "width": 300,
+        "height": 200,
+        "scopedError": null,
+        "errors": []
+      },
+      "client": {
+        "address": "0x594840355120",
+        "mapped": true,
+        "hidden": false,
+        "visible": true,
+        "acceptsInput": true,
+        "at": [
+          647,
+          38
+        ],
+        "size": [
+          621,
+          750
+        ],
+        "workspace": {
+          "id": 1,
+          "name": "1"
+        },
+        "floating": false,
+        "monitor": 0,
+        "class": "Chromium",
+        "title": "Gurow - Chromium",
+        "initialClass": "Chromium",
+        "initialTitle": "Untitled - Chromium",
+        "pid": 492037,
+        "xwayland": true,
+        "pinned": false,
+        "pinFullscreened": false,
+        "fullscreen": 0,
+        "fullscreenClient": 0,
+        "fullscreenHandler": "default",
+        "allowedOverFullscreen": true,
+        "grouped": [],
+        "tags": [
+          "chromium-based-browser*",
+          "default-opacity*"
+        ],
+        "swallowing": "0x0",
+        "focusHistoryID": 0,
+        "inhibitingIdle": false,
+        "xdgTag": "",
+        "xdgDescription": "",
+        "contentType": "none",
+        "tearingHint": false,
+        "stableId": "18000028"
+      },
+      "compositorCapture": "/home/harkon666/Dev/experiment/Gurow/.harness/t43/platform-fullscreen/xwayland-vulkan-screen.png",
+      "consoleLog": [
+        "error: Failed to load resource: the server responded with a status of 404 ()",
+        "warn: Real WebGPU device lost: Device was destroyed."
+      ]
+    },
+    {
+      "name": "wayland-vulkan",
+      "flags": [
+        "--no-sandbox",
+        "--enable-unsafe-webgpu",
+        "--disable-dev-shm-usage",
+        "--use-angle=vulkan",
+        "--ozone-platform=wayland"
+      ],
+      "state": {
+        "configs": [
+          {
+            "format": "rgba8unorm",
+            "alphaMode": "opaque",
+            "usage": 16,
+            "viewFormats": [],
+            "width": 916,
+            "height": 468
+          },
+          {
+            "format": "rgba8unorm",
+            "alphaMode": "opaque",
+            "usage": 16,
+            "viewFormats": [],
+            "width": 916,
+            "height": 468
+          }
+        ],
+        "errors": [],
+        "adapters": [
+          {
+            "vendor": "nvidia",
+            "architecture": "lovelace",
+            "description": ""
+          }
+        ],
+        "badge": "WebGPU Rust Editor",
+        "labels": 4,
+        "canvas": {
+          "x": 0,
+          "y": 655.3333740234375,
+          "width": 611.3333740234375,
+          "height": 312,
+          "backingWidth": 916,
+          "backingHeight": 468,
+          "dpr": 1.5
+        }
+      },
+      "raw": {
+        "format": "rgba8unorm",
+        "width": 300,
+        "height": 200,
+        "scopedError": null,
+        "errors": []
+      },
+      "client": {
+        "address": "0x594840266860",
+        "mapped": true,
+        "hidden": false,
+        "visible": true,
+        "acceptsInput": true,
+        "at": [
+          647,
+          38
+        ],
+        "size": [
+          621,
+          750
+        ],
+        "workspace": {
+          "id": 1,
+          "name": "1"
+        },
+        "floating": false,
+        "monitor": 0,
+        "class": "chromium",
+        "title": "Gurow - Chromium",
+        "initialClass": "chromium",
+        "initialTitle": "about:blank - Chromium",
+        "pid": 492303,
+        "xwayland": false,
+        "pinned": false,
+        "pinFullscreened": false,
+        "fullscreen": 0,
+        "fullscreenClient": 0,
+        "fullscreenHandler": "default",
+        "allowedOverFullscreen": true,
+        "grouped": [],
+        "tags": [
+          "chromium-based-browser*",
+          "default-opacity*"
+        ],
+        "swallowing": "0x0",
+        "focusHistoryID": 0,
+        "inhibitingIdle": false,
+        "xdgTag": "",
+        "xdgDescription": "",
+        "contentType": "none",
+        "tearingHint": false,
+        "stableId": "1800002b"
+      },
+      "compositorCapture": "/home/harkon666/Dev/experiment/Gurow/.harness/t43/platform-fullscreen/wayland-vulkan-screen.png",
+      "consoleLog": [
+        "error: Failed to load resource: the server responded with a status of 404 ()",
+        "warn: Real WebGPU device lost: Device was destroyed."
+      ]
+    }
+  ]
+}

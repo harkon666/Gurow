@@ -11,6 +11,7 @@
     "editor-lifecycle": {"cwd": "frontend", "argv": ["bun", "run", "scripts/editor-lifecycle-check.ts"], "timeout": 180},
     "t06-l3-01-qualify-v1": {"cwd": "frontend", "argv": ["bun", "run", "scripts/benchmark/qualify.ts", "--contract", "../docs/benchmarks/p1/protocol.json", "--out", "../.harness/t06/qualification"], "timeout": 600},
     "report-tests": {"cwd": "frontend", "argv": ["bun", "test", "scripts/benchmark/report.test.ts"], "timeout": 120},
+    "t43-gpu-errors": {"cwd": "frontend", "argv": ["bun", "run", "scripts/gpu-error-check.ts"], "timeout": 180},
     "t06-l3-03-capture-tests": {"cwd": "frontend", "argv": ["bun", "test", "scripts/benchmark/scenarios.test.ts", "scripts/benchmark/run.test.ts", "scripts/benchmark/report.test.ts", "src/components/editor/benchmarkHooks.test.ts", "src/components/editor/wheelCoalescer.test.ts"], "timeout": 120},
     "t06-l3-02-fixture-check": {"cwd": "frontend", "argv": ["bun", "run", "scripts/benchmark/fixture-check.ts", "--contract", "../docs/benchmarks/p1/protocol-v4.json", "--out", "../.harness/t06/fixtures"], "timeout": 900}
   },
@@ -24,6 +25,7 @@
     "T06-L3-01": ["collector-tests", "editor-lifecycle"],
     "T06-L3-02": ["collector-tests", "t06-l3-02-fixture-check"],
     "T06-L3-04": ["report-tests"],
-    "T06-L3-03": ["t06-l3-03-capture-tests", "frontend-types"]
+    "T06-L3-03": ["t06-l3-03-capture-tests", "frontend-types"],
+    "T06-L3-09": ["t43-gpu-errors", "t05-browser", "editor-lifecycle"]
   }
 }

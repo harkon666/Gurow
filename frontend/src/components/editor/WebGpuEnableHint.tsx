@@ -8,6 +8,8 @@ export function WebGpuEnableHint() {
       <strong className="text-slate-300">WebGPU unavailable:</strong> use a browser with WebGPU
       support and check that hardware acceleration is enabled. In Chromium, inspect{' '}
       <code className="text-emerald-300">chrome://gpu</code> for GPU status and diagnostics.
+      On Linux/NVIDIA, native Wayland may fail to render even when WebGPU is available;
+      use the documented Chromium XWayland configuration. The Skill list and Tasks remain usable.
     </div>
   )
 }

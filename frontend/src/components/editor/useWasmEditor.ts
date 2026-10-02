@@ -27,43 +27,7 @@ import {
   type LabelRevision,
 } from './benchmarkHooks'
 
-// Install WebGPU device hook to observe real hardware/software device loss (ADR-0017 / Spec 2)
-if (typeof window !== 'undefined') {
-  const setupDeviceCapture = () => {
-    if ('GPUAdapter' in window && (window as any).GPUAdapter?.prototype) {
-      const proto = (window as any).GPUAdapter.prototype
-      if (!proto.__gurowWrapped) {
-        const origRequestDevice = proto.requestDevice
-        proto.requestDevice = async function (...args: any[]) {
-          const device = await origRequestDevice.apply(this, args)
-          window.dispatchEvent(new CustomEvent('gurow:gpu-device-created', { detail: { device } }))
-          return device
-        }
-        proto.__gurowWrapped = true
-      }
-    }
-    if ('navigator' in window && (navigator as any).gpu) {
-      const origRequestAdapter = (navigator as any).gpu.requestAdapter
-      if (origRequestAdapter && !(navigator as any).gpu.__gurowWrapped) {
-        (navigator as any).gpu.requestAdapter = async function (...args: any[]) {
-          const adapter = await origRequestAdapter.apply(this, args)
-          if (adapter && !adapter.__gurowWrapped) {
-            const origReqDevice = adapter.requestDevice
-            adapter.requestDevice = async function (...devArgs: any[]) {
-              const device = await origReqDevice.apply(this, devArgs)
-              window.dispatchEvent(new CustomEvent('gurow:gpu-device-created', { detail: { device } }))
-              return device
-            }
-            adapter.__gurowWrapped = true
-          }
-          return adapter
-        }
-        ;(navigator as any).gpu.__gurowWrapped = true
-      }
-    }
-  }
-  setupDeviceCapture()
-}
+import { beginGpuAttempt, retireGpuAttempt } from './gpuDeviceCapture'
 
 interface UseWasmEditorOptions {
   canvasRef: React.RefObject<HTMLCanvasElement | null>
@@ -100,6 +64,18 @@ export function useWasmEditor({
 }: UseWasmEditorOptions) {
   const editorRef = useRef<WasmEditor | null>(null)
   const activeDeviceRef = useRef<any>(null)
+  const gpuAttemptRef = useRef<number | null>(null)
+  const deviceObservationRef = useRef<{
+    device: any
+    failure: string | null
+    checking: boolean
+    removeListener: () => void
+  } | null>(null)
+  const rendererSetupRef = useRef(true)
+  // One automatic attempt until a healthy renderer handles fresh user input.
+  // A replacement that immediately fails must never start a recreation loop.
+  const automaticRecoveryArmedRef = useRef(true)
+  const gpuFailureRef = useRef<(message: string) => void>(() => {})
   const recoveryInFlightRef = useRef(false)
   const recoverRef = useRef<(() => Promise<boolean>) | null>(null)
   const [isRecovering, setIsRecovering] = useState(false)
@@ -141,36 +117,74 @@ export function useWasmEditor({
     return () => cancelAnimationFrame(frame)
   }, [])
 
-  // Listen for created GPUDevices and attach real device.lost handlers (Spec 2)
+  const retireDevice = useCallback(() => {
+    const device = activeDeviceRef.current
+    retireGpuAttempt(gpuAttemptRef.current)
+    gpuAttemptRef.current = null
+    deviceObservationRef.current?.removeListener()
+    deviceObservationRef.current = null
+    if ((window as any).__gurowActiveDevice === device) {
+      ;(window as any).__gurowActiveDevice = null
+    }
+    activeDeviceRef.current = null
+    // Release old GPU allocations as well as listeners. Its lost promise is
+    // harmless after clearing the observation identity above.
+    device?.destroy()
+  }, [])
+
+  // Browser errors can arrive after render() returned Ok, with no later input.
+  // Scopes cover only creation/attachment, never the timed command/render path.
   useEffect(() => {
     let listening = true
     const handleDeviceCreated = (e: any) => {
       const device = e.detail?.device
-      if (!device) return
+      if (!device || e.detail?.attempt !== gpuAttemptRef.current || activeDeviceRef.current === device) return
+      // One device per owned attempt. Never retire the active device in response
+      // to an arrival event; replacement is initiated by the owner explicitly.
+      if (activeDeviceRef.current) { device.destroy(); return }
       activeDeviceRef.current = device
       ;(window as any).__gurowActiveDevice = device
-
+      const fail = (message: string) => {
+        if (!listening || deviceObservationRef.current !== observation) return
+        observation.failure ??= message
+        if (!observation.checking && !rendererSetupRef.current) gpuFailureRef.current(message)
+      }
+      const uncaptured = (event: any) => {
+        fail(`WebGPU ${event.error?.constructor?.name || 'device error'}: ${event.error?.message || 'Unknown GPU error'}`)
+      }
+      const observation = {
+        device, failure: null as string | null, checking: true,
+        removeListener: () => device.removeEventListener('uncapturederror', uncaptured),
+      }
+      deviceObservationRef.current = observation
+      device.addEventListener('uncapturederror', uncaptured)
+      device.pushErrorScope('out-of-memory')
+      device.pushErrorScope('internal')
+      device.pushErrorScope('validation')
       device.lost?.then((info: any) => {
-        if (listening && activeDeviceRef.current === device) {
-          activeDeviceRef.current = null
-          const reason = info?.reason || 'destroyed'
-          const msg = info?.message || `WebGPU device lost (${reason})`
-          console.warn('Real WebGPU device lost:', msg)
-          if (editorRef.current) {
-            editorRef.current.simulate_device_loss()
-          }
-          setGpuStatus('error')
-          setErrorMessage(`WebGPU device lost: ${msg}. Document and tasks preserved.`)
-          void recoverRef.current?.()
-        }
+        fail(`WebGPU device lost: ${info?.message || info?.reason || 'Unknown reason'}`)
       })
     }
-
     window.addEventListener('gurow:gpu-device-created', handleDeviceCreated)
     return () => {
       listening = false
       window.removeEventListener('gurow:gpu-device-created', handleDeviceCreated)
+      retireDevice()
     }
+  }, [retireDevice])
+
+  const checkRendererSetup = useCallback(async () => {
+    const observation = deviceObservationRef.current
+    if (!observation) throw new Error('WebGPU device was not observed during renderer setup.')
+    // Pop all scopes immediately (LIFO), then await their results. This neither
+    // waits for queue completion nor reads back pixels.
+    const results = await Promise.all([
+      observation.device.popErrorScope(), observation.device.popErrorScope(), observation.device.popErrorScope(),
+    ])
+    observation.checking = false
+    if (deviceObservationRef.current !== observation) throw new Error('Renderer device was retired during setup.')
+    const failure = observation.failure || results.find(error => error)?.message
+    if (failure) throw new Error(failure)
   }, [])
 
   const onSelectionChangedRef = useRef(onSelectionChanged)
@@ -243,9 +257,13 @@ export function useWasmEditor({
           setGpuStatus('error')
           setErrorMessage(event.message)
           setEngineError(event.message)
-          if (!recoveryInFlightRef.current) {
-            editorRef.current?.simulate_device_loss()
+          editorRef.current?.simulate_device_loss()
+          retireDevice()
+          if (!rendererSetupRef.current && !recoveryInFlightRef.current && automaticRecoveryArmedRef.current) {
+            automaticRecoveryArmedRef.current = false
             void recoverRef.current?.()
+          } else if (!rendererSetupRef.current && !recoveryInFlightRef.current) {
+            setRecoveryError('Renderer failed again. Retry when the GPU is available, or continue using the Skill list.')
           }
           break
         case 'Error':
@@ -255,7 +273,14 @@ export function useWasmEditor({
           break
       }
     }
-  }, [])
+  }, [retireDevice])
+
+  gpuFailureRef.current = (message: string) => {
+    const editor = editorRef.current
+    if (!editor) return
+    const events = EditorEventsSchema.parse(JSON.parse(editor.report_renderer_error(message)))
+    handleEvents(events, undefined)
+  }
 
   // Single consolidated command dispatch helper (Matt Pocock SDD)
   const dispatchInternal = useCallback(
@@ -282,6 +307,9 @@ export function useWasmEditor({
       }
 
       try {
+        if (!rendererSetupRef.current && !recoveryInFlightRef.current && editor.is_renderer_active()) {
+          automaticRecoveryArmedRef.current = true
+        }
         dispatchInternal(editor, cmd)
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err)
@@ -369,13 +397,18 @@ export function useWasmEditor({
         canvas.width = bufferSize.width
         canvas.height = bufferSize.height
 
-        const editor = await wasmModule.WasmEditor.create(canvas)
+        const attempt = beginGpuAttempt()
+        gpuAttemptRef.current = attempt
+        const editor = await wasmModule.WasmEditor.create(canvas, attempt)
         if (!active) {
           editor.free()
           return
         }
 
         initializeEditor(editor)
+        await checkRendererSetup()
+        if (!active) return
+        rendererSetupRef.current = false
 
         setGpuStatus('ready')
         if (typeof window !== 'undefined') {
@@ -385,15 +418,16 @@ export function useWasmEditor({
         const msg = err instanceof Error ? err.message : String(err)
         console.error('WebGPU editor initialization failed:', err)
         if (active) {
-          // Fallback to headless CPU editor state on WebGPU initialization failure
-          try {
+          // If creation completed, retain that same CPU state/history. Otherwise
+          // initialize a CPU editor so late document data and the list still work.
+          if (!editorRef.current) {
             const fallbackEditor = wasmModule.WasmEditor.create_headless()
             initializeEditor(fallbackEditor)
-          } catch {
-            // ignore fallback errors
           }
-          setGpuStatus('error')
-          setErrorMessage(msg)
+          gpuFailureRef.current(msg)
+          rendererSetupRef.current = false
+          automaticRecoveryArmedRef.current = false
+          setRecoveryError(`Renderer initialization failed: ${msg}`)
         }
       }
     }
@@ -402,6 +436,7 @@ export function useWasmEditor({
 
     return () => {
       active = false
+      retireDevice()
       if (editorRef.current) {
         try {
           editorRef.current.free()
@@ -416,7 +451,7 @@ export function useWasmEditor({
     // wasm-bindgen reports as "FnOnce called more than once" and leaves the
     // editor dead with an empty canvas. The document is applied by the effect
     // below instead.
-  }, [canvasRef, containerRef, initializeEditor])
+  }, [canvasRef, containerRef, initializeEditor, checkRendererSetup, retireDevice])
 
   // Late data uses the same application path without recreating the renderer.
   // LoadDocument clears Rust history; skipping already-applied identities is
@@ -747,12 +782,19 @@ export function useWasmEditor({
     }
 
     recoveryInFlightRef.current = true
+    rendererSetupRef.current = true
+    automaticRecoveryArmedRef.current = false
+    retireDevice()
+    editor.simulate_device_loss()
     setIsRecovering(true)
     setRecoveryError(null)
     try {
       const wasmModule = await import('../../pkg/editor_wasm.js')
+      if (editorRef.current !== editor) return false
       // Asynchronously build renderer without borrowing editor (Spec 1: prevents unsafe aliasing)
-      const handle = await wasmModule.create_renderer_handle(canvas)
+      const attempt = beginGpuAttempt()
+      gpuAttemptRef.current = attempt
+      const handle = await wasmModule.create_renderer_handle(canvas, attempt)
       if (editorRef.current !== editor) {
         handle.free()
         return false
@@ -760,12 +802,7 @@ export function useWasmEditor({
       // Synchronously attach renderer and redraw current document state (including recovery edits)
       editor.attach_renderer(handle, canvas)
 
-      setGpuStatus('ready')
-      setErrorMessage(null)
-      setRecoveryError(null)
-      setEngineError(null)
-
-      // Sync viewport dimensions after recreation
+      // Sync viewport dimensions after recreation, still inside setup scopes.
       const container = containerRef.current
       if (container) {
         const cssWidth = container.clientWidth || 800
@@ -776,19 +813,26 @@ export function useWasmEditor({
           height: cssHeight,
         })
       }
+      await checkRendererSetup()
+      if (editorRef.current !== editor) return false
+      setGpuStatus('ready')
+      setErrorMessage(null)
+      setRecoveryError(null)
+      setEngineError(null)
       return true
     } catch (err: unknown) {
       if (editorRef.current !== editor) return false
       const msg = err instanceof Error ? err.message : String(err)
       console.error('Renderer recreation failed:', err)
-      setGpuStatus('error')
+      gpuFailureRef.current(msg)
       setRecoveryError(`Renderer recovery failed: ${msg}`)
       return false
     } finally {
       recoveryInFlightRef.current = false
+      rendererSetupRef.current = false
       if (editorRef.current === editor) setIsRecovering(false)
     }
-  }, [canvasRef, containerRef, dispatchInternal])
+  }, [canvasRef, containerRef, dispatchInternal, checkRendererSetup, retireDevice])
   recoverRef.current = recreateRenderer
 
   return {

@@ -1,0 +1,322 @@
+{
+  "capturedAt": "2026-10-02T12:30:26.986Z",
+  "sourceCommit": "999538a42c629d04489910cb48d5aaefecc3e812",
+  "buildHash": "d4f2fbe7e828438e2bd4d45976180a7366ea181b158657d2a80d214f7b4dd29c",
+  "browser": "Chromium 152.0.7977.82 Arch Linux",
+  "results": [
+    {
+      "name": "wayland-default",
+      "flags": [
+        "--no-sandbox",
+        "--enable-unsafe-webgpu",
+        "--disable-dev-shm-usage",
+        "--enable-features=Vulkan",
+        "--use-gl=angle",
+        "--ozone-platform=wayland"
+      ],
+      "actualLaunchArgs": [
+        "/usr/bin/chromium",
+        "--allow-pre-commit-input",
+        "--disable-background-networking",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-breakpad",
+        "--disable-client-side-phishing-detection",
+        "--disable-component-extensions-with-background-pages",
+        "--disable-crash-reporter",
+        "--disable-default-apps",
+        "--disable-dev-shm-usage",
+        "--disable-hang-monitor",
+        "--disable-infobars",
+        "--disable-ipc-flooding-protection",
+        "--disable-popup-blocking",
+        "--disable-prompt-on-repost",
+        "--disable-renderer-backgrounding",
+        "--disable-search-engine-choice-screen",
+        "--disable-sync",
+        "--enable-automation",
+        "--export-tagged-pdf",
+        "--force-color-profile=srgb",
+        "--generate-pdf-document-outline",
+        "--metrics-recording-only",
+        "--no-first-run",
+        "--password-store=basic",
+        "--use-mock-keychain",
+        "--disable-features=Translate,AcceptCHFrame,MediaRouter,OptimizationHints,WebUIReloadButton,WebUIOmniboxPopup,WebUIOmniboxAimPopup,ProcessPerSiteUpToMainFrameThreshold,IsolateSandboxedIframes",
+        "--enable-features=PdfOopif,Vulkan",
+        "--user-data-dir=/home/harkon666/Dev/experiment/Gurow/.harness/t43/platform-reviewed/profile-wayland-default",
+        "--disable-extensions",
+        "about:blank",
+        "--no-sandbox",
+        "--enable-unsafe-webgpu",
+        "--disable-dev-shm-usage",
+        "--use-gl=angle",
+        "--ozone-platform=wayland",
+        "--remote-debugging-port=0"
+      ],
+      "state": {
+        "configs": [
+          {
+            "format": "rgba8unorm",
+            "alphaMode": "opaque",
+            "usage": 16,
+            "viewFormats": [],
+            "width": 800,
+            "height": 312
+          },
+          {
+            "format": "rgba8unorm",
+            "alphaMode": "opaque",
+            "usage": 16,
+            "viewFormats": [],
+            "width": 800,
+            "height": 312
+          }
+        ],
+        "errors": [],
+        "adapters": [
+          {
+            "vendor": "nvidia",
+            "architecture": "lovelace",
+            "description": ""
+          }
+        ],
+        "badge": "WebGPU Rust Editor",
+        "notice": "Renderer Failure / Device LostRenderer error: Requested allocation size (1024000) is smaller than the image requires (1228800).\n    at ImportMemory (../../third_party/dawn/src/dawn/native/vulkan/external_memory/MemoryServiceImplementationOpaqueFD.cpp:132)\n. Document and tasks preserved.WebGPU unavailable: use a browser with WebGPU support and check that hardware acceleration is enabled. In Chromium, inspect chrome://gpu for GPU status and diagnostics. On Linux/NVIDIA, native Wayland may fail to render even when WebGPU is available; use the documented Chromium XWayland configuration. The Skill list and Tasks remain usable.Recovery Failed: Renderer initialization failed: Requested allocation size (1024000) is smaller than the image requires (1228800).\n    at ImportMemory (../../third_party/dawn/src/dawn/native/vulkan/external_memory/MemoryServiceImplementationOpaqueFD.cpp:132)\nRetry Renderer RecreationList navigation and Task editing remain available during renderer interruption.",
+        "labels": 4,
+        "canvas": {
+          "x": 0,
+          "y": 655.3333740234375,
+          "width": 611.3333740234375,
+          "height": 312,
+          "backingWidth": 800,
+          "backingHeight": 312,
+          "dpr": 1.5
+        }
+      },
+      "navigation": {
+        "firstSkill": "skill-rust-basics",
+        "lastSkill": "skill-concurrency",
+        "tasksAvailable": true
+      },
+      "retry": {
+        "notice": "Renderer Failure / Device LostRenderer error: Requested allocation size (1024000) is smaller than the image requires (1228800).\n    at ImportMemory (../../third_party/dawn/src/dawn/native/vulkan/external_memory/MemoryServiceImplementationOpaqueFD.cpp:132)\n. Document and tasks preserved.WebGPU unavailable: use a browser with WebGPU support and check that hardware acceleration is enabled. In Chromium, inspect chrome://gpu for GPU status and diagnostics. On Linux/NVIDIA, native Wayland may fail to render even when WebGPU is available; use the documented Chromium XWayland configuration. The Skill list and Tasks remain usable.Recovery Failed: Renderer recovery failed: Requested allocation size (1024000) is smaller than the image requires (1228800).\n    at ImportMemory (../../third_party/dawn/src/dawn/native/vulkan/external_memory/MemoryServiceImplementationOpaqueFD.cpp:132)\nRetry Renderer RecreationList navigation and Task editing remain available during renderer interruption.",
+        "retryEnabled": true,
+        "selectedSkill": "skill-concurrency",
+        "labels": 4,
+        "deviceCount": 2
+      },
+      "raw": {
+        "format": "rgba8unorm",
+        "width": 300,
+        "height": 200,
+        "scopedError": "Requested allocation size (286720) is smaller than the image requires (311296).\n    at ImportMemory (../../third_party/dawn/src/dawn/native/vulkan/external_memory/MemoryServiceImplementationOpaqueFD.cpp:132)\n",
+        "errors": []
+      },
+      "client": {
+        "address": "0x594840343f50",
+        "mapped": true,
+        "hidden": false,
+        "visible": true,
+        "acceptsInput": true,
+        "at": [
+          647,
+          38
+        ],
+        "size": [
+          621,
+          750
+        ],
+        "workspace": {
+          "id": 1,
+          "name": "1"
+        },
+        "floating": false,
+        "monitor": 0,
+        "class": "chromium",
+        "title": "Gurow - Chromium",
+        "initialClass": "chromium",
+        "initialTitle": "Gurow - Chromium",
+        "pid": 558252,
+        "xwayland": false,
+        "pinned": false,
+        "pinFullscreened": false,
+        "fullscreen": 0,
+        "fullscreenClient": 0,
+        "fullscreenHandler": "default",
+        "allowedOverFullscreen": true,
+        "grouped": [],
+        "tags": [
+          "chromium-based-browser*"
+        ],
+        "swallowing": "0x0",
+        "focusHistoryID": 0,
+        "inhibitingIdle": false,
+        "xdgTag": "",
+        "xdgDescription": "",
+        "contentType": "none",
+        "tearingHint": false,
+        "stableId": "1800004f"
+      },
+      "compositorCapture": "/home/harkon666/Dev/experiment/Gurow/.harness/t43/platform-reviewed/wayland-default-screen.png",
+      "consoleLog": [
+        "error: Failed to load resource: the server responded with a status of 404 ()",
+        "error: WebGPU editor initialization failed: Error: Requested allocation size (1024000) is smaller than the image requires (1228800).",
+        "error: Renderer recreation failed: Error: Requested allocation size (1024000) is smaller than the image requires (1228800)."
+      ]
+    },
+    {
+      "name": "xwayland-vulkan",
+      "flags": [
+        "--no-sandbox",
+        "--enable-unsafe-webgpu",
+        "--disable-dev-shm-usage",
+        "--enable-features=Vulkan,DefaultANGLEVulkan,VulkanFromANGLE",
+        "--use-angle=vulkan",
+        "--ozone-platform=x11"
+      ],
+      "actualLaunchArgs": [
+        "/usr/bin/chromium",
+        "--allow-pre-commit-input",
+        "--disable-background-networking",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-breakpad",
+        "--disable-client-side-phishing-detection",
+        "--disable-component-extensions-with-background-pages",
+        "--disable-crash-reporter",
+        "--disable-default-apps",
+        "--disable-dev-shm-usage",
+        "--disable-hang-monitor",
+        "--disable-infobars",
+        "--disable-ipc-flooding-protection",
+        "--disable-popup-blocking",
+        "--disable-prompt-on-repost",
+        "--disable-renderer-backgrounding",
+        "--disable-search-engine-choice-screen",
+        "--disable-sync",
+        "--enable-automation",
+        "--export-tagged-pdf",
+        "--force-color-profile=srgb",
+        "--generate-pdf-document-outline",
+        "--metrics-recording-only",
+        "--no-first-run",
+        "--password-store=basic",
+        "--use-mock-keychain",
+        "--disable-features=Translate,AcceptCHFrame,MediaRouter,OptimizationHints,WebUIReloadButton,WebUIOmniboxPopup,WebUIOmniboxAimPopup,ProcessPerSiteUpToMainFrameThreshold,IsolateSandboxedIframes",
+        "--enable-features=PdfOopif,Vulkan,DefaultANGLEVulkan,VulkanFromANGLE",
+        "--user-data-dir=/home/harkon666/Dev/experiment/Gurow/.harness/t43/platform-reviewed/profile-xwayland-vulkan",
+        "--disable-extensions",
+        "about:blank",
+        "--no-sandbox",
+        "--enable-unsafe-webgpu",
+        "--disable-dev-shm-usage",
+        "--use-angle=vulkan",
+        "--ozone-platform=x11",
+        "--remote-debugging-port=0"
+      ],
+      "state": {
+        "configs": [
+          {
+            "format": "rgba8unorm",
+            "alphaMode": "opaque",
+            "usage": 16,
+            "viewFormats": [],
+            "width": 356,
+            "height": 890
+          },
+          {
+            "format": "rgba8unorm",
+            "alphaMode": "opaque",
+            "usage": 16,
+            "viewFormats": [],
+            "width": 356,
+            "height": 890
+          }
+        ],
+        "errors": [],
+        "adapters": [
+          {
+            "vendor": "nvidia",
+            "architecture": "lovelace",
+            "description": ""
+          }
+        ],
+        "badge": "WebGPU Rust Editor",
+        "labels": 4,
+        "canvas": {
+          "x": 256,
+          "y": 92,
+          "width": 356,
+          "height": 890,
+          "backingWidth": 356,
+          "backingHeight": 890,
+          "dpr": 1
+        }
+      },
+      "navigation": {
+        "firstSkill": "skill-rust-basics",
+        "lastSkill": "skill-concurrency",
+        "tasksAvailable": true
+      },
+      "retry": null,
+      "raw": {
+        "format": "rgba8unorm",
+        "width": 300,
+        "height": 200,
+        "scopedError": null,
+        "errors": []
+      },
+      "client": {
+        "address": "0x5948402f0400",
+        "mapped": true,
+        "hidden": false,
+        "visible": true,
+        "acceptsInput": true,
+        "at": [
+          647,
+          38
+        ],
+        "size": [
+          621,
+          750
+        ],
+        "workspace": {
+          "id": 1,
+          "name": "1"
+        },
+        "floating": false,
+        "monitor": 0,
+        "class": "Chromium",
+        "title": "Gurow - Chromium",
+        "initialClass": "Chromium",
+        "initialTitle": "Untitled - Chromium",
+        "pid": 558596,
+        "xwayland": true,
+        "pinned": false,
+        "pinFullscreened": false,
+        "fullscreen": 0,
+        "fullscreenClient": 0,
+        "fullscreenHandler": "default",
+        "allowedOverFullscreen": true,
+        "grouped": [],
+        "tags": [
+          "chromium-based-browser*",
+          "default-opacity*"
+        ],
+        "swallowing": "0x0",
+        "focusHistoryID": 0,
+        "inhibitingIdle": false,
+        "xdgTag": "",
+        "xdgDescription": "",
+        "contentType": "none",
+        "tearingHint": false,
+        "stableId": "18000053"
+      },
+      "compositorCapture": "/home/harkon666/Dev/experiment/Gurow/.harness/t43/platform-reviewed/xwayland-vulkan-screen.png",
+      "consoleLog": [
+        "error: Failed to load resource: the server responded with a status of 404 ()"
+      ]
+    }
+  ]
+}
