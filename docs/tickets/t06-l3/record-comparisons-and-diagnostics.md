@@ -1,5 +1,7 @@
 # T06-L3-05 — Record comparison workloads and explain benchmark resource costs
 
+> **Superseded in part by [ADR 0020](../../adr/0020-right-size-the-p1-gate-for-the-mvp.md) (2026-10-02).** Closed as not planned; kept for reference.
+
 Status: approved execution packet, published as [#38](https://github.com/harkon666/Gurow/issues/38); implementation pending. Revised 2026-09-30 for contract `gurow-p1-v4`. Parent: [#7](https://github.com/harkon666/Gurow/issues/7). Contract: [gurow-p1-v4](../../benchmarks/p1/contract.md).
 
 Executor recommendation: **Flash candidate**. Blocked by: **T06-L3-03, T06-L3-04**. Parent coverage: AC3, AC4, AC5. User stories: US80, US84.

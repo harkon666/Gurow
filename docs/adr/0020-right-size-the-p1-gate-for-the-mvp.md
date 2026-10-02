@@ -1,0 +1,5 @@
+# Right-size the P1 gate for the MVP
+
+The P1 responsiveness gate keeps the 20 ms frame-time and 50 ms input-to-frame p95 limits and the in-app measurement method of ADR 0019, but it gates on a realistic Learning Path of 300 cards and 600 connections. The 1,000-card workload is recorded as informational only. Performance work is timeboxed (5 working days, ending 2026-10-09). If the gate still fails at the end, the result triggers a design reassessment of the editor engine rather than more instrumentation. P2 no longer waits for the P1 gate, because the learning domain and backend are independent of the editor engine (ADR 0015).
+
+The original gate (1,000 cards, 100/10,000 comparisons, resource diagnostics, fail-closed harness and independent decision review) was sized like a release gate for a mature product. It produced more measurement code than product code and blocked all learning-domain work behind canvas performance. Comparisons and diagnostics are deferred until there is a real capacity question.

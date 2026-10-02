@@ -2,15 +2,15 @@
 
 This records the accepted testing strategy and initial benchmark targets. These are planned checks, not completed tests or demonstrated product capacity. The agreed scopes and acceptance criteria for P1 and P2 are in [PROTOTYPE_PLAN.md](PROTOTYPE_PLAN.md).
 
-The concrete T06 measurement design is in the [P1 benchmark contract](benchmarks/p1/contract.md), with [L3 execution packets](tickets/t06-l3/README.md). Contract `gurow-p1-v4` ([ADR 0019](adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md)) fixes the environment record, workload, in-app metrics, sampling and reporting rules; it replaced the stricter `gurow-p1-v1` presentation-collector/optical design on 2026-09-30. Benchmark execution is still outstanding; the L3 breakdown is published as sub-issues #34–#40. These documents do not establish that P1 has passed.
+The concrete T06 measurement design is in the [P1 benchmark contract](benchmarks/p1/contract.md), with [L3 execution packets](tickets/t06-l3/README.md). Contract `gurow-p1-v4` ([ADR 0019](adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md)) fixes the environment record, workload, in-app metrics, sampling and reporting rules; it replaced the stricter `gurow-p1-v1` presentation-collector/optical design on 2026-09-30. [ADR 0020](adr/0020-right-size-the-p1-gate-for-the-mvp.md) keeps that method and the 20 ms / 50 ms limits but gates on 300 cards, timeboxes the performance work, and defers comparisons and resource diagnostics. The first 1,000-card capture failed (#37); #39 and #42 remain open. These documents do not establish that P1 has passed.
 
 ## Reference environment and workloads
 
 Record the reference device and its CPU, RAM, GPU, operating system, browser, viewport, device pixel ratio, and display refresh rate before measuring. Use a fixed, recorded configuration for comparisons and identify the fixture and interaction sequence used.
 
-The primary workload has 1,000 Skill cards, approximately 200 visible cards, and 2,000 total Prerequisite connections. Record the actual visible card, label, and connection counts during the sequence. Workloads with 100 and 10,000 cards provide comparisons; the 10,000-card case is exploratory rather than a promised capacity target.
+The gate workload has 300 Skill cards, roughly 150–250 visible cards, and 600 Prerequisite connections. Record the actual visible card, label, and connection counts during the sequence. A 1,000-card / 2,000-connection run is recorded as informational with no pass threshold. Comparisons at 100 and 10,000 cards are deferred (ADR 0020).
 
-For the primary workload during pan, zoom, and drag, the initial targets are:
+For the gate workload during pan, zoom, and drag, the initial targets are:
 
 | Metric | Target |
 | --- | --- |

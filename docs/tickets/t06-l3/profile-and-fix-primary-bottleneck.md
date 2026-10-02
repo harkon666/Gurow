@@ -1,5 +1,7 @@
 # T06-L3-08 — Profile the primary pan, zoom and drag path and fix the measured bottleneck
 
+> **Superseded in part by [ADR 0020](../../adr/0020-right-size-the-p1-gate-for-the-mvp.md) (2026-10-02).** The published issue body (`profile-and-fix-primary-bottleneck.issue.md`) is authoritative where this packet conflicts with it.
+
 Status: approved execution packet, published as [#42](https://github.com/harkon666/Gurow/issues/42); implementation pending. Parent: [#7](https://github.com/harkon666/Gurow/issues/7). Contract: [gurow-p1-v4](../../benchmarks/p1/contract.md).
 
 Executor recommendation: **Strong model for profiling, then bounded fixes with independent review**. Blocked by: **T06-L3-03**. Parent coverage: AC2, AC5. User stories: US80, US84.

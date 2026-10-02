@@ -1,5 +1,7 @@
 # T06-L3-06 — Exercise the complete P1 flow and wire T06 acceptance into the harness
 
+> **Superseded in part by [ADR 0020](../../adr/0020-right-size-the-p1-gate-for-the-mvp.md) (2026-10-02).** The published issue body (`integrate-functional-and-gate-checks.issue.md`) is authoritative where this packet conflicts with it.
+
 Status: approved execution packet, published as [#39](https://github.com/harkon666/Gurow/issues/39); implementation pending. Revised 2026-09-30 for contract `gurow-p1-v4`. Parent: [#7](https://github.com/harkon666/Gurow/issues/7). Contract: [gurow-p1-v4](../../benchmarks/p1/contract.md).
 
 Executor recommendation: **Flash candidate with independent acceptance review**. Blocked by: **T06-L3-05**. Parent coverage: AC1, AC2, AC3, AC4, AC5. User stories: US80, US82, US83, US84.

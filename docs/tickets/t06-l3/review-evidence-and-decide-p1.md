@@ -1,5 +1,7 @@
 # T06-L3-07 — Review the evidence and decide the P1 gate without hiding failures
 
+> **Superseded in part by [ADR 0020](../../adr/0020-right-size-the-p1-gate-for-the-mvp.md) (2026-10-02).** Closed as not planned; the gate decision is a checklist comment on #7.
+
 Status: approved execution packet, published as [#40](https://github.com/harkon666/Gurow/issues/40); implementation pending. Revised 2026-09-30 for contract `gurow-p1-v4`. Parent: [#7](https://github.com/harkon666/Gurow/issues/7). Contract: [gurow-p1-v4](../../benchmarks/p1/contract.md).
 
 Executor recommendation: **Strong independent reviewer / integrator**. Blocked by: **T06-L3-06**. Parent coverage: AC1, AC2, AC3, AC4, AC5. User stories: US80, US82, US83, US84.

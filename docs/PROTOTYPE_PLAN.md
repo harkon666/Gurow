@@ -1,6 +1,6 @@
 # Gurow prototype plan
 
-Status: design and prototype scopes agreed through Q82. Implementation and benchmark results are not yet available. The first implementation target is P1; P2 follows after its acceptance criteria pass.
+Status: design and prototype scopes agreed through Q82. Implementation and benchmark results are not yet available. The first implementation target is P1; P2 runs in parallel with the timeboxed P1 performance work ([ADR 0020](adr/0020-right-size-the-p1-gate-for-the-mvp.md)).
 
 The design baseline is recorded in [CONTEXT.md](../CONTEXT.md) and the [architectural decisions](adr/). The original research remains a source of implementation starting points; the agreed decisions take precedence where the discussion refined it.
 
@@ -63,12 +63,12 @@ All required P1 flow steps must work. The following checks make the result revie
 | Labels | HTML labels remain associated and aligned with their cards through selection, dragging, and camera changes |
 | Recovery | Exercising renderer failure does not discard the CPU-side document; recovery redraws it, or retry and list navigation remain available |
 | Keyboard/list path | The user can select a Skill and reach its sidebar Task through the list when the canvas is unavailable |
-| Frame time | On the primary workload, p95 is at most 20 ms during pan/zoom/drag |
-| Input response | On the primary workload, p95 input-to-frame latency (in-app proxy, [ADR 0019](adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md)) is at most 50 ms |
+| Frame time | On the gate workload, p95 is at most 20 ms during pan/zoom/drag |
+| Input response | On the gate workload, p95 input-to-frame latency (in-app proxy, [ADR 0019](adr/0019-measure-p1-responsiveness-with-frame-time-and-an-in-app-latency-proxy.md)) is at most 50 ms |
 
-The primary workload is 1,000 cards, approximately 200 visible cards, and 2,000 total connections. The reference environment, interaction sequence, visible counts, and measurement method must be reported as specified in [ENGINE_VALIDATION_PLAN.md](ENGINE_VALIDATION_PLAN.md). Workloads with 100 and 10,000 cards are comparisons; the latter is exploratory rather than a release-capacity promise.
+The gate workload is 300 cards, roughly 150–250 visible cards, and 600 connections ([ADR 0020](adr/0020-right-size-the-p1-gate-for-the-mvp.md)). The reference environment, interaction sequence, visible counts, and measurement method must be reported as specified in [ENGINE_VALIDATION_PLAN.md](ENGINE_VALIDATION_PLAN.md). A 1,000-card run is recorded as informational; 100- and 10,000-card comparisons are deferred. Neither is a capacity promise.
 
-Functional success without the performance results is not full P1 acceptance. If a required check fails, fix the prototype or reassess the relevant design choice before widening implementation. Changes to the agreed targets should be recorded explicitly, rather than reported as if the original targets passed.
+Functional success without the performance results is not full P1 acceptance. If a required check fails, fix the prototype or reassess the relevant design choice. Performance work is timeboxed to 2026-10-09; a gate that still fails then triggers a design reassessment of the editor engine. Changes to the agreed targets should be recorded explicitly, rather than reported as if the original targets passed.
 
 ## P2: learning-domain backend with PostgreSQL
 
@@ -101,7 +101,7 @@ PostgreSQL-backed integration results must demonstrate the intended effects unde
 
 | Risk or limit | Evidence or follow-up |
 | --- | --- |
-| HTML-label cost and alignment at scale | P1 exercises labels on the primary workload and records their visible count; reconsider the label strategy if it fails |
+| HTML-label cost and alignment at scale | P1 exercises labels on the gate workload and records their visible count; reconsider the label strategy if it fails |
 | JSON boundary overhead or excessive updates | Measure messages, payload sizes, and interaction timing before replacing the initial interface with a binary format |
 | WebGPU startup, device availability, and recovery | Test a real WebGPU browser and the separate failure/list paths; the exact reference device remains to be recorded |
 | Split editor/application state becoming inconsistent | The P1 save/restore check must preserve the graph and Task association without duplicating authority |
@@ -114,7 +114,7 @@ PostgreSQL-backed integration results must demonstrate the intended effects unde
 
 The supplied research supports central scene ownership through IDs, an explicit interaction state machine, distinct world/CSS/framebuffer coordinates, CPU bounding-box and curve-distance hit testing, and linear scanning before a measured need for an index. These are conservative starting points for implementation rather than measured performance results. Low-level graphics infrastructure is allowed; replacing the editor with a high-level editor library remains outside the agreed direction.
 
-Concrete package versions, GPU buffer and curve-tessellation choices, anti-aliasing, tracing details, local-storage schema mechanics, and the exact reference device are implementation follow-ups. Record initialization time, memory use, draw calls, and upload volume alongside the accepted latency gates; no pass thresholds for those additional diagnostics have been agreed yet.
+Concrete package versions, GPU buffer and curve-tessellation choices, anti-aliasing, tracing details, local-storage schema mechanics, and the exact reference device are implementation follow-ups. Initialization time, memory use, draw-call and upload diagnostics are deferred until there is a real capacity question (ADR 0020).
 
 Production authentication/email delivery, invitation expiry policy, detailed archive presentation and restoration, and broader account or Workspace lifecycle changes are outside the two narrow proofs. No time-based Mastery expiry has been agreed; prototypes exercise the explicitly defined correction and revocation rules. Product-facing wording such as "Skill Tree" may be refined in the UI while the domain continues to use Prerequisite Graph.
 
