@@ -121,17 +121,6 @@ impl Camera {
         )
     }
 
-    /// Projects a world-space rectangle into screen space.
-    pub fn world_rect_to_screen(&self, rect: Rect) -> Rect {
-        let top_left = self.world_to_screen(Point::new(rect.x, rect.y));
-        Rect::new(
-            top_left.x,
-            top_left.y,
-            rect.width * self.zoom,
-            rect.height * self.zoom,
-        )
-    }
-
     /// Moves the camera by a screen-space delta, then enforces world bounds.
     pub fn pan(&mut self, delta_x: f32, delta_y: f32) {
         self.offset_x += delta_x;

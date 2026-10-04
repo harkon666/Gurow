@@ -216,7 +216,7 @@ async function main() {
     console.log('✓ Initial Skill cards loaded in engine and labels rendered in DOM')
 
     // Verify initial cards in DOM (US68: one flat card per Skill)
-    const initialLabelIds = await page.$$eval('#labels-overlay > div', (elements: any[]) =>
+    const initialLabelIds = await page.$$eval('#labels-overlay [id^="card-label-"]', (elements: any[]) =>
       elements.map((el) => el.id)
     )
     console.log(`✓ Rendered label elements: [${initialLabelIds.join(', ')}]`)

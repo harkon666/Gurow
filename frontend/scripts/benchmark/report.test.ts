@@ -199,3 +199,30 @@ describe('P1 report-v4 SYNTHETIC reducer', () => {
     } finally { rmSync(directory,{recursive:true,force:true}) }
   })
 })
+describe('P1 report on contract gurow-p1-v5 (300-card gate, ADR 0020) SYNTHETIC', () => {
+  const v5 = readFileSync(resolve(import.meta.dir, '../../../docs/benchmarks/p1/protocol-v5.json'))
+  const p5 = JSON.parse(v5.toString()) as Protocol
+  const generated = generateBenchmarkFixture(parseBenchmarkContract(v5.toString()), 300, { canvasCss: { width: 1000, height: 600 } })
+  const primary = { ...fixtures[1000], cards: 300 as const, connections: 600, hash: generated.manifest.checkpoint_hash, geometry: generated.manifest.geometry,
+    manifest_path: 'manifest-300.json', checkpoint_path: 'checkpoint-300.json' }
+  function v5Manifest(): CaptureManifest {
+    const m = manifest()
+    m.identity = { ...m.identity, contract_id: p5.contract_id, contract_sha256: sha(v5) }
+    m.fixture = primary
+    m.comparison_fixtures = [fixtures[1000]]
+    const gate = (['pan', 'zoom', 'drag'] as const).flatMap(s => [1, 2, 3].map(i => ({ ...run(1000, s, i), id: `300-${s}-${i}`, cards: 300 as const, fixture_hash: primary.hash })))
+    m.runs = [...gate, ...m.runs.filter(r => r.cards === 1000 && r.repetition === 1)]
+    return m
+  }
+  it('gates the pooled 300-card primary and reduces 1,000 cards as a single-run comparison', () => {
+    const r = reduceReport(v5Manifest(), p5, v5)
+    expect(r.scenarios.map(s => [s.scenario, s.verdict, s.valid_runs])).toEqual([['pan', 'PASS', 3], ['zoom', 'PASS', 3], ['drag', 'PASS', 3]])
+    expect(r.comparisons.map(c => [c.cards, c.verdict])).toEqual([[1000, 'PASS']])
+    expect(r.metrics.verdict).toBe('PASS')
+  })
+  it('does not let v4 bytes, or a 1,000-card primary, stand in for the v5 gate', () => {
+    expect(reduceReport(v5Manifest(), p5, contract).metrics.reasons.some(x => x.startsWith('Contract/manifest schema'))).toBe(true)
+    const m = v5Manifest(); m.fixture = fixtures[1000]
+    expect(reduceReport(m, p5, v5).metrics.reasons).toContain('Primary fixture invalid.')
+  })
+})

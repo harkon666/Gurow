@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import type { WasmEditor } from '../../pkg/editor_wasm'
 import {
   EditorCommandSchema,
@@ -15,6 +15,7 @@ import {
 import type { GpuStatus, SelectedSkillInfo } from './types'
 import { getCanvasDpr, toCanvasBufferSize, cssToLogicalPoint } from './coords'
 import { WheelCoalescer, wheelCommand } from './wheelCoalescer'
+import { PointerMoveCoalescer } from './pointerMoveCoalescer'
 import {
   applyAppDelay,
   beginInput,
@@ -24,10 +25,19 @@ import {
   recordLabelUpdate,
   recordNoOpInput,
   sealBenchmarkCapture,
+  traceStage,
   type LabelRevision,
 } from './benchmarkHooks'
 
 import { beginGpuAttempt, retireGpuAttempt } from './gpuDeviceCapture'
+
+/**
+ * The camera of a freshly created engine (`Camera::default()` in engine-core).
+ * A new engine emits no CameraChanged for it, and emitting one on LoadDocument
+ * would persist this default as view state before SetCamera restores the saved
+ * camera, so the overlay starts each engine from this value instead.
+ */
+const ENGINE_INITIAL_CAMERA: CameraState = { offset_x: 0, offset_y: 0, zoom: 1 }
 
 interface UseWasmEditorOptions {
   canvasRef: React.RefObject<HTMLCanvasElement | null>
@@ -79,10 +89,13 @@ export function useWasmEditor({
   const recoveryInFlightRef = useRef(false)
   const recoverRef = useRef<(() => Promise<boolean>) | null>(null)
   const [isRecovering, setIsRecovering] = useState(false)
-  const [{ labels, benchmarkRevision }, setLabelState] = useState<{
+  // Labels and the camera that places them commit together, so one revision
+  // covers both whether a dispatch moved cards, the camera, or both.
+  const [{ labels, labelCamera, benchmarkRevision }, setLabelState] = useState<{
     labels: LabelLayout[]
+    labelCamera: CameraState
     benchmarkRevision?: LabelRevision
-  }>({ labels: [] })
+  }>({ labels: [], labelCamera: ENGINE_INITIAL_CAMERA })
   const [connections, setConnections] = useState<PrerequisiteConnection[]>([])
   const [connectionRejection, setConnectionRejection] = useState<string | null>(null)
   const [zoom, setZoom] = useState<number>(1.0)
@@ -96,6 +109,8 @@ export function useWasmEditor({
   // Wheel events are merged into at most one camera command per animation
   // frame; flushWheelRef is assigned once dispatch exists.
   const flushWheelRef = useRef<() => void>(() => {})
+  // Drag pointer moves are merged the same way: the latest position per frame.
+  const flushPointerMoveRef = useRef<() => void>(() => {})
 
   // The driver installs the hooks before navigation. The rAF loop exists only
   // for opt-in benchmark pages, never as an extra production render loop. It
@@ -110,6 +125,7 @@ export function useWasmEditor({
       // The endpoint is when this callback starts, read before its own work.
       const callbackMs = performance.now()
       flushWheelRef.current()
+      flushPointerMoveRef.current()
       recordBenchmarkFrame(timestamp, callbackMs)
       frame = requestAnimationFrame(tick)
     }
@@ -208,6 +224,8 @@ export function useWasmEditor({
   initialCameraRef.current = initialCamera
 
   const handleEvents = useCallback((events: EditorEvent[], appRevision: number | undefined) => {
+    let nextLabels: LabelLayout[] | undefined
+    let nextCamera: CameraState | undefined
     for (const event of events) {
       switch (event.type) {
         case 'SelectionChanged':
@@ -224,7 +242,7 @@ export function useWasmEditor({
           onOperationCompletedRef.current?.()
           break
         case 'LabelsUpdated':
-          setLabelState({ labels: event.labels, benchmarkRevision: recordLabelUpdate(appRevision) })
+          nextLabels = event.labels
           break
         case 'ConnectionsUpdated':
           setConnections(event.connections)
@@ -239,6 +257,7 @@ export function useWasmEditor({
           setEngineError(event.reason)
           break
         case 'CameraChanged':
+          nextCamera = { offset_x: event.offset_x, offset_y: event.offset_y, zoom: event.zoom }
           setZoom(event.zoom)
           onCameraChangedRef.current?.({
             offset_x: event.offset_x,
@@ -273,6 +292,14 @@ export function useWasmEditor({
           break
       }
     }
+    if (nextLabels || nextCamera) {
+      const benchmarkRevision = recordLabelUpdate(appRevision)
+      setLabelState(previous => ({
+        labels: nextLabels ?? previous.labels,
+        labelCamera: nextCamera ?? previous.labelCamera,
+        benchmarkRevision,
+      }))
+    }
   }, [retireDevice])
 
   gpuFailureRef.current = (message: string) => {
@@ -290,10 +317,17 @@ export function useWasmEditor({
       const t0 = performance.now()
       applyAppDelay()
       const validatedCmd = EditorCommandSchema.parse(cmd)
-      const eventsJson = editor.dispatch_command(JSON.stringify(validatedCmd))
+      const commandJson = JSON.stringify(validatedCmd)
+      const tWasm = performance.now()
+      const eventsJson = editor.dispatch_command(commandJson)
+      const tParse = performance.now()
+      traceStage('wasm-dispatch', tWasm)
       const parsedEvents = EditorEventsSchema.parse(JSON.parse(eventsJson))
+      traceStage('events-parse', tParse)
       const appRevision = recordDispatch(cmd.type, performance.now() - t0)
+      const tHandle = performance.now()
       handleEvents(parsedEvents, appRevision)
+      traceStage('handle-events', tHandle)
       return parsedEvents
     },
     [handleEvents]
@@ -349,6 +383,8 @@ export function useWasmEditor({
 
   const initializeEditor = useCallback((editor: WasmEditor) => {
     editorRef.current = editor
+    // A new engine starts at its default camera; labels must not keep the old one.
+    setLabelState(previous => ({ ...previous, labelCamera: ENGINE_INITIAL_CAMERA }))
     // Establish the viewport before restoring camera, in GPU and CPU paths.
     dispatchInternal(editor, {
       type: 'ResizeViewport',
@@ -497,14 +533,24 @@ export function useWasmEditor({
 
   // Canvas pointer handlers with pointer capture for dragging
   const isPointerDownRef = useRef(false)
+  // A fast pointer can report several moves per frame; each would otherwise
+  // run a full command and render. Dispatch only the latest one per frame.
+  const pointerMoves = useMemo(
+    () => new PointerMoveCoalescer(point => dispatch({ type: 'PointerMove', screen_x: point.x, screen_y: point.y })),
+    [dispatch]
+  )
+  const flushPointerMove = useCallback(() => pointerMoves.flush(), [pointerMoves])
+  flushPointerMoveRef.current = flushPointerMove
+  useEffect(() => () => pointerMoves.dispose(), [pointerMoves])
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       const canvas = canvasRef.current
       if (!canvas || !editorRef.current) return
 
-      // A wheel merged earlier this frame precedes the press it came before.
+      // Input merged earlier this frame precedes the press it came before.
       flushWheelRef.current()
+      flushPointerMove()
       isPointerDownRef.current = true
       beginInput(e, 'drag')
       try {
@@ -522,7 +568,7 @@ export function useWasmEditor({
         screen_y: logicalPt.y,
       })
     },
-    [canvasRef, dispatch]
+    [canvasRef, dispatch, flushPointerMove]
   )
 
   const handlePointerMove = useCallback(
@@ -533,15 +579,9 @@ export function useWasmEditor({
 
       beginInput(e, 'drag')
       const rect = canvas.getBoundingClientRect()
-      const logicalPt = cssToLogicalPoint(e.clientX, e.clientY, rect)
-
-      dispatch({
-        type: 'PointerMove',
-        screen_x: logicalPt.x,
-        screen_y: logicalPt.y,
-      })
+      pointerMoves.add(cssToLogicalPoint(e.clientX, e.clientY, rect))
     },
-    [canvasRef, dispatch]
+    [canvasRef, pointerMoves]
   )
 
   const handlePointerUp = useCallback(
@@ -549,6 +589,8 @@ export function useWasmEditor({
       if (!isPointerDownRef.current) return
       isPointerDownRef.current = false
       flushWheelRef.current()
+      // The release lands where the last merged move left the card.
+      flushPointerMove()
       const canvas = canvasRef.current
       if (!canvas || !editorRef.current) return
 
@@ -567,7 +609,7 @@ export function useWasmEditor({
         screen_y: logicalPt.y,
       })
     },
-    [canvasRef, dispatch]
+    [canvasRef, dispatch, flushPointerMove]
   )
 
   // Native non-passive wheel listener for cursor-anchored zoom & trackpad pan.
@@ -837,6 +879,7 @@ export function useWasmEditor({
 
   return {
     labels,
+    labelCamera,
     benchmarkRevision,
     connections,
     connectionRejection,

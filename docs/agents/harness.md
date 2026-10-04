@@ -24,7 +24,7 @@ Use this workflow for ticket implementation, review fixes, and review handoff. T
 
 Routine `python3 scripts/harness.py check` does not launch the headed T06 capture, because it takes over a visible desktop window for several minutes. The full profile and the ticket's appended checks run the capture's unit and reducer tests instead.
 
-Run `cd frontend && bun run capture:p1` for a primary capture under contract `gurow-p1-v4`. It builds the current source, runs the preflight (hardware adapter, focused on-screen window, AC power, idle rAF matching the display refresh), the delay sanity captures, and the pan/zoom/drag runs, then reduces the evidence. Keep the browser window focused and visible until it exits. Evidence goes to `.harness/t06/primary/`; `--size 100 --headless` gives a diagnostic run that can never qualify P1.
+Run `cd frontend && bun run capture:p1` for a primary capture under contract `gurow-p1-v5` (300 cards, ADR 0020); `bun run capture:p1:v4-1000` re-runs the historical 1,000-card v4 primary for comparison. It builds the current source, runs the preflight (hardware adapter, focused on-screen window, AC power, idle rAF matching the display refresh), the delay sanity captures, and the pan/zoom/drag runs, then reduces the evidence. Keep the browser window focused and visible until it exits. Evidence goes to `.harness/t06/primary/`; `--size 100 --headless` gives a diagnostic run that can never qualify P1.
 
 A routine full pass is code/regression evidence only; it does not establish P1 performance acceptance. Report a skipped headed capture separately in review handoffs and task notes. The v1 collector qualification (`bun run qualify:native:v1`) is historical and is not part of T06 acceptance.
 

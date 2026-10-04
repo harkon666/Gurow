@@ -18,10 +18,11 @@ export const RectSchema = z.object({
   height: z.number(),
 })
 
+/** World-space card bounds; the overlay applies the camera from CameraChanged as one transform. */
 export const LabelLayoutSchema = z.object({
   card_id: z.string(),
   title: z.string(),
-  screen_rect: RectSchema,
+  world_rect: RectSchema,
   selected: z.boolean(),
 })
 

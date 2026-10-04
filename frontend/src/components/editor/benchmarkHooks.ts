@@ -149,6 +149,8 @@ export interface BenchmarkHooks {
   focus_events?: FocusRecord[]
   /** Installed by the editor: closes the window even if rAF has stopped. */
   seal?: () => void
+  /** Diagnostic traces only (#42): record `gurow:*` stage measures. Never set in acceptance runs. */
+  trace_stages?: boolean
 }
 
 interface CaptureWindow { start: number; end: number; deadline: number; refreshHz: number }
@@ -170,6 +172,14 @@ export function getBenchmarkHooks(): BenchmarkHooks | undefined {
   const hooks = (window as unknown as { __gurowBenchmarkHooks?: BenchmarkHooks })
     .__gurowBenchmarkHooks
   return hooks?.enabled ? hooks : undefined
+}
+
+/** Editor stages a diagnostic trace attributes main-thread time to (#42). */
+export type TraceStage = 'wasm-dispatch' | 'events-parse' | 'handle-events' | 'labels-render-commit'
+
+/** Records one `gurow:<stage>` performance measure from `startMs` to now, only while a diagnostic trace asks for stages. */
+export function traceStage(name: TraceStage, startMs: number): void {
+  if (getBenchmarkHooks()?.trace_stages) performance.measure(`gurow:${name}`, { start: startMs, end: performance.now() })
 }
 
 function mark(name: string): void {

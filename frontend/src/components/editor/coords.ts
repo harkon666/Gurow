@@ -1,4 +1,4 @@
-import type { Point, Rect } from './protocol'
+import type { CameraState, Point } from './protocol'
 
 /**
  * Returns current device pixel ratio safely across browser and SSR environments.
@@ -23,18 +23,11 @@ export function cssToLogicalPoint(
 }
 
 /**
- * Maps engine screen rect to CSS layout for HTML overlay positioning.
- * Engine screen coordinates match logical CSS pixels.
+ * The engine camera (`screen = world * zoom + offset`) as a CSS transform with
+ * origin 0 0, so world-space labels follow pan and zoom through one style change.
  */
-export function screenToCssRect(
-  screenRect: Rect
-): { left: number; top: number; width: number; height: number } {
-  return {
-    left: screenRect.x,
-    top: screenRect.y,
-    width: screenRect.width,
-    height: screenRect.height,
-  }
+export function cameraToCssTransform(camera: CameraState): string {
+  return `translate(${camera.offset_x}px, ${camera.offset_y}px) scale(${camera.zoom})`
 }
 
 /**

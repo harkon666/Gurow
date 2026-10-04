@@ -101,19 +101,17 @@ impl EditorState {
         })
     }
 
-    /// Computes HTML-label rectangles from the current camera and card bounds.
+    /// Computes HTML-label world bounds; the camera reaches the overlay separately.
     pub fn get_label_layouts(&self) -> Vec<LabelLayout> {
         self.document
             .cards
             .iter()
             .map(|card| {
-                let world_rect = card.world_bounds();
-                let screen_rect = self.camera.world_rect_to_screen(world_rect);
                 let selected = self.selected_card_id.as_deref() == Some(&card.id);
                 LabelLayout {
                     card_id: card.id.clone(),
                     title: card.title.clone(),
-                    screen_rect,
+                    world_rect: card.world_bounds(),
                     selected,
                 }
             })
@@ -318,7 +316,6 @@ impl EditorState {
                                 offset_y: self.camera.offset_y,
                                 zoom: self.camera.zoom,
                             });
-                            labels_changed = true;
                         }
                     }
                     InteractionState::Idle => {}
@@ -368,7 +365,6 @@ impl EditorState {
                     offset_y: self.camera.offset_y,
                     zoom: self.camera.zoom,
                 });
-                labels_changed = true;
             }
             EditorCommand::ZoomAt {
                 screen_x,
@@ -382,7 +378,6 @@ impl EditorState {
                     offset_y: self.camera.offset_y,
                     zoom: self.camera.zoom,
                 });
-                labels_changed = true;
             }
             EditorCommand::Undo => {
                 if self.cancel_active_interaction(&mut events) {
@@ -442,7 +437,6 @@ impl EditorState {
             }
             EditorCommand::ResizeViewport { width, height } => {
                 self.set_viewport(width, height);
-                labels_changed = true;
             }
             EditorCommand::ConnectSkills { from_id, to_id } => {
                 match self.document.try_add_connection(&from_id, &to_id) {
@@ -542,7 +536,6 @@ impl EditorState {
                     offset_y: self.camera.offset_y,
                     zoom: self.camera.zoom,
                 });
-                labels_changed = true;
             }
         }
 

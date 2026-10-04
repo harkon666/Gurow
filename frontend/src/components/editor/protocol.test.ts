@@ -221,13 +221,16 @@ describe('Editor Protocol Schemas (Matt Pocock SDD)', () => {
           {
             card_id: 'skill-1',
             title: 'Skill One',
-            screen_rect: { x: 10, y: 20, width: 180, height: 80 },
+            world_rect: { x: 10, y: 20, width: 180, height: 80 },
             selected: true,
           },
         ],
       }
       const parsed = EditorEventSchema.parse(event)
       expect(parsed).toEqual(event)
+      // A camera-dependent screen rectangle is no longer part of the label protocol.
+      const { world_rect, ...rest } = event.labels[0]
+      expect(() => EditorEventSchema.parse({ ...event, labels: [{ ...rest, screen_rect: world_rect }] })).toThrow()
     })
 
 
@@ -312,7 +315,7 @@ describe('Editor Protocol Schemas (Matt Pocock SDD)', () => {
             {
               card_id: 'skill-new',
               title: 'New Skill',
-              screen_rect: { x: 0, y: 0, width: 180, height: 80 },
+              world_rect: { x: 0, y: 0, width: 180, height: 80 },
               selected: false,
             },
           ],

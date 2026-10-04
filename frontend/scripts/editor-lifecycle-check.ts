@@ -85,20 +85,28 @@ try {
         const expectedLoads = arrival === 'after' ? 2 : 1
         const loads = () => page.evaluate(() => window.__gurowBenchmarkHooks.dispatches.filter(d => d.command_type === 'LoadDocument').length)
         assert.equal(await loads(), expectedLoads, 'each document identity must load once into this engine')
-        const position = () => page.$eval('#card-label-lifecycle-skill', el => ({ x: parseFloat((el as HTMLElement).style.left), y: parseFloat((el as HTMLElement).style.top) }))
+        // Rendered position relative to the overlay: labels sit at world bounds
+        // inside the camera-transformed container, so style.left is world space.
+        const renderedPosition = () => {
+          const label = document.querySelector('#card-label-lifecycle-skill')!.getBoundingClientRect()
+          const overlay = document.querySelector('#labels-overlay')!.getBoundingClientRect()
+          return { x: Math.round((label.x - overlay.x) * 1000) / 1000, y: Math.round((label.y - overlay.y) * 1000) / 1000 }
+        }
+        await page.evaluate(`window.__renderedLabelPosition = ${renderedPosition.toString()}`)
+        const position = () => page.evaluate(() => (window as any).__renderedLabelPosition() as { x: number; y: number })
         assert.deepEqual(await position(), { x: 120, y: 130 }, 'camera restoration must follow viewport setup in every backend')
         if (backend === 'software-webgpu') {
           const original = await position()
           const rect = await page.$eval('#card-label-lifecycle-skill', el => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y } })
           await page.mouse.move(rect.x + 40, rect.y + 40); await page.mouse.down()
           await page.mouse.move(rect.x + 100, rect.y + 80, { steps: 4 }); await page.mouse.up()
-          await page.waitForFunction(x => parseFloat((document.querySelector('#card-label-lifecycle-skill') as HTMLElement).style.left) !== x, {}, original.x)
+          await page.waitForFunction(x => (window as any).__renderedLabelPosition().x !== x, {}, original.x)
           await page.click('#rerender')
           assert.equal(await loads(), expectedLoads, 'same props must not erase user history')
           await page.keyboard.down('Control'); await page.keyboard.press('z'); await page.keyboard.up('Control')
           await page.waitForFunction(({ x, y }) => {
-            const el = document.querySelector('#card-label-lifecycle-skill') as HTMLElement
-            return parseFloat(el.style.left) === x && parseFloat(el.style.top) === y
+            const p = (window as any).__renderedLabelPosition()
+            return p.x === x && p.y === y
           }, {}, original)
           await page.click('#observe-camera')
           await page.evaluate(() => { window.__gurowBenchmarkHooks.label_delay_ms = 80; window.__labelFrames = [] })

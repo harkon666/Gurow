@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
-  BENCHMARK_SIZES,
+  contractSizes,
   computeCheckpointHash,
   computeEditorIdentityHash,
   computeFixtureGeometry,
@@ -17,6 +17,7 @@ import {
   loadBenchmarkContract,
   parseBenchmarkContract,
   readFixtureFiles,
+  requireRecipe,
   validateBenchmarkFixture,
   validatePlannedPathVisibility,
   writeFixtureFiles,
@@ -28,6 +29,8 @@ import { loadCheckpoint } from '../../src/components/editor/checkpoint'
 
 const CONTRACT_PATH = path.resolve(import.meta.dir, '../../../docs/benchmarks/p1/protocol-v4.json')
 const contract = loadBenchmarkContract(CONTRACT_PATH)
+/** The v4 contract defines the 100, 1,000 and 10,000-card generator workloads exercised below. */
+const BENCHMARK_SIZES = contractSizes(contract)
 /** Canvas measured at 1200x720 with the list and Task panel open (fixture-check). */
 const CANVAS = { width: 592, height: 628 }
 
@@ -57,8 +60,10 @@ describe('benchmark contract', () => {
   it('rejects a different contract or a missing workload', () => {
     const raw = JSON.parse(readFileSync(CONTRACT_PATH, 'utf8'))
     expect(() => parseBenchmarkContract(JSON.stringify({ ...raw, contract_id: 'other' }))).toThrow()
-    expect(() => parseBenchmarkContract(JSON.stringify({ ...raw, comparisons: raw.comparisons.slice(0, 1) })))
-      .toThrow(/no 10000-card workload/)
+    expect(() => parseBenchmarkContract(JSON.stringify({ ...raw, primary: { ...raw.primary, cards: 250 } })))
+      .toThrow(/not a benchmark size/)
+    const partial = parseBenchmarkContract(JSON.stringify({ ...raw, comparisons: raw.comparisons.slice(0, 1) }))
+    expect(() => generateBenchmarkFixture(partial, 10000, { canvasCss: CANVAS })).toThrow(/no 10000-card workload/)
   })
 })
 
@@ -212,7 +217,7 @@ describe('AC4: geometry and planned-path visibility', () => {
   })
 
   it('fails geometry setup when z0 leaves [0.1, 4]', () => {
-    expect(() => computeFixtureGeometry(contract.recipes[1000], contract.card_size_world, { width: 100, height: 100 }))
+    expect(() => computeFixtureGeometry(requireRecipe(contract, 1000), contract.card_size_world, { width: 100, height: 100 }))
       .toThrow(/Geometry setup failure/)
   })
 })
@@ -268,5 +273,36 @@ describe('AC6: setup rejects malformed or substituted fixture files', () => {
     const dir = setupDir()
     edit(fixtureFilePaths(dir, 100).manifest, (m) => { m.contract_sha256 = '0'.repeat(64) })
     expect(() => readFixtureFiles(contract, dir, 100)).toThrow(/different contract/)
+  })
+})
+
+describe('gurow-p1-v5: 300-card gate and 1,000-card comparison (ADR 0020)', () => {
+  const v5 = loadBenchmarkContract(path.resolve(import.meta.dir, '../../../docs/benchmarks/p1/protocol-v5.json'))
+
+  it('reads the 300-card primary and only the 1,000-card comparison', () => {
+    expect(v5.contract_id).toBe('gurow-p1-v5')
+    expect(v5.primary_size).toBe(300)
+    expect(contractSizes(v5)).toEqual([300, 1000])
+    expect(v5.recipes[300]).toMatchObject({
+      connections: 600, grid_columns: 15, grid_rows: 20, initial_visible_cards: 200,
+      visibility_band: { min: 150, max: 250 },
+    })
+    expect(v5.recipes[1000]).toMatchObject({ connections: 2000, visibility_band: null })
+    expect(() => generateBenchmarkFixture(v5, 100, { canvasCss: CANVAS })).toThrow(/no 100-card workload/)
+  })
+
+  it('generates the 300-card DAG with 200 visible cards that stay inside [150, 250] along every planned path', () => {
+    const fixture = generateBenchmarkFixture(v5, 300, { canvasCss: CANVAS })
+    expect(fixture.checkpoint.editor.cards).toHaveLength(300)
+    expect(fixture.checkpoint.editor.connections).toHaveLength(600)
+    expect(computeVisibleCardIds(fixture.checkpoint.editor.cards, fixture.camera, CANVAS)).toHaveLength(200)
+    const result = validatePlannedPathVisibility(fixture, v5.motion)
+    expect(result.violations).toEqual([])
+    expect([result.min_visible >= 150, result.max_visible <= 250]).toEqual([true, true])
+  })
+
+  it('keeps the v4 contract readable for the 1,000-card re-run, without a 300-card workload', () => {
+    expect(contract.primary_size).toBe(1000)
+    expect(contract.recipes[300]).toBeUndefined()
   })
 })

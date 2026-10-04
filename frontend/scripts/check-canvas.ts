@@ -14,7 +14,7 @@ export async function checkCanvas(page: Page, dpr: number) {
   })
   assert.equal(dimensions.width, Math.floor(dimensions.cssWidth * dpr), 'Framebuffer width must retain DPR')
   assert.equal(dimensions.height, Math.floor(dimensions.cssHeight * dpr), 'Framebuffer height must retain DPR')
-  const labelIds = await page.$$eval('#labels-overlay > div', (elements) => elements.map((el) => el.id).sort())
+  const labelIds = await page.$$eval('#labels-overlay [id^="card-label-"]', (elements) => elements.map((el) => el.id).sort())
   assert.deepEqual(labelIds, INITIAL_LEARNING_PATH_FIXTURE.skills.map((skill) => `card-label-${skill.id}`).sort(), 'Exactly one card per fixture Skill')
 
   const skills = INITIAL_LEARNING_PATH_FIXTURE.skills.slice(0, 2)

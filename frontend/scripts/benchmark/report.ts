@@ -1,13 +1,17 @@
 import { createHash } from 'node:crypto'
 import { readFileSync, realpathSync } from 'node:fs'
 import { isAbsolute, relative, resolve } from 'node:path'
-import { CONTRACT_ID, computeCheckpointHash, generateBenchmarkFixture, loadBenchmarkContract, type FixtureManifest } from './fixture'
+import { computeCheckpointHash, generateBenchmarkFixture, loadBenchmarkContract, type BenchmarkSize, type ContractId, type FixtureManifest } from './fixture'
 import { isSoftwareAdapter } from './collector'
 import { nearestRank } from './scenarios'
 import type { Scenario } from '../../src/components/editor/benchmarkHooks'
 
-/** The approved gurow-p1-v4 protocol; reducer policy is pinned to these bytes. */
-export const PROTOCOL_PATH = resolve(import.meta.dir, '../../../docs/benchmarks/p1/protocol-v4.json')
+/** Approved protocols; reducer policy is pinned to these bytes. v5 gates on 300 cards (ADR 0020); v4 keeps the 1,000-card primary for comparison. */
+export const PROTOCOL_PATHS: Record<ContractId, string> = {
+  'gurow-p1-v4': resolve(import.meta.dir, '../../../docs/benchmarks/p1/protocol-v4.json'),
+  'gurow-p1-v5': resolve(import.meta.dir, '../../../docs/benchmarks/p1/protocol-v5.json'),
+}
+const approvedPath = (id: string | undefined): string | undefined => (PROTOCOL_PATHS as Record<string, string>)[id ?? '']
 
 /** V2 capture interchange: times are milliseconds on the in-page performance clock.
  * Preserve every attempt, including invalid attempts; only valid repetitions pool.
@@ -33,13 +37,13 @@ export interface FunctionalAssertion {
   source_fingerprint: string; result: Verdict; reason: string | null
 }
 export interface FixtureRecord {
-  cards: 100 | 1000 | 10000; connections: number; hash: string
+  cards: BenchmarkSize; connections: number; hash: string
   manifest_path: string; checkpoint_path: string; geometry: FixtureManifest['geometry']
   task_association_verified: boolean
 }
 export interface VisibilitySample { time_ms: number; visible_cards: number; dom_labels: number; submitted_primitives: number }
 export interface CaptureRun {
-  id: string; cards: 100 | 1000 | 10000; scenario: Scenario; repetition: number
+  id: string; cards: BenchmarkSize; scenario: Scenario; repetition: number
   source_fingerprint: string; fixture_hash: string
   warmup_seconds: number; active_seconds: number; drain_seconds: number
   /** Requests the driver actually sent; below the sent minimum the run is invalid. */
@@ -158,10 +162,12 @@ export function verifyArtifactBindings(m: CaptureManifest, directory: string): s
       if (JSON.stringify(JSON.parse(readFileSync(resolve(directory, a.path), 'utf8'))) !== JSON.stringify(value)) errors.push(`${role} content differs from manifest records.`)
     } catch { errors.push(`${role} is not readable JSON.`) }
   }
-  const contract = loadBenchmarkContract(PROTOCOL_PATH)
+  const contractPath = approvedPath(m.identity?.contract_id)
+  if (!contractPath) return [...errors, `Contract ${m.identity?.contract_id} is not an approved protocol.`]
+  const contract = loadBenchmarkContract(contractPath)
   for (const f of [m.fixture, ...(m.comparison_fixtures ?? [])]) {
     if (!f) continue
-    const prefix = f.cards === 1000 ? 'primary-fixture' : 'comparison-fixture'
+    const prefix = f === m.fixture ? 'primary-fixture' : 'comparison-fixture'
     const manifestArtifact = m.artifacts?.find(a => a.role === `${prefix}-manifest` && a.path === f.manifest_path)
     const checkpointArtifact = m.artifacts?.find(a => a.role === `${prefix}-checkpoint` && a.path === f.checkpoint_path)
     if (!manifestArtifact || !checkpointArtifact) { errors.push(`Fixture ${f.cards} manifest/checkpoint artifact missing.`); continue }
@@ -223,9 +229,10 @@ function reduceRun(r: CaptureRun, m: CaptureManifest, p: Protocol): RunReport {
 }
 export function reduceReport(m: CaptureManifest, p: Protocol, contractBytes: Uint8Array, artifactErrors: string[] = []): BenchmarkReport {
   const structural = [...artifactErrors]
-  const approved = readFileSync(PROTOCOL_PATH)
-  if (hash(contractBytes) !== hash(approved) || JSON.stringify(p) !== JSON.stringify(JSON.parse(new TextDecoder().decode(contractBytes))) ||
-    m.schema !== 'gurow-p1-capture-manifest-v4' || p.contract_id !== CONTRACT_ID || p.report_schema !== 'gurow-p1-report-v4' || p.percentile !== 'nearest_rank_ceil') structural.push('Contract/manifest schema or approved v2 policy mismatched; v1 evidence is historical only.')
+  const approvedFile = approvedPath(p.contract_id)
+  const approved = approvedFile ? readFileSync(approvedFile) : new Uint8Array()
+  if (!approvedFile || hash(contractBytes) !== hash(approved) || JSON.stringify(p) !== JSON.stringify(JSON.parse(new TextDecoder().decode(contractBytes))) ||
+    m.schema !== 'gurow-p1-capture-manifest-v4' || p.report_schema !== 'gurow-p1-report-v4' || p.percentile !== 'nearest_rank_ceil') structural.push('Contract/manifest schema or approved v2 policy mismatched; v1 evidence is historical only.')
   if (typeof m.synthetic !== 'boolean' || m.identity?.contract_id !== p.contract_id || m.identity?.contract_sha256 !== hash(contractBytes) ||
     m.identity?.parent_issue !== p.parent_issue || !text(m.identity?.commit) || !hex(m.identity?.source_fingerprint) || !hex(m.identity?.build_hash) ||
     !text(m.identity?.runner_version) || !text(m.identity?.timestamp)) structural.push('Contract/source/build/runner identity invalid.')

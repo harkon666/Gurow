@@ -38,8 +38,10 @@ The event sequence has two useful layers:
 
 1. semantic events such as `SelectionChanged`, `ConnectionRejected`, and
    `HistoryChanged` update React controls;
-2. `LabelsUpdated` carries screen-space rectangles for HTML labels, while the
-   renderer draws card and connection geometry on the canvas.
+2. `LabelsUpdated` carries world-space card bounds for HTML labels and
+   `CameraChanged` carries the camera; the overlay places the labels through
+   one CSS transform of that camera, so camera-only commands do not re-send
+   labels. The renderer draws card and connection geometry on the canvas.
 
 The renderer is optional. A headless `WasmEditor` still exercises command,
 state, and event behavior. Losing the renderer must preserve the CPU document

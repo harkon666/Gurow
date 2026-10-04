@@ -10,11 +10,14 @@ pub struct SelectionChange {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-/// Screen-space geometry and identity used to position an HTML Skill label.
+/// World-space card bounds and identity for an HTML Skill label.
+///
+/// Labels do not depend on the camera: the overlay applies the camera from
+/// `CameraChanged` as one transform, so camera-only commands never re-send them.
 pub struct LabelLayout {
     pub card_id: String,
     pub title: String,
-    pub screen_rect: Rect,
+    pub world_rect: Rect,
     pub selected: bool,
 }
 

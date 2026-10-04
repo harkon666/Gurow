@@ -10,9 +10,10 @@ import puppeteer, { type Page, type CDPSession } from 'puppeteer-core'
 import { computeBuildHash, resolveChromiumExecutable, waitForServerReady } from './browser'
 import { computeSourceFingerprint } from './sourceFingerprint'
 import { isSoftwareAdapter } from './collector'
-import { CONTRACT_ID, fixtureStorageEntries, generateBenchmarkFixture, loadBenchmarkContract, motionAmplitudeCss, readFixtureFiles, writeFixtureFiles, type BenchmarkContract, type BenchmarkFixture, type BenchmarkSize } from './fixture'
+import { BENCHMARK_SIZES, CONTRACT_IDS, fixtureStorageEntries, generateBenchmarkFixture, loadBenchmarkContract, motionAmplitudeCss, readFixtureFiles, requireRecipe, writeFixtureFiles, type BenchmarkContract, type BenchmarkFixture, type BenchmarkSize } from './fixture'
 import { motionAt, nearestRank, pace, type Motion } from './scenarios'
 import type { Protocol } from './report'
+import { markdownSummary, summarizeTrace, type TraceSummary } from './trace-summary'
 import type { Scenario } from '../../src/components/editor/benchmarkHooks'
 
 const ROOT = path.resolve(import.meta.dir, '../../..')
@@ -76,9 +77,9 @@ export function deliveredCount(inputs: Array<{ event_type?: string }>, noOpInput
   return inputs.filter(input => input.event_type !== 'pointerdown').length + noOpInputs
 }
 
-interface Options { size: BenchmarkSize; contract: string; out: string; port: number; headless: boolean; diagnostic: boolean }
+interface Options { size: BenchmarkSize | null; contract: string; out: string; port: number; headless: boolean; diagnostic: boolean; trace: boolean }
 function args(argv: string[]): Options {
-  const parsed: Options = { size: 1000, contract: path.join(ROOT, 'docs/benchmarks/p1/protocol-v4.json'), out: path.join(ROOT, '.harness/t06/primary'), port: 3475, headless: false, diagnostic: false }
+  const parsed: Options = { size: null, contract: path.join(ROOT, 'docs/benchmarks/p1/protocol-v5.json'), out: path.join(ROOT, '.harness/t06/primary'), port: 3475, headless: false, diagnostic: false, trace: false }
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i]
     if (flag === '--size' || flag === '--port' || flag === '--contract' || flag === '--out') {
@@ -90,10 +91,10 @@ function args(argv: string[]): Options {
       if (flag === '--out') parsed.out = path.resolve(value)
     } else if (flag === '--headless') { parsed.headless = true; parsed.diagnostic = true }
     else if (flag === '--diagnostic') parsed.diagnostic = true
+    else if (flag === '--trace') { parsed.trace = true; parsed.diagnostic = true }
     else throw new Error(`Unknown option ${flag}`)
   }
-  if (![100, 1000, 10000].includes(parsed.size) || !Number.isSafeInteger(parsed.port) || parsed.port < 1 || parsed.port > 65535) throw new Error('Unsupported size or port')
-  if (parsed.size !== 1000) parsed.diagnostic = true
+  if ((parsed.size !== null && !BENCHMARK_SIZES.includes(parsed.size)) || !Number.isSafeInteger(parsed.port) || parsed.port < 1 || parsed.port > 65535) throw new Error('Unsupported size or port')
   return parsed
 }
 
@@ -139,13 +140,13 @@ async function ready(page: Page, count: number): Promise<void> {
     await page.waitForFunction(n => {
       const w = window as any
       if (document.getElementById('editor-gpu-error-notice') || document.getElementById('checkpoint-error-alert')) return true
-      return w.__gurowEditorReady === true && document.querySelectorAll('#labels-overlay > [id^="card-label-"]').length === n
+      return w.__gurowEditorReady === true && document.querySelectorAll('#labels-overlay [id^="card-label-"]').length === n
     }, { timeout: count > 1000 ? 180000 : 30000, polling: 250 }, count)
   } catch (error) {
     const status = await page.evaluate(() => ({ ready: (window as any).__gurowEditorReady,
       hooks: !!(window as any).__gurowBenchmarkHooks, adapter: (window as any).__gurowEditorAdapter,
       gpu: document.getElementById('editor-gpu-error-notice')?.textContent,
-      labels: document.querySelectorAll('#labels-overlay > [id^="card-label-"]').length,
+      labels: document.querySelectorAll('#labels-overlay [id^="card-label-"]').length,
       text: document.body?.innerText.slice(0, 300) }))
     throw new Error(`Editor readiness failed for ${count}: ${JSON.stringify(status)}; ${String(error)}`)
   }
@@ -163,7 +164,7 @@ async function seed(page: Page, url: string, fixture: BenchmarkFixture): Promise
   const observed = await page.evaluate((expected) => ({
     count: document.querySelectorAll('#skill-prerequisite-list [id^="skill-list-item-"]').length,
     center: !!document.getElementById(`card-label-${expected}`),
-    labels: document.querySelectorAll('#labels-overlay > [id^="card-label-"]').length,
+    labels: document.querySelectorAll('#labels-overlay [id^="card-label-"]').length,
   }), id)
   if (observed.count !== fixture.size || observed.labels !== fixture.size || !observed.center) throw new Error(`Fixture route identity mismatch: ${JSON.stringify(observed)}`)
   const rect = await page.$eval(`#card-label-${id}`, el => { const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 } })
@@ -183,13 +184,15 @@ async function visibility(page: Page): Promise<Visibility> {
   return page.evaluate(() => {
     const canvas = document.getElementById('editor-canvas') as HTMLCanvasElement
     const b = canvas.getBoundingClientRect()
-    const labels = [...document.querySelectorAll('#labels-overlay > [id^="card-label-"]')] as HTMLElement[]
+    const labels = [...document.querySelectorAll('#labels-overlay [id^="card-label-"]')] as HTMLElement[]
     const overlay = document.getElementById('labels-overlay')!.getBoundingClientRect()
     const intersects = (x: number, y: number, w: number, h: number) => Math.min(x + w, b.right) > Math.max(x, b.left) && Math.min(y + h, b.bottom) > Math.max(y, b.top)
     const count = document.getElementById('editor-card-count')?.textContent?.match(/(\d+)/)
+    // Labels carry engine world bounds; the camera container's transform maps them to engine screen rects.
+    const camera = new DOMMatrixReadOnly(getComputedStyle(document.getElementById('labels-camera')!).transform)
     return {
       time_ms: performance.now(),
-      visible_cards: labels.filter(el => { const s = el.style; return intersects(overlay.left + parseFloat(s.left), overlay.top + parseFloat(s.top), parseFloat(s.width), parseFloat(s.height)) }).length,
+      visible_cards: labels.filter(el => { const s = el.style; return intersects(overlay.left + camera.e + parseFloat(s.left) * camera.a, overlay.top + camera.f + parseFloat(s.top) * camera.d, parseFloat(s.width) * camera.a, parseFloat(s.height) * camera.d) }).length,
       visible_labels: labels.filter(el => { const r = el.getBoundingClientRect(); return intersects(r.left, r.top, r.width, r.height) }).length,
       submitted_cards: count ? Number(count[1]) : null,
       canvas: { x: b.x, y: b.y, width: b.width, height: b.height, backing_width: canvas.width, backing_height: canvas.height },
@@ -243,6 +246,34 @@ function drive(cdp: CDPSession, scenario: Scenario, motion: ScenarioMotion, star
 }
 
 interface Settings { warmup_ms: number; hz: number; refresh_hz: number }
+
+/** Diagnostic profile (#42): a shorter warm-up, then a traced window of the same scheduled input. Never acceptance evidence. */
+const TRACE_WARMUP_MS = 3000
+const TRACE_ACTIVE_MS = 5000
+const TRACE_CATEGORIES = ['devtools.timeline', 'disabled-by-default-devtools.timeline', 'disabled-by-default-devtools.timeline.frame',
+  'blink.user_timing', 'toplevel', 'v8.execute', 'disabled-by-default-v8.cpu_profiler']
+
+async function traceScenario(page: Page, cdp: CDPSession, scenario: Scenario, fixture: BenchmarkFixture, contract: BenchmarkContract, hz: number, file: string): Promise<TraceSummary> {
+  const errors: string[] = []
+  const motion = await scenarioMotion(page, scenario, fixture, contract)
+  await page.evaluate(() => { (window as any).__gurowBenchmarkHooks.trace_stages = true })
+  let tracing = false
+  try {
+    if (scenario === 'drag') await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: motion.anchor.x, y: motion.anchor.y, button: 'left', buttons: 1, clickCount: 1 })
+    await page.tracing.start({ path: file, categories: TRACE_CATEGORIES })
+    tracing = true
+    const { delivery, requests } = drive(cdp, scenario, motion, performance.now() + 50, TRACE_ACTIVE_MS, hz, errors, 'trace')
+    await delivery
+    await Promise.race([Promise.all(requests), wait(WARMUP_DRAIN_TIMEOUT_MS)])
+  } finally {
+    // Never leave tracing, a pressed button or stage measures behind for the next scenario.
+    if (tracing) await page.tracing.stop()
+    if (scenario === 'drag') await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: motion.anchor.x, y: motion.anchor.y, button: 'left', buttons: 0, clickCount: 1 })
+    await page.evaluate(() => { (window as any).__gurowBenchmarkHooks.trace_stages = false })
+  }
+  if (errors.length) throw new Error(`${scenario} trace input errors: ${errors.join('; ')}`)
+  return summarizeTrace(JSON.parse(readFileSync(file, 'utf8')))
+}
 
 /** Contract §5 warm-up: identical real CDP input outside any measured window. */
 async function warmUp(page: Page, cdp: CDPSession, scenario: Scenario, fixture: BenchmarkFixture, contract: BenchmarkContract, settings: Settings): Promise<{ warmup_end_ms: number; errors: string[] }> {
@@ -363,9 +394,14 @@ async function main(): Promise<number> {
   const options = args(process.argv.slice(2))
   const protocolBytes = readFileSync(options.contract)
   const protocol = JSON.parse(protocolBytes.toString()) as Protocol
-  if (protocol.contract_id !== CONTRACT_ID || protocol.report_schema !== 'gurow-p1-report-v4') throw new Error('Runner requires protocol-v4.json')
-  // The fixture schema pins the same contract ID, so a v1 protocol fails here too.
+  if (!(CONTRACT_IDS as readonly string[]).includes(protocol.contract_id) || protocol.report_schema !== 'gurow-p1-report-v4') throw new Error('Runner requires protocol-v5.json or protocol-v4.json')
+  // The fixture schema pins the same contract IDs, so a v1 protocol fails here too.
   const fixtureContract = loadBenchmarkContract(options.contract)
+  // Default to the contract's primary; any other size can never qualify the gate.
+  options.size ??= fixtureContract.primary_size
+  requireRecipe(fixtureContract, options.size)
+  if (options.size !== fixtureContract.primary_size) options.diagnostic = true
+  const size = options.size
   const sampling = protocol.sampling
   mkdirSync(options.out, { recursive: true })
   execFileSync('bun', ['run', 'build'], { cwd: FRONTEND, stdio: 'inherit' })
@@ -411,15 +447,15 @@ async function main(): Promise<number> {
     await ready(page, 4)
     // Generate the fixture against the settled canvas with the Task sidebar
     // open; the sidebar changes the canvas width on the real application route.
-    await page.click('#labels-overlay > [id^="card-label-"]')
+    await page.click('#labels-overlay [id^="card-label-"]')
     await page.waitForFunction(() => !!document.querySelector('#skill-detail-panel'), { timeout: 15000 })
     const initial = await visibility(page)
     if (initial.canvas.width < protocol.minimum_canvas_css.width || initial.canvas.height < protocol.minimum_canvas_css.height) throw new Error(`Canvas ${initial.canvas.width}x${initial.canvas.height} below contract minimum`)
     const fixtureDir = path.join(options.out, 'fixtures')
-    writeFixtureFiles(fixtureDir, generateBenchmarkFixture(fixtureContract, options.size, { canvasCss: { width: initial.canvas.width, height: initial.canvas.height } }))
-    const fixture = readFixtureFiles(fixtureContract, fixtureDir, options.size)
+    writeFixtureFiles(fixtureDir, generateBenchmarkFixture(fixtureContract, size, { canvasCss: { width: initial.canvas.width, height: initial.canvas.height } }))
+    const fixture = readFixtureFiles(fixtureContract, fixtureDir, size)
     for (const [name, role] of [['manifest', 'primary-fixture-manifest'], ['checkpoint', 'primary-fixture-checkpoint'], ['camera', 'primary-fixture-camera']] as const) {
-      const filename = `fixtures/${name}-${options.size}.json`
+      const filename = `fixtures/${name}-${size}.json`
       artifacts.push({ path: filename, sha256: hash(readFileSync(path.join(options.out, filename))), role })
     }
     const cdp = await page.createCDPSession()
@@ -482,9 +518,25 @@ async function main(): Promise<number> {
       !environment.gpu_driver || !environment.ac_power_online || environment.interruptions.length)) {
       throw new Error('Headed hardware preflight failed (selected editor adapter, on-screen window, driver, AC or refresh rate); no acceptance series attempted. See environment.json')
     }
-    const primary = options.size === fixtureContract.primary_size
-    const visibleBand = fixtureContract.recipes[options.size].visibility_band
+    const primary = size === fixtureContract.primary_size
+    const visibleBand = requireRecipe(fixtureContract, size).visibility_band
     const runConfig = { refresh_hz: refreshHz, minimum_sent_fraction: sampling.minimum_sent_fraction, visible_band: visibleBand, browser_active: browserActive }
+    if (options.trace) {
+      const sections: string[] = [`# Diagnostic trace — ${size} cards (${protocol.contract_id}); not acceptance evidence`, '',
+        `Each scenario: ${TRACE_WARMUP_MS / 1000} s warm-up, then ${TRACE_ACTIVE_MS / 1000} s of ${sampling.input_hz} Hz input traced with stage measures and the V8 sampling profiler enabled, which add overhead.`, '']
+      for (const scenario of protocol.scenarios) {
+        await seed(page, url, fixture)
+        const warmup = await warmUp(page, cdp, scenario, fixture, fixtureContract, { warmup_ms: TRACE_WARMUP_MS, hz: sampling.input_hz, refresh_hz: refreshHz })
+        if (warmup.errors.length) throw new Error(`${scenario} warmup page errors: ${warmup.errors.join('; ')}`)
+        await seed(page, url, fixture)
+        const summary = await traceScenario(page, cdp, scenario, fixture, fixtureContract, sampling.input_hz, path.join(options.out, `trace-${size}-${scenario}.json`))
+        writeFileSync(path.join(options.out, `trace-${size}-${scenario}.summary.json`), JSON.stringify(summary, null, 2) + '\n')
+        sections.push(markdownSummary(scenario, summary))
+      }
+      writeFileSync(path.join(options.out, `trace-${size}.md`), sections.join('\n'))
+      console.log(`Diagnostic traces written to ${options.out}`)
+      return 2
+    }
     const delay = protocol.sanity_check.injected_delay_ms
     if (primary) {
       // Paired low-rate captures avoid serializing the injected delay against
@@ -500,7 +552,7 @@ async function main(): Promise<number> {
     }
     const minimumShift = protocol.sanity_check.minimum_p50_shift_ms
     const sanityOk = !primary || sanity.every(s => s.invalid_reasons.length === 0) && sanity.slice(1).every(s => sanity[0].p50_ms !== null && s.p50_ms !== null && s.delays_applied > 0 && s.p50_ms - sanity[0].p50_ms >= minimumShift)
-    const repetitions = primary ? sampling.runs_per_scenario : protocol.comparisons.find(c => c.cards === options.size)?.runs_per_scenario ?? 1
+    const repetitions = primary ? sampling.runs_per_scenario : protocol.comparisons.find(c => c.cards === size)?.runs_per_scenario ?? 1
     const active = { active_ms: sampling.active_seconds * 1000, drain_ms: sampling.drain_seconds * 1000, hz: sampling.input_hz }
     for (const scenario of protocol.scenarios) {
       if (!sanityOk) break
@@ -512,7 +564,7 @@ async function main(): Promise<number> {
       for (let repetition = 1; repetition <= repetitions; repetition++) {
         await seed(page, url, fixture)
         const result = await measured(page, cdp, scenario, fixture, fixtureContract, { ...runConfig, ...active, app_delay_ms: 0, label_delay_ms: 0, acceptance: true })
-        const run = { id: `${options.size}-${scenario}-${repetition}`, cards: options.size, scenario, repetition, source_fingerprint: computeSourceFingerprint(ROOT), fixture_hash: fixture.manifest.checkpoint_hash, warmup_seconds: sampling.warmup_seconds, active_seconds: sampling.active_seconds, drain_seconds: sampling.drain_seconds, ...result }
+        const run = { id: `${size}-${scenario}-${repetition}`, cards: size, scenario, repetition, source_fingerprint: computeSourceFingerprint(ROOT), fixture_hash: fixture.manifest.checkpoint_hash, warmup_seconds: sampling.warmup_seconds, active_seconds: sampling.active_seconds, drain_seconds: sampling.drain_seconds, ...result }
         runs.push(run)
         artifacts.push(artifact(options.out, `raw-${run.id}.json`, run, 'raw-input-frame-log'))
         console.log(`${run.id}: CDP ${run.sent}/${run.scheduled}, page ${run.delivered} (observed ${run.observed_inputs}), no-op ${run.no_op_inputs}; ${run.invalid_reasons.join(', ') || 'valid'}`)
@@ -525,7 +577,7 @@ async function main(): Promise<number> {
     const manifest = {
       schema: 'gurow-p1-capture-manifest-v4', synthetic: false, diagnostic: options.diagnostic,
       identity: { contract_id: protocol.contract_id, contract_sha256: hash(protocolBytes), parent_issue: 7, commit: git('rev-parse', 'HEAD'), tree_dirty: !!git('status', '--porcelain'), source_fingerprint: computeSourceFingerprint(ROOT), build_hash: buildHash, timestamp: new Date().toISOString(), runner_version: VERSION },
-      environment, fixture: { hash: fixture.manifest.checkpoint_hash, cards: options.size, connections: fixture.recipe.connections, geometry: fixture.manifest.geometry, task_association_verified: true, manifest_path: `fixtures/manifest-${options.size}.json`, checkpoint_path: `fixtures/checkpoint-${options.size}.json` }, comparison_fixtures: [],
+      environment, fixture: { hash: fixture.manifest.checkpoint_hash, cards: size, connections: fixture.recipe.connections, geometry: fixture.manifest.geometry, task_association_verified: true, manifest_path: `fixtures/manifest-${size}.json`, checkpoint_path: `fixtures/checkpoint-${size}.json` }, comparison_fixtures: [],
       sanity_checks: { application_update_p50_shift_ms: sanity[0]?.p50_ms == null || sanity[1]?.p50_ms == null ? null : sanity[1].p50_ms - sanity[0].p50_ms, label_commit_p50_shift_ms: sanity[0]?.p50_ms == null || sanity[2]?.p50_ms == null ? null : sanity[2].p50_ms - sanity[0].p50_ms },
       runs, functional: [], diagnostics: {
         initialization_to_first_render_ms: missing('ms', 'Initial render was not separately instrumented'), process_rss_bytes: missing('bytes', 'Browser process tree not collected'),

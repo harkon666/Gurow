@@ -1,0 +1,87 @@
+{
+  "contract_id": "gurow-p1-v5",
+  "supersedes": "gurow-p1-v4",
+  "decision_record": "docs/adr/0020-right-size-the-p1-gate-for-the-mvp.md",
+  "report_schema": "gurow-p1-report-v4",
+  "parent_issue": 7,
+  "revised_at": "2026-10-02",
+  "design_status": "approved_adr_0020",
+  "benchmark_status": "not_run",
+  "metrics": {
+    "frame_interval_ms": "consecutive requestAnimationFrame timestamp deltas during the active window",
+    "input_to_frame_proxy_ms": "performance.now() when the first rAF callback after canvas and label commit of the input's revision runs, minus event.timeStamp, plus 1000/refresh_hz"
+  },
+  "thresholds_ms": {
+    "frame_p95": 20,
+    "input_to_frame_proxy_p95": 50
+  },
+  "primary": {
+    "cards": 300,
+    "connections": 600,
+    "grid_columns": 15,
+    "grid_rows": 20,
+    "initial_visible_cards": 200,
+    "html_labels": true,
+    "visible_cards_median_min": 150,
+    "visible_cards_median_max": 250
+  },
+  "comparisons": [
+    {
+      "cards": 1000,
+      "connections": 2000,
+      "grid_columns": 25,
+      "grid_rows": 40,
+      "runs_per_scenario": 1
+    }
+  ],
+  "card_size_world": {
+    "width": 180,
+    "height": 80
+  },
+  "minimum_canvas_css": {
+    "width": 960,
+    "height": 540
+  },
+  "browser_zoom_percent": 100,
+  "sampling": {
+    "warmup_seconds": 10,
+    "active_seconds": 30,
+    "drain_seconds": 2,
+    "runs_per_scenario": 3,
+    "pooling": "per_scenario",
+    "input_hz": 120,
+    "minimum_sent_fraction": 0.8,
+    "minimum_delivered_fraction": 0.8,
+    "minimum_pooled_latency_samples": 1000,
+    "minimum_pooled_frame_intervals": 1000,
+    "visibility_sample_hz": 2,
+    "motion_period_seconds": 2,
+    "pan_drag_amplitude_cell_fraction": 0.1,
+    "zoom_min_factor": 0.99,
+    "zoom_max_factor": 1.01
+  },
+  "scenarios": [
+    "pan",
+    "zoom",
+    "drag"
+  ],
+  "percentile": "nearest_rank_ceil",
+  "verdicts": [
+    "PASS",
+    "FAIL",
+    "NOT_MEASURED"
+  ],
+  "sanity_check": {
+    "injected_delay_ms": 80,
+    "minimum_p50_shift_ms": 60,
+    "targets": [
+      "application_update",
+      "label_commit"
+    ]
+  },
+  "unresolved_input_policy": "charge_until_drain_deadline",
+  "validity": {
+    "invalid_run": "driver sent fewer than minimum_sent_fraction of scheduled requests, focus/visibility loss, device loss, page or WebGPU error",
+    "backpressure": "page observed fewer than minimum_delivered_fraction of scheduled inputs: the run stays valid and can FAIL, but a scenario with such a run cannot PASS"
+  }
+}

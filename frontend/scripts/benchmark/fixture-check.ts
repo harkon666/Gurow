@@ -22,7 +22,8 @@ import type { CameraState, LearningPathCheckpoint } from '../../src/components/e
 import { getCheckpointKey } from '../../src/components/editor/checkpoint'
 import { INITIAL_LEARNING_PATH_FIXTURE } from '../../src/fixtures/learningPath'
 import {
-  BENCHMARK_SIZES,
+  contractSizes,
+  requireRecipe,
   computeApplicationHash,
   computeEditorIdentityHash,
   computeVisibleCardIds,
@@ -183,18 +184,20 @@ async function readUi(page: Page): Promise<UiState> {
       submitted_cards: count ? Number(count[1]) : null,
       list_ids: Array.from(document.querySelectorAll('#skill-prerequisite-list [id^="skill-list-item-"]'))
         .map((el) => el.id.slice('skill-list-item-'.length)),
-      labels: Array.from(document.querySelectorAll('#labels-overlay > [id^="card-label-"]'))
+      labels: Array.from(document.querySelectorAll('#labels-overlay [id^="card-label-"]'))
         .map((el) => {
-          // The label's inline box is the engine's card screen rect; CSS padding can make the laid-out label taller.
+          // The label's inline box is the engine's card world rect, placed by the camera container's
+          // transform; CSS padding can make the laid-out label taller.
           const style = (el as HTMLElement).style
+          const camera = new DOMMatrixReadOnly(getComputedStyle(document.getElementById('labels-camera')!).transform)
           return {
             id: el.id.slice('card-label-'.length),
             ...rectOf(el),
             card: {
-              left: overlay.left + parseFloat(style.left),
-              top: overlay.top + parseFloat(style.top),
-              width: parseFloat(style.width),
-              height: parseFloat(style.height),
+              left: overlay.left + camera.e + parseFloat(style.left) * camera.a,
+              top: overlay.top + camera.f + parseFloat(style.top) * camera.d,
+              width: parseFloat(style.width) * camera.a,
+              height: parseFloat(style.height) * camera.d,
             },
           }
         }),
@@ -241,7 +244,7 @@ async function waitForEditorSettled(page: Page, expectedLabels: number | null): 
     (expected) => {
       const ready = (window as unknown as { __gurowEditorReady?: boolean }).__gurowEditorReady === true
       const failed = document.getElementById('editor-gpu-error-notice') || document.getElementById('checkpoint-error-alert')
-      const labels = document.querySelectorAll('#labels-overlay > [id^="card-label-"]').length
+      const labels = document.querySelectorAll('#labels-overlay [id^="card-label-"]').length
       return failed || (ready && (expected === null || labels === expected))
     },
     { timeout: EDITOR_TIMEOUT_MS, polling: 250 },
@@ -280,13 +283,19 @@ async function selectCard(page: Page, id: string): Promise<void> {
   )
 }
 
-/** Performs real input and waits until the engine delivers a new screen rect for a card. */
+/**
+ * Performs real input and waits until the engine delivers a new screen rect for a card:
+ * a moved card changes its label's world bounds, a camera change the container transform.
+ */
 async function actAndWaitForCardMove(page: Page, id: string, act: () => Promise<void>): Promise<void> {
   const selector = `#card-label-${id}`
-  const before = await page.$eval(selector, (el) => el.getAttribute('style'))
+  const placement = (sel: string) =>
+    `${document.querySelector(sel)?.getAttribute('style')}|${document.getElementById('labels-camera')?.style.transform}`
+  await page.evaluate(`window.__gurowLabelPlacement = ${placement.toString()}`)
+  const before = await page.evaluate((sel) => (window as any).__gurowLabelPlacement(sel), selector)
   await act()
   await page.waitForFunction(
-    (sel, prev) => document.querySelector(sel)?.getAttribute('style') !== prev,
+    (sel, prev) => (window as any).__gurowLabelPlacement(sel) !== prev,
     { timeout: 15_000, polling: 'raf' },
     selector,
     before
@@ -669,7 +678,8 @@ const MALFORMED_CASES: MalformedCase[] = [
 /** Setup-side rejection of malformed and substituted fixture files (AC6). */
 function checkSetupRejection(evidence: Evidence, contract: BenchmarkContract, outDir: string, fixtures: Record<BenchmarkSize, BenchmarkFixture>): void {
   const primary = contract.primary_size
-  const smaller = BENCHMARK_SIZES.find((size) => size < primary)!
+  // Any other workload of the contract; v5 has none smaller than its primary.
+  const other = contractSizes(contract).find((size) => size !== primary)!
   const cases: Array<{ id: string; tamper: (dir: string) => void }> = [
     ...MALFORMED_CASES.map((c) => ({
       id: c.id,
@@ -681,11 +691,11 @@ function checkSetupRejection(evidence: Evidence, contract: BenchmarkContract, ou
     })),
     {
       id: 'smaller-workload-substituted',
-      tamper: (dir) => writeFileSync(fixtureFilePaths(dir, primary).checkpoint, JSON.stringify(fixtures[smaller].checkpoint)),
+      tamper: (dir) => writeFileSync(fixtureFilePaths(dir, primary).checkpoint, JSON.stringify(fixtures[other].checkpoint)),
     },
     {
       id: 'manifest-for-other-size',
-      tamper: (dir) => writeFileSync(fixtureFilePaths(dir, primary).manifest, JSON.stringify(fixtures[smaller].manifest)),
+      tamper: (dir) => writeFileSync(fixtureFilePaths(dir, primary).manifest, JSON.stringify(fixtures[other].manifest)),
     },
   ]
   for (const c of cases) {
@@ -834,7 +844,7 @@ async function main(): Promise<number> {
     await evidence.phase(['AC1', 'AC2', 'AC4'], 'generate', () => {
       console.log('[3/6] Generating, writing and re-reading the fixtures...')
       const fixtureDir = path.join(options.outDir, 'fixtures')
-      for (const size of BENCHMARK_SIZES) {
+      for (const size of contractSizes(contract)) {
         writeFixtureFiles(fixtureDir, generateBenchmarkFixture(contract, size, { canvasCss: canvas }))
         let fixture: BenchmarkFixture
         try {
@@ -845,7 +855,7 @@ async function main(): Promise<number> {
           continue
         }
         fixtures[size] = fixture
-        const recipe = contract.recipes[size]
+        const recipe = requireRecipe(contract, size)
         evidence.expect('AC1', `${size}:counts`, { cards: size, connections: recipe.connections, skills: size, tasks: size },
           { cards: fixture.checkpoint.editor.cards.length, connections: fixture.checkpoint.editor.connections.length,
             skills: fixture.checkpoint.application.skills.length,
@@ -856,12 +866,12 @@ async function main(): Promise<number> {
         evidence.satisfies('AC4', `${size}:planned-path-geometry`, 'initial count as recipe and every sample inside the band',
           pathVisibility[size], pathVisibility[size].in_band)
       }
-      const hashes = BENCHMARK_SIZES.map((size) => fixtures[size].manifest.editor_identity_hash)
-      evidence.expect('AC2', 'sizes-have-distinct-identity', 3, new Set(hashes).size)
+      const hashes = contractSizes(contract).map((size) => fixtures[size].manifest.editor_identity_hash)
+      evidence.expect('AC2', 'sizes-have-distinct-identity', contractSizes(contract).length, new Set(hashes).size)
     })
 
     console.log('[4/6] Loading each fixture through the route...')
-    for (const size of BENCHMARK_SIZES) {
+    for (const size of contractSizes(contract)) {
       if (!fixtures[size]) continue
       await evidence.phase(['AC3', 'AC4', 'AC5'], `load-${size}`, async () => {
         console.log(`  ${size} cards: restore, selection, visibility and GPU pixels`)
@@ -950,7 +960,7 @@ async function main(): Promise<number> {
   )
 
   evidence.satisfies('AC6', 'setup-metadata-emitted', 'metadata for all three fixtures', Object.keys(fixtureMetadata),
-    BENCHMARK_SIZES.every((size) => size in fixtureMetadata))
+    contractSizes(contract).every((size) => size in fixtureMetadata))
   const verdicts = Object.fromEntries((Object.keys(CRITERIA) as Criterion[]).map((ac) => [ac, evidence.verdict(ac)])) as Record<Criterion, Verdict>
   const overall = overallVerdict(Object.values(verdicts))
   const primary = fixtures[contract.primary_size]

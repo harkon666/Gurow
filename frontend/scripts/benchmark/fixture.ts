@@ -1,6 +1,7 @@
 /**
  * Deterministic benchmark fixtures for P1/T06 (issue #35 / T06-L3-02).
- * Contract: gurow-p1-v4 (docs/benchmarks/p1/contract.md §4 and protocol-v4.json).
+ * Contracts: gurow-p1-v5 (protocol-v5.json, ADR 0020) and the historical gurow-p1-v4
+ * (protocol-v4.json); docs/benchmarks/p1/contract.md §4.
  *
  * The numeric workload comes from the contract file, and the camera geometry
  * from the canvas dimensions measured in the settled browser layout, so neither
@@ -27,10 +28,13 @@ import {
   validateCheckpointIntegrity,
 } from '../../src/components/editor/checkpoint'
 import { INITIAL_LEARNING_PATH_FIXTURE } from '../../src/fixtures/learningPath'
-export const CONTRACT_ID = 'gurow-p1-v4'
+/** The current contract. gurow-p1-v4 stays readable so its 1,000-card primary can be re-run for comparison. */
+export const CONTRACT_ID = 'gurow-p1-v5'
+export const CONTRACT_IDS = ['gurow-p1-v4', CONTRACT_ID] as const
+export type ContractId = (typeof CONTRACT_IDS)[number]
 
 export const FIXTURE_GENERATOR_VERSION = 'gurow-p1-fixture-v2'
-export const BENCHMARK_SIZES = [100, 1000, 10000] as const
+export const BENCHMARK_SIZES = [100, 300, 1000, 10000] as const
 export type BenchmarkSize = (typeof BENCHMARK_SIZES)[number]
 
 /**
@@ -64,7 +68,7 @@ const WorkloadSchema = z.object({
   grid_rows: z.number().int().positive(),
 })
 const ProtocolSchema = z.object({
-  contract_id: z.literal(CONTRACT_ID),
+  contract_id: z.enum(CONTRACT_IDS),
   sampling: z.object({
     pan_drag_amplitude_cell_fraction: z.number().positive(),
     zoom_min_factor: z.number().positive(),
@@ -103,7 +107,7 @@ export interface PlannedMotion {
 }
 
 export interface BenchmarkContract {
-  contract_id: typeof CONTRACT_ID
+  contract_id: ContractId
   /** SHA-256 of the contract file bytes, for source identity. */
   sha256: string
   /** Size of the primary workload that carries the pass thresholds. */
@@ -111,27 +115,24 @@ export interface BenchmarkContract {
   motion: PlannedMotion
   card_size_world: Size
   minimum_canvas_css: Size
-  recipes: Record<BenchmarkSize, GridRecipe>
+  /** Only the sizes the contract defines; v4 has no 300-card workload. */
+  recipes: Partial<Record<BenchmarkSize, GridRecipe>>
 }
 
 /**
- * Parses protocol-v4.json into fixture recipes (contract §1 and §4).
+ * Parses a protocol file into fixture recipes (contract §1 and §4).
  * Visibility bands are primary-run median limits, not path-extreme gates;
  * comparisons have no visibility threshold.
  */
 export function parseBenchmarkContract(raw: string): BenchmarkContract {
   const protocol = ProtocolSchema.parse(JSON.parse(raw))
-  const primarySize = BENCHMARK_SIZES.find((size) => size === protocol.primary.cards)
-  if (!primarySize) {
-    throw new Error(`Contract primary workload of ${protocol.primary.cards} cards is not a benchmark size.`)
-  }
-  const workloads = [protocol.primary, ...protocol.comparisons]
-  const recipes = {} as Record<BenchmarkSize, GridRecipe>
+  const primarySize = protocol.primary.cards as BenchmarkSize
+  const recipes: Partial<Record<BenchmarkSize, GridRecipe>> = {}
 
-  for (const size of BENCHMARK_SIZES) {
-    const workload = workloads.find((w) => w.cards === size)
-    if (!workload) {
-      throw new Error(`Contract ${protocol.contract_id} defines no ${size}-card workload.`)
+  for (const workload of [protocol.primary, ...protocol.comparisons]) {
+    const size = workload.cards as BenchmarkSize
+    if (!BENCHMARK_SIZES.includes(size)) {
+      throw new Error(`Contract ${protocol.contract_id} workload of ${workload.cards} cards is not a benchmark size.`)
     }
     if (workload.grid_columns * workload.grid_rows !== size) {
       throw new Error(`Contract grid ${workload.grid_columns}x${workload.grid_rows} does not hold ${size} cards.`)
@@ -167,6 +168,18 @@ export function parseBenchmarkContract(raw: string): BenchmarkContract {
   }
 }
 
+/** Benchmark sizes the contract defines, smallest first. */
+export function contractSizes(contract: BenchmarkContract): BenchmarkSize[] {
+  return BENCHMARK_SIZES.filter((size) => contract.recipes[size])
+}
+
+/** The contract's recipe for `size`; throws when the contract defines no such workload. */
+export function requireRecipe(contract: BenchmarkContract, size: BenchmarkSize): GridRecipe {
+  const recipe = contract.recipes[size]
+  if (!recipe) throw new Error(`Contract ${contract.contract_id} defines no ${size}-card workload.`)
+  return recipe
+}
+
 export function loadBenchmarkContract(contractPath: string): BenchmarkContract {
   return parseBenchmarkContract(readFileSync(contractPath, 'utf8'))
 }
@@ -183,7 +196,7 @@ export interface FixtureGeometry {
 }
 
 export interface FixtureManifest {
-  contract_id: typeof CONTRACT_ID
+  contract_id: ContractId
   contract_sha256: string
   generator_version: typeof FIXTURE_GENERATOR_VERSION
   size: BenchmarkSize
@@ -353,10 +366,7 @@ export function generateBenchmarkFixture(
   size: BenchmarkSize,
   options: GenerateFixtureOptions
 ): BenchmarkFixture {
-  const recipe = contract.recipes[size]
-  if (!recipe) {
-    throw new Error(`Unsupported benchmark size: ${size}`)
-  }
+  const recipe = requireRecipe(contract, size)
   const cardSize = contract.card_size_world
   const geometry = computeFixtureGeometry(recipe, cardSize, options.canvasCss)
   const savedAt = options.savedAt ?? '2026-09-28T00:00:00.000Z'

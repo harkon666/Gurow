@@ -147,7 +147,7 @@ fn test_hit_testing_and_selection_with_title() {
 }
 
 #[test]
-fn test_label_layouts_with_camera() {
+fn test_label_layouts_are_world_space_and_camera_independent() {
     let mut state = EditorState::new();
     state.camera = Camera::new(100.0, 50.0, 2.0); // 2x zoom, offset (100, 50)
 
@@ -163,7 +163,8 @@ fn test_label_layouts_with_camera() {
     let label = &labels[0];
     assert_eq!(label.card_id, "card-1");
     assert_eq!(label.title, "WebGPU Pipeline");
-    assert_eq!(label.screen_rect, Rect::new(120.0, 90.0, 200.0, 100.0));
+    // The overlay applies the camera as one transform; labels carry world bounds.
+    assert_eq!(label.world_rect, Rect::new(10.0, 20.0, 100.0, 50.0));
     assert_eq!(label.selected, false);
 
     state.apply_command(EditorCommand::SelectCard {
@@ -256,7 +257,7 @@ fn test_json_protocol_roundtrip() {
             labels: vec![crate::protocol::LabelLayout {
                 card_id: "card-1".into(),
                 title: "Title 1".into(),
-                screen_rect: Rect::new(10.0, 20.0, 180.0, 80.0),
+                world_rect: Rect::new(10.0, 20.0, 180.0, 80.0),
                 selected: true,
             }],
         },
@@ -450,7 +451,42 @@ fn test_canvas_pan_and_zoom_commands() {
     });
     assert_eq!(state.camera.zoom, 2.0);
     assert!(zoom_events.iter().any(|e| matches!(e, EditorEvent::CameraChanged { zoom, .. } if (*zoom - 2.0).abs() < 1e-4)));
-    assert!(zoom_events.iter().any(|e| matches!(e, EditorEvent::LabelsUpdated { .. })));
+    assert!(!zoom_events.iter().any(|e| matches!(e, EditorEvent::LabelsUpdated { .. })));
+}
+
+#[test]
+fn test_camera_only_commands_move_labels_through_camera_changed() {
+    let mut state = EditorState::new();
+    state.apply_command(EditorCommand::CreateCard {
+        id: "card-a".into(),
+        title: "A".into(),
+        position: Point::new(100.0, 100.0),
+        size: None,
+    });
+    let labels_before = state.get_label_layouts();
+    let camera_commands = vec![
+        EditorCommand::PanCamera { delta_x: 15.0, delta_y: -5.0 },
+        EditorCommand::ZoomAt { screen_x: 50.0, screen_y: 60.0, factor: 1.5 },
+        EditorCommand::SetCamera { offset_x: 3.0, offset_y: 4.0, zoom: 0.5 },
+        EditorCommand::PointerDown { screen_x: 500.0, screen_y: 500.0 },
+        EditorCommand::PointerMove { screen_x: 520.0, screen_y: 530.0 },
+        EditorCommand::PointerUp { screen_x: 520.0, screen_y: 530.0 },
+        EditorCommand::ResizeViewport { width: 640.0, height: 480.0 },
+    ];
+    for cmd in camera_commands {
+        let moves_camera = matches!(cmd, EditorCommand::PanCamera { .. } | EditorCommand::ZoomAt { .. } | EditorCommand::SetCamera { .. } | EditorCommand::PointerMove { .. });
+        let events = state.apply_command(cmd);
+        assert!(!events.iter().any(|e| matches!(e, EditorEvent::LabelsUpdated { .. })), "camera-only command re-sent labels: {events:?}");
+        assert_eq!(moves_camera, events.iter().any(|e| matches!(e, EditorEvent::CameraChanged { .. })), "{events:?}");
+    }
+    assert_eq!(state.get_label_layouts(), labels_before);
+
+    // Moving a card still re-sends its world bounds.
+    let start = state.camera.world_to_screen(Point::new(110.0, 110.0));
+    state.apply_command(EditorCommand::PointerDown { screen_x: start.x, screen_y: start.y });
+    let drag = state.apply_command(EditorCommand::PointerMove { screen_x: start.x + 10.0, screen_y: start.y });
+    let labels = drag.iter().find_map(|e| match e { EditorEvent::LabelsUpdated { labels } => Some(labels.clone()), _ => None }).expect("drag re-sends labels");
+    assert!((labels[0].world_rect.x - (100.0 + 10.0 / state.camera.zoom)).abs() < 1e-3);
 }
 
 #[test]
