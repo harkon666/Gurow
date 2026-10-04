@@ -63,6 +63,8 @@ Review and send transactions lock **Enrollment FOR UPDATE before Submission**, r
 
 Current XP/Mastery remain derived from durable revision decisions. T10 additionally records XP Award/Correction and Mastery award/revocation transitions in the same transaction as each Review mutation. T11 persists scoped Access Overrides; T12 adds explicit Enrollment lifecycle and durable Task starts. Personal XP persistence and authentication-provider integration are not implemented. There is no generic Review overwrite endpoint.
 
+Recorded times follow the accepted lock order (T14): sends, Reviews, revocations and personal actions read one `clock_timestamp()` after taking their locks (`src/db/clock.ts`) and reuse it for every record of that transition. A superseded revision's `supersededAt` equals its successor's `sentAt`, XP/Mastery events share their decision or revocation time, and a send that queued behind a Review is recorded after that decision. Transaction-start `now()` is not used for ordered history, because a request can begin before it waits for a lock.
+
 ### Grant or withdraw one scoped Access Override (T11)
 
 `POST /enrollments/:enrollmentId/skills/:skillId/access-overrides`
@@ -171,3 +173,7 @@ All routes require trusted identity and act only for the Personal Workspace owne
 - Every request holds the Path row lock through commit, so checks, changes, history and reads are one state. XP, Mastery and override histories reject UPDATE/DELETE in SQL. A late history failure rolls back the whole action.
 
 `bun test test/personal.test.ts` covers owner-only authority against the learner's Coach, peers and other Accounts; free Mastery; idempotent sequential and concurrent completion/undo; the 20→50 correction scenario; Path-local thresholds, relocking and the reasonless override; archival retention; separation from Enrollments in both directions; fresh-connection readback; immutable history; late rollback of each history kind; and a PostgreSQL-observed wait of a reward edit behind an in-flight completion. Intentional rollback tests log storage exceptions.
+
+## P2 gate (T14)
+
+`bun test test/p2-gate.test.ts` runs competing requests across Enrollment, Submission, Review, revocation, override and lifecycle boundaries over the SPEC reference Path, plus the end-to-end reference flow, privacy matrix, lifecycle and personal 20→50 checks. Forced orders hold a row lock from a separate connection and observe `pg_blocking_pids` before starting the competing request. Unforced storms assert order-independent invariants in SQL at full timestamp precision. These invariants cover contiguous revision numbers, supersession at the successor's send, no Review on superseded work, no successor sent while a reviewed revision was pending, events at their causal time, one Submission per Task, and no revision sent while inactive. They also check that each Task's contribution moves only between zero and its reward. Results are recorded in [the P2 gate report](../docs/validation/t14-p2-gate-report.md).

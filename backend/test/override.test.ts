@@ -4,6 +4,7 @@ import { createApp } from '../src/app'
 import { createDatabase, type Database } from '../src/db/client'
 import { enrollments, versionPrerequisites, versionSkills, versionTasks } from '../src/db/schema'
 import { FIXTURE_IDENTITY_HEADER, fixtureIdentity } from '../src/identity'
+import { waitForBlockedBy } from './support/blocking'
 import { prepareTestDatabase, resetTestDatabase, TEST_DATABASE_URL } from './support/database'
 import { seedEnrollmentFixture, type EnrollmentFixture } from './support/fixtures'
 
@@ -252,14 +253,6 @@ it('AC2/4/5: late record storage failure rolls back grant and revoke with no sta
   expect(skill(await state()).access).toBe(false)
 })
 
-async function waitForBlockedBy(blocker: number) {
-  for (let attempt = 0; attempt < 200; attempt++) {
-    const rows = await db.execute<{ pid: number }>(sql`select pid from pg_stat_activity where ${blocker} = any(pg_blocking_pids(pid))`)
-    if (rows.length) return rows[0].pid
-    await Bun.sleep(5)
-  }
-  throw new Error(`No PostgreSQL-observed wait on backend ${blocker}`)
-}
 /** Pause the first request inside its Enrollment lock and observe the second waiting. */
 async function orderedRequests(table: 'override_records' | 'submission_revisions', first: () => Promise<Response>, second: () => Promise<Response>) {
   const other = createDatabase(TEST_DATABASE_URL, 1)
@@ -278,9 +271,9 @@ async function orderedRequests(table: 'override_records' | 'submission_revisions
   try {
     const pid = await locked
     pendingFirst = first()
-    const firstPid = await waitForBlockedBy(pid)
+    const firstPid = await waitForBlockedBy(db, pid)
     pendingSecond = second()
-    await waitForBlockedBy(firstPid)
+    await waitForBlockedBy(db, firstPid)
     release()
     await locker
     return await Promise.all([pendingFirst, pendingSecond])

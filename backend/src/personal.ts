@@ -1,5 +1,6 @@
-import { and, asc, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq, sql, type SQL } from 'drizzle-orm'
 import type { Database } from './db/client'
+import { lockedTimestamp } from './db/clock'
 import { learningPaths, personalMasteryEvents, personalOverrideRecords, personalPrerequisites, personalSkills, personalTasks, personalWorkspaces, personalXpEvents } from './db/schema'
 
 type Tx = Parameters<Parameters<Database['transaction']>[0]>[0]
@@ -61,10 +62,10 @@ export async function readPersonalLearningState(db: Database, learningPathId: st
 }
 
 /** Runs one owner action under the Path lock and returns the committed state it produced. */
-async function act(db: Database, learningPathId: string, accountId: string, change: (tx: Tx, now: Date) => Promise<Outcome>) {
+async function act(db: Database, learningPathId: string, accountId: string, change: (tx: Tx, now: SQL) => Promise<Outcome>) {
   return db.transaction(async (tx) => {
     if (!await lockOwnedPath(tx, learningPathId, accountId)) return { ok: false, refusal: 'learning_path_not_found' } as const
-    const outcome = await change(tx, new Date())
+    const outcome = await change(tx, await lockedTimestamp(tx))
     return outcome.ok ? { ok: true, changed: outcome.changed, learningState: await readState(tx, learningPathId) } as const : outcome
   })
 }
@@ -82,7 +83,7 @@ async function hasAccess(tx: Tx, learningPathId: string, skillId: string) {
 }
 
 /** Records a nonzero change in one Task's contribution; the first completion is its XP Award. */
-async function recordXp(tx: Tx, task: typeof personalTasks.$inferSelect, accountId: string, occurredAt: Date, cause: 'completion' | 'completion_undone' | 'reward_change', amount: number) {
+async function recordXp(tx: Tx, task: typeof personalTasks.$inferSelect, accountId: string, occurredAt: SQL, cause: 'completion' | 'completion_undone' | 'reward_change', amount: number) {
   if (amount === 0) return
   const [prior] = await tx.select({ id: personalXpEvents.id }).from(personalXpEvents).where(and(eq(personalXpEvents.learningPathId, task.learningPathId), eq(personalXpEvents.taskId, task.taskId))).limit(1)
   await tx.insert(personalXpEvents).values({ learningPathId: task.learningPathId, taskId: task.taskId, actorAccountId: accountId, occurredAt, cause, amount, kind: cause === 'completion' && !prior ? 'award' : 'correction' })
@@ -94,7 +95,7 @@ export const completeTask = (db: Database, learningPathId: string, taskId: strin
   if (!found.ok) return found
   if (found.task.completedAt) return { ok: true, changed: false }
   if (!await hasAccess(tx, learningPathId, found.task.skillId)) return { ok: false, refusal: 'skill_locked' }
-  await tx.update(personalTasks).set({ completedAt: now, startedAt: found.task.startedAt ?? now }).where(eq(personalTasks.taskId, taskId))
+  await tx.update(personalTasks).set({ completedAt: now, startedAt: sql`coalesce(${personalTasks.startedAt}, ${now})` }).where(eq(personalTasks.taskId, taskId))
   await recordXp(tx, found.task, accountId, now, 'completion', found.task.xpReward)
   return { ok: true, changed: true }
 })

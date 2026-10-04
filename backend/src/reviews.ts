@@ -3,6 +3,7 @@ import { deriveLearningState } from './access'
 import type { Database } from './db/client'
 import { coachWorkspaces, enrollmentLifecycleRecords, enrollments, learningPaths, learningPathVersions, submissionReviews, submissionRevisions, submissions, taskStarts } from './db/schema'
 import { taskContext } from './submissions'
+import { lockedTimestamp } from './db/clock'
 import { readHistory, recordTransitions } from './history'
 
 export interface ReviewContents {
@@ -31,9 +32,10 @@ export async function recordReview(db: Database, enrollmentId: string, taskId: s
     const [existing] = await tx.select().from(submissionReviews).where(eq(submissionReviews.revisionId, revisionId))
     if (existing) return { ok: false, refusal: 'revision_already_reviewed' } as const
     const before = await deriveLearningState(tx, enrollmentId, enrollment.learningPathVersionId, accountId, enrollment.status === 'active')
-    const [review] = await tx.insert(submissionReviews).values({ revisionId, coachAccountId: accountId, ...contents, decidedAt: new Date() }).returning()
+    const decidedAt = await lockedTimestamp(tx)
+    const [review] = await tx.insert(submissionReviews).values({ revisionId, coachAccountId: accountId, ...contents, decidedAt }).returning()
     const after = await deriveLearningState(tx, enrollmentId, enrollment.learningPathVersionId, accountId, enrollment.status === 'active')
-    await recordTransitions(tx, before, after, revisionId, accountId, review.decidedAt)
+    await recordTransitions(tx, before, after, revisionId, accountId, decidedAt)
     return { ok: true, value: review } as const
   })
 }
@@ -52,7 +54,7 @@ export async function revokeApproval(db: Database, enrollmentId: string, taskId:
     if (!review || review.review.decision !== 'approval' || review.review.coachAccountId !== accountId) return { ok: false, refusal: 'approval_not_found' } as const
     if (review.review.revokedAt) return { ok: false, refusal: 'approval_already_revoked' } as const
     const before = await deriveLearningState(tx, enrollmentId, enrollment.learningPathVersionId, accountId, enrollment.status === 'active')
-    const occurredAt = new Date()
+    const occurredAt = await lockedTimestamp(tx)
     const [revoked] = await tx.update(submissionReviews).set({ revokedAt: occurredAt, revocationReason: reason, revokedByAccountId: accountId }).where(eq(submissionReviews.revisionId, revisionId)).returning()
     const after = await deriveLearningState(tx, enrollmentId, enrollment.learningPathVersionId, accountId, enrollment.status === 'active')
     await recordTransitions(tx, before, after, revisionId, accountId, occurredAt)

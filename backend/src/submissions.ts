@@ -1,6 +1,7 @@
 import { and, asc, eq, isNull, max, notExists, sql } from 'drizzle-orm'
 import type { Database } from './db/client'
 import { hasSkillAccess } from './access'
+import { lockedTimestamp } from './db/clock'
 import { coachWorkspaces, enrollments, learningPaths, learningPathVersions, submissionDrafts, submissionReviews, submissionRevisions, submissions, taskStarts, versionTasks } from './db/schema'
 
 /** Why a draft or Submission operation is refused; each maps to one HTTP status at the route. */
@@ -152,14 +153,16 @@ export async function sendRevision(db: Database, enrollmentId: string, taskId: s
     const [submission] = await tx.select().from(submissions)
       .where(and(eq(submissions.enrollmentId, enrollmentId), eq(submissions.taskId, taskId))).for('update')
 
+    // Supersession and the new revision share one time taken after both locks.
+    const sentAt = await lockedTimestamp(tx)
     const [{ latest }] = await tx.select({ latest: max(submissionRevisions.revisionNumber) }).from(submissionRevisions)
       .where(eq(submissionRevisions.submissionId, submission.id))
-    await tx.update(submissionRevisions).set({ supersededAt: sql`now()` })
+    await tx.update(submissionRevisions).set({ supersededAt: sentAt })
       .where(and(eq(submissionRevisions.submissionId, submission.id), isNull(submissionRevisions.supersededAt),
         notExists(tx.select({ id: submissionReviews.revisionId }).from(submissionReviews)
           .where(eq(submissionReviews.revisionId, submissionRevisions.id)))))
     const [revision] = await tx.insert(submissionRevisions)
-      .values({ submissionId: submission.id, revisionNumber: (latest ?? 0) + 1, ...contents })
+      .values({ submissionId: submission.id, revisionNumber: (latest ?? 0) + 1, ...contents, sentAt })
       .returning()
     return { ok: true, value: { submission, revision, createdSubmission: Boolean(inserted) } }
   })

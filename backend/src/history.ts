@@ -1,11 +1,11 @@
-import { and, asc, eq } from 'drizzle-orm'
+import { and, asc, eq, type SQL } from 'drizzle-orm'
 import type { Database } from './db/client'
 import { masteryEvents, xpEvents } from './db/schema'
 import { deriveLearningState } from './access'
 
 type State = Awaited<ReturnType<typeof deriveLearningState>>
 /** Called under the shared Enrollment lock, in the same transaction as the Review mutation. */
-export async function recordTransitions(db: Pick<Database, 'insert' | 'select'>, before: State, after: State, revisionId: string, actorAccountId: string, occurredAt: Date) {
+export async function recordTransitions(db: Pick<Database, 'insert' | 'select'>, before: State, after: State, revisionId: string, actorAccountId: string, occurredAt: SQL) {
   for (const task of after.tasks) {
     const previous = before.tasks.find((t) => t.taskId === task.taskId)!
     if (previous.approved !== task.approved) {

@@ -4,6 +4,7 @@ import { createApp } from '../src/app'
 import { createDatabase, type Database } from '../src/db/client'
 import { enrollments, masteryEvents, submissionReviews, tasks, xpEvents, versionPrerequisites, versionSkills, versionTasks } from '../src/db/schema'
 import { FIXTURE_IDENTITY_HEADER, fixtureIdentity } from '../src/identity'
+import { waitForBlockedBy } from './support/blocking'
 import { prepareTestDatabase, resetTestDatabase, TEST_DATABASE_URL } from './support/database'
 import { seedEnrollmentFixture, type EnrollmentFixture } from './support/fixtures'
 let db: Database, close: () => Promise<void>, fx: EnrollmentFixture, app: ReturnType<typeof createApp>, enrollmentId: string
@@ -239,14 +240,6 @@ it('AC5/6: concurrent final revocation and later Approval serialize to coherent 
   expect(after.masteryHistory.map((e: any) => e.action)).toEqual(after.masteryHistory.length === 1 ? ['award'] : ['award', 'revocation', 'award'])
 })
 
-async function waitForBlockedBy(blocker: number) {
-  for (let attempt = 0; attempt < 200; attempt++) {
-    const rows = await db.execute<{ pid: number }>(sql`select pid from pg_stat_activity where ${blocker} = any(pg_blocking_pids(pid))`)
-    if (rows.length) return rows[0].pid
-    await Bun.sleep(5)
-  }
-  throw new Error(`No PostgreSQL-observed wait on backend ${blocker}`)
-}
 /** Pause the first request after its Enrollment lock; prove the second really waits. */
 async function orderedRequests(operation: 'insert' | 'update', first: () => Promise<Response>, second: () => Promise<Response>) {
   const other = createDatabase(TEST_DATABASE_URL, 1)
@@ -265,9 +258,9 @@ async function orderedRequests(operation: 'insert' | 'update', first: () => Prom
   try {
     const pid = await locked
     pendingFirst = first()
-    const firstPid = await waitForBlockedBy(pid)
+    const firstPid = await waitForBlockedBy(db, pid)
     pendingSecond = second()
-    await waitForBlockedBy(firstPid)
+    await waitForBlockedBy(db, firstPid)
     release()
     await locker
     return await Promise.all([pendingFirst, pendingSecond])

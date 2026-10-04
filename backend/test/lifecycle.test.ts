@@ -4,6 +4,7 @@ import { createApp } from '../src/app'
 import { createDatabase, type Database } from '../src/db/client'
 import { enrollments, versionPrerequisites, versionSkills, versionTasks } from '../src/db/schema'
 import { FIXTURE_IDENTITY_HEADER, fixtureIdentity } from '../src/identity'
+import { waitForBlockedBy } from './support/blocking'
 import { prepareTestDatabase, resetTestDatabase, TEST_DATABASE_URL } from './support/database'
 import { seedEnrollmentFixture, type EnrollmentFixture } from './support/fixtures'
 
@@ -308,14 +309,6 @@ it('AC1/5/6: owning-Coach authority is bounded to the target Workspace', async (
   expect((await (await request(`/enrollments/${foreign.id}/learning-state`, 'learner')).json() as any).learningState.lifecycleHistory).toHaveLength(2)
 })
 
-async function waitForBlockedBy(blocker: number) {
-  for (let attempt = 0; attempt < 200; attempt++) {
-    const rows = await db.execute<{ pid: number }>(sql`select pid from pg_stat_activity where ${blocker} = any(pg_blocking_pids(pid))`)
-    if (rows.length) return rows[0].pid
-    await Bun.sleep(5)
-  }
-  throw new Error(`No PostgreSQL-observed wait on backend ${blocker}`)
-}
 /** Pause a real request after its Enrollment lock and observe the next request waiting. */
 async function orderedRequests(table: 'enrollment_lifecycle_records' | 'submission_revisions' | 'task_starts', first: () => Promise<Response>, second: () => Promise<Response>) {
   const other = createDatabase(TEST_DATABASE_URL, 1)
@@ -334,9 +327,9 @@ async function orderedRequests(table: 'enrollment_lifecycle_records' | 'submissi
   try {
     const pid = await locked
     pendingFirst = first()
-    const firstPid = await waitForBlockedBy(pid)
+    const firstPid = await waitForBlockedBy(db, pid)
     pendingSecond = second()
-    await waitForBlockedBy(firstPid)
+    await waitForBlockedBy(db, firstPid)
     release()
     await locker
     return await Promise.all([pendingFirst, pendingSecond])

@@ -4,6 +4,7 @@ import { createApp } from '../src/app'
 import { createDatabase, type Database } from '../src/db/client'
 import { versionTasks } from '../src/db/schema'
 import { FIXTURE_IDENTITY_HEADER, fixtureIdentity } from '../src/identity'
+import { waitForBlockedBy } from './support/blocking'
 import { prepareTestDatabase, resetTestDatabase, TEST_DATABASE_URL } from './support/database'
 import { seedEnrollmentFixture, seedPersonalFixture, type EnrollmentFixture, type PersonalFixture } from './support/fixtures'
 
@@ -215,7 +216,11 @@ it('AC4: Path-local XP Thresholds relock started work; an explicit override waiv
   expect(skill(s, px.skills.skillA.id)).toEqual(skill(locked, px.skills.skillA.id))
   expect([s.xp, s.tasks, s.xpHistory, s.masteryHistory]).toEqual([locked.xp, locked.tasks, locked.xpHistory, locked.masteryHistory])
   await ok(override(true), false)
+  const storedStart = () => db.execute<{ at: string }>(sql`select started_at::text as at from personal_tasks where task_id = ${px.tasks.taskB.id}`)
+  const [retained] = await storedStart()
   s = await ok(complete(px.tasks.taskB.id))
+  // Completing keeps the first start exactly, at PostgreSQL precision.
+  expect(await storedStart()).toEqual([retained])
   expect(s.xp).toBe(5)
   expect(skill(s)).toMatchObject({ mastery: false })
   // Revoking returns B to the ordinary rules while its completed work and contribution stay.
@@ -318,14 +323,6 @@ it('AC6: owner actions persist through a fresh connection; history rejects rewri
   expect(retried.xp).toBe(60)
 })
 
-async function waitForBlockedBy(blocker: number) {
-  for (let attempt = 0; attempt < 200; attempt++) {
-    const rows = await db.execute<{ pid: number }>(sql`select pid from pg_stat_activity where ${blocker} = any(pg_blocking_pids(pid))`)
-    if (rows.length) return rows[0].pid
-    await Bun.sleep(5)
-  }
-  throw new Error(`No PostgreSQL-observed wait on backend ${blocker}`)
-}
 
 it('AC2/3/6: a reward edit waiting behind an in-flight completion applies the difference to the committed completion', async () => {
   const other = createDatabase(TEST_DATABASE_URL, 1)
@@ -344,10 +341,10 @@ it('AC2/3/6: a reward edit waiting behind an in-flight completion applies the di
   try {
     const pid = await locked
     pending = [complete()]
-    const completionPid = await waitForBlockedBy(pid)
+    const completionPid = await waitForBlockedBy(db, pid)
     pending.push(reward(50))
     // The edit waits on the completion's Path lock, not on the test barrier.
-    await waitForBlockedBy(completionPid)
+    await waitForBlockedBy(db, completionPid)
     release()
     await locker
     const responses = await Promise.all(pending)
