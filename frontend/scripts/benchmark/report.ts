@@ -127,7 +127,7 @@ export function combineVerdicts(verdicts: Verdict[]): Verdict {
   return verdicts.includes('FAIL') ? 'FAIL' : verdicts.includes('NOT_MEASURED') ? 'NOT_MEASURED' : 'PASS'
 }
 export { nearestRank }
-function stats(values: number[], duration_seconds: number): Statistics {
+export function stats(values: number[], duration_seconds: number): Statistics {
   return { unit: 'ms', n: values.length, duration_seconds, p50: nearestRank(values, .5), p95: nearestRank(values, .95),
     max: values.length ? Math.max(...values) : null, over_50_ms: values.filter(v => v > 50).length }
 }

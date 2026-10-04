@@ -26,6 +26,10 @@ Routine `python3 scripts/harness.py check` does not launch the headed T06 captur
 
 Run `cd frontend && bun run capture:p1` for a primary capture under contract `gurow-p1-v5` (300 cards, ADR 0020); `bun run capture:p1:v4-1000` re-runs the historical 1,000-card v4 primary for comparison. It builds the current source, runs the preflight (hardware adapter, focused on-screen window, AC power, idle rAF matching the display refresh), the delay sanity captures, and the pan/zoom/drag runs, then reduces the evidence. Keep the browser window focused and visible until it exits. Evidence goes to `.harness/t06/primary/`; `--size 100 --headless` gives a diagnostic run that can never qualify P1.
 
+For the parent #7 gate, run `cd frontend && bun run capture:p1:gate`. It runs the 300-card v5 capture and the 1,000-card informational run (one run per scenario, no threshold), then writes `.harness/t06/gate/gate-report.md`: a PASS/FAIL table per scenario, the 1,000-card numbers, the environment and the proxy limitation. The verdict is the reducer's 300-card metrics verdict; functional coverage comes from the `t06-functional` check instead of the capture. Exit 0 means PASS, 1 FAIL and 2 NOT_MEASURED. `--report-only` re-summarizes existing captures.
+
+`t06-functional` (`bun run check:t06`) is the P1 functional flow in one headless browser session. It builds current sources first and covers create/select, Task edits, a valid connection, cycle rejection, pan/zoom/drag, one-step undo/redo, reload, a renderer failure with retry, and the no-WebGPU list on the same document. It runs in the full profile.
+
 A routine full pass is code/regression evidence only; it does not establish P1 performance acceptance. Report a skipped headed capture separately in review handoffs and task notes. The v1 collector qualification (`bun run qualify:native:v1`) is historical and is not part of T06 acceptance.
 
 ## Finish and hand off
