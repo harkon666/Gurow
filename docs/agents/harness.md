@@ -9,6 +9,8 @@ Use this workflow for ticket implementation, review fixes, and review handoff. T
 3. Fill each criterion's `test` with a repository test-file path and `assertion` with the user action, observable result, and failure case. Preserve the captured requirements. Split composite criteria into scenarios within the assertion field. State proof gaps explicitly in `notes`.
 4. Check `harness.json`: the ticket must have its own acceptance check in `tickets`. Existing T04 browser coverage is regression coverage for later tickets, not proof of their new behavior. Add required commands with argument arrays and repository-relative working directories. Full checks must build the current source before testing the browser.
 
+Backend checks (`db-up`, `backend-types`, `backend-tests`) need Docker access: `db-up` starts the PostgreSQL container from `compose.yaml` (127.0.0.1:5433) and the tests use the separate `gurow_test` database.
+
 ## Implement one behavior at a time
 
 1. Use the agreed browser/application or public Rust-core seam in `docs/SPEC.md`. For a bug, make a regression test fail on that bug first; record the failure and subsequent passing command in `notes`. Run focused tests while editing, and `python3 scripts/harness.py check --quick` at integration points.

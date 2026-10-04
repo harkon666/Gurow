@@ -15,6 +15,9 @@
     "t43-gpu-errors": {"cwd": "frontend", "argv": ["bun", "run", "scripts/gpu-error-check.ts"], "timeout": 180},
     "t06-l3-03-capture-tests": {"cwd": "frontend", "argv": ["bun", "test", "scripts/benchmark/scenarios.test.ts", "scripts/benchmark/run.test.ts", "scripts/benchmark/report.test.ts", "src/components/editor/benchmarkHooks.test.ts", "src/components/editor/wheelCoalescer.test.ts"], "timeout": 120},
     "t06-l3-02-fixture-check": {"cwd": "frontend", "argv": ["bun", "run", "scripts/benchmark/fixture-check.ts", "--contract", "../docs/benchmarks/p1/protocol-v4.json", "--out", "../.harness/t06/fixtures"], "timeout": 900},
+    "db-up": {"cwd": ".", "argv": ["docker", "compose", "up", "-d", "--wait"], "timeout": 180},
+    "backend-types": {"cwd": "backend", "argv": ["bun", "run", "typecheck"], "timeout": 120},
+    "backend-tests": {"cwd": "backend", "argv": ["bun", "test"], "timeout": 180},
     "t06-l3-08-regressions": {"cwd": "frontend", "argv": ["bun", "test", "src/components/editor/pointerMoveCoalescer.test.ts", "src/components/editor/selection.test.ts", "src/components/editor/protocol.test.ts", "scripts/benchmark/fixture.test.ts", "scripts/benchmark/report.test.ts", "scripts/benchmark/trace-summary.test.ts"], "timeout": 120},
     "t06-l3-08-engine-labels": {"cwd": ".", "argv": ["cargo", "test", "--manifest-path", "editor/Cargo.toml", "-p", "engine-core", "label"], "timeout": 300},
     "t06-l3-08-fixture-check-v5": {"cwd": "frontend", "argv": ["bun", "run", "scripts/benchmark/fixture-check.ts", "--contract", "../docs/benchmarks/p1/protocol-v5.json", "--out", "../.harness/t06/fixtures-v5"], "timeout": 900},
@@ -22,8 +25,8 @@
     "t06-l3-06-gate-tests": {"cwd": "frontend", "argv": ["bun", "test", "scripts/benchmark/gate.test.ts", "scripts/benchmark/report.test.ts", "scripts/benchmark/fixture.test.ts", "scripts/benchmark/run.test.ts"], "timeout": 120}
   },
   "profiles": {
-    "quick": ["harness-tests", "frontend-types", "frontend-tests", "rust-tests", "collector-tests", "report-tests"],
-    "full": ["harness-tests", "frontend-types", "frontend-tests", "rust-tests", "build", "collector-tests", "t04-browser", "t05-browser", "editor-lifecycle", "t06-functional"]
+    "quick": ["harness-tests", "frontend-types", "frontend-tests", "rust-tests", "collector-tests", "report-tests", "db-up", "backend-types", "backend-tests"],
+    "full": ["harness-tests", "frontend-types", "frontend-tests", "rust-tests", "build", "collector-tests", "t04-browser", "t05-browser", "editor-lifecycle", "t06-functional", "db-up", "backend-types", "backend-tests"]
   },
   "tickets": {
     "T44": ["t44-label-scroll", "t04-browser", "t05-browser", "editor-lifecycle", "t06-functional"],
@@ -34,6 +37,7 @@
     "T06-L3-04": ["report-tests"],
     "T06-L3-03": ["t06-l3-03-capture-tests", "frontend-types"],
     "T06-L3-09": ["t43-gpu-errors", "t05-browser", "editor-lifecycle"],
+    "T07": ["db-up", "backend-types", "backend-tests"],
     "T06-L3-08": ["t06-l3-08-regressions", "t06-l3-08-engine-labels", "t06-l3-08-fixture-check-v5", "t04-browser", "t05-browser", "editor-lifecycle"],
     "T06-L3-06": ["t06-functional", "t06-l3-06-gate-tests", "t06-l3-08-fixture-check-v5", "frontend-types"]
   }

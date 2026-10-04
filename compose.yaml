@@ -1,0 +1,24 @@
+# Local PostgreSQL for the Gurow backend (P2). Start with `docker compose up -d`.
+# Bound to 127.0.0.1:5433 so it neither clashes with other local Postgres
+# containers on 5432 nor listens on the network. Development credentials only.
+name: gurow
+
+services:
+  postgres:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: gurow
+      POSTGRES_PASSWORD: gurow
+      POSTGRES_DB: gurow
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gurow -d gurow"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  postgres-data:
