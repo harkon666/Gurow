@@ -162,7 +162,7 @@ async function main() {
     page.setDefaultTimeout(10000)
     page.on('pageerror', error => pageErrors.push(String(error)))
     await page.setViewport({ width: 1280, height: 800, deviceScaleFactor: 1 })
-    await page.goto(URL, { waitUntil: 'networkidle0' })
+    await page.goto(`${URL}/editor`, { waitUntil: 'networkidle0' })
     await page.evaluate(() => localStorage.clear())
     await page.reload({ waitUntil: 'networkidle0' })
     await page.waitForSelector('#card-label-skill-rust-basics')
@@ -352,7 +352,7 @@ async function main() {
     await noGpu.evaluateOnNewDocument(() => {
       Object.defineProperty(Navigator.prototype, 'gpu', { get: () => undefined, configurable: true })
     })
-    await noGpu.goto(URL, { waitUntil: 'networkidle0' })
+    await noGpu.goto(`${URL}/editor`, { waitUntil: 'networkidle0' })
     await noGpu.waitForSelector('#editor-gpu-notice')
     const note = await noGpu.$eval('#list-positioning-note', el => el.textContent ?? '')
     check(note.includes('Card positioning remains a canvas operation'), `Positioning note missing: ${note}`)

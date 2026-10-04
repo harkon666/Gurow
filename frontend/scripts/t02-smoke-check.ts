@@ -277,7 +277,7 @@ async function main() {
     })
 
     console.log(`Navigating to ${baseUrl}/...`)
-    await page.goto(`${baseUrl}/`, { waitUntil: 'networkidle0' })
+    await page.goto(`${baseUrl}/editor`, { waitUntil: 'networkidle0' })
 
     // Wait for canvas element and initial labels
     await page.waitForSelector('#editor-canvas', { timeout: 8000 })

@@ -1,9 +1,10 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
 import { asc, eq } from 'drizzle-orm'
-import { createApp } from '../src/app'
+import { createApp, createServer } from '../src/app'
+import { createAuth } from '../src/auth'
 import type { Database } from '../src/db/client'
 import { enrollmentInvitations, enrollments, learningPathVersions, skills, versionSkills, versionTasks } from '../src/db/schema'
-import { FIXTURE_IDENTITY_HEADER, fixtureIdentity, noTrustedIdentity } from '../src/identity'
+import { FIXTURE_IDENTITY_HEADER, fixtureIdentity } from '../src/identity'
 import { prepareTestDatabase, resetTestDatabase } from './support/database'
 import { seedEnrollmentFixture, type EnrollmentFixture } from './support/fixtures'
 
@@ -45,7 +46,7 @@ describe('AC1: controlled fixture identity', () => {
     expect(fx.workspaces.workspace.ownerAccountId).toBe(fx.accounts.coach.id)
     expect(fx.versions.version1.publishedAt).not.toBeNull()
     expect(fx.invitations.toLearner.learningPathVersionId).toBe(fx.versions.version1.id)
-    expect(fx.accounts.learner.emailVerifiedAt).not.toBeNull()
+    expect(fx.accounts.learner.emailVerified).toBe(true)
 
     // The offered Version holds learning content of its own Path.
     const { skillA, skillB, taskA, taskAReading, taskB } = fx.content
@@ -75,8 +76,9 @@ describe('AC1: controlled fixture identity', () => {
   })
 
   it('is not production authentication: the production resolver ignores the fixture header', async () => {
-    const production = createApp({ db, identity: noTrustedIdentity })
-    const res = await production.request(`/invitations/${fx.invitations.toLearner.id}/accept`, { method: 'POST', headers: as('learner') })
+    const auth = createAuth({ db, baseURL: 'http://localhost:3000', secret: 'test-secret-with-at-least-32-characters!', sendVerificationEmail: async () => {} })
+    const production = createServer({ db, auth })
+    const res = await production.request(`/api/invitations/${fx.invitations.toLearner.id}/accept`, { method: 'POST', headers: as('learner') })
     expect(res.status).toBe(401)
     expect(await storedEnrollments()).toHaveLength(0)
     expect((await accept(fx.invitations.toLearner.id, null)).status).toBe(401)

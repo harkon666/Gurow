@@ -902,7 +902,7 @@ async function main() {
       }
     })
 
-    await page.goto(`${serverUrl}/`, { waitUntil: 'networkidle0' })
+    await page.goto(`${serverUrl}/editor`, { waitUntil: 'networkidle0' })
     await page.waitForSelector('canvas#editor-canvas', { timeout: 15000 })
     await page.waitForSelector('#card-label-skill-rust-basics', { timeout: 15000 })
     await page.waitForFunction(

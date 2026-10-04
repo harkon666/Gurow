@@ -237,7 +237,7 @@ async function main() {
       }
     })
 
-    await page.goto(serverUrl, { waitUntil: 'networkidle0' })
+    await page.goto(`${serverUrl}/editor`, { waitUntil: 'networkidle0' })
     await page.evaluate(() => localStorage.clear())
     await page.reload({ waitUntil: 'networkidle0' })
 
@@ -676,7 +676,7 @@ async function main() {
       })
     })
 
-    await noGpuPage.goto(serverUrl, { waitUntil: 'networkidle0' })
+    await noGpuPage.goto(`${serverUrl}/editor`, { waitUntil: 'networkidle0' })
 
     // Wait for WebGPU unavailable notice
     await noGpuPage.waitForSelector('#editor-gpu-notice', { timeout: 10000 })

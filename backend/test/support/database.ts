@@ -24,5 +24,5 @@ export async function prepareTestDatabase(): Promise<{ db: Database; close: () =
 
 /** Empties every domain table so each test starts from its own fixture. */
 export async function resetTestDatabase(db: Database): Promise<void> {
-  await db.execute(sql`truncate submission_reviews, submission_revisions, submissions, submission_drafts, version_prerequisites, enrollments, enrollment_invitations, version_tasks, version_skills, tasks, skills, learning_path_versions, learning_paths, coach_workspaces, accounts restart identity cascade`)
+  await db.execute(sql`truncate submission_reviews, submission_revisions, submissions, submission_drafts, version_prerequisites, enrollments, enrollment_invitations, version_tasks, version_skills, tasks, skills, learning_path_versions, learning_paths, coach_workspaces, auth_verifications, accounts restart identity cascade`)
 }

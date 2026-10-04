@@ -155,7 +155,7 @@ async function main() {
       })
     })
     try {
-      await startupPage.goto(serverUrl, { waitUntil: 'domcontentloaded' })
+      await startupPage.goto(`${serverUrl}/editor`, { waitUntil: 'domcontentloaded' })
       await startupPage.waitForSelector('#editor-add-card-btn')
       await Promise.race([
         wasmRequested,
@@ -185,7 +185,7 @@ async function main() {
       }
     })
 
-    await page.goto(serverUrl, { waitUntil: 'networkidle0' })
+    await page.goto(`${serverUrl}/editor`, { waitUntil: 'networkidle0' })
 
     // Clean any prior state in local storage to start pristine
     await page.evaluate(() => localStorage.clear())

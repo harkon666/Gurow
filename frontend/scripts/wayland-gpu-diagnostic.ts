@@ -88,7 +88,7 @@ try {
           return adapter
         }
       }, variant.config)
-      await page.goto(`http://127.0.0.1:${port}`, { waitUntil: 'networkidle0' })
+      await page.goto(`http://127.0.0.1:${port}/editor`, { waitUntil: 'networkidle0' })
       await page.waitForSelector('#editor-canvas')
       await page.keyboard.press('F11')
       await wait(1800)

@@ -10,33 +10,63 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as EditorRouteImport } from './routes/editor'
+import { Route as ApiSplatRouteImport } from './routes/api/$'
+import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces.$workspaceId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const EditorRoute = EditorRouteImport.update({
+  id: '/editor',
+  path: '/editor',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiSplatRoute = ApiSplatRouteImport.update({
+  id: '/api/$',
+  path: '/api/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WorkspacesWorkspaceIdRoute = WorkspacesWorkspaceIdRouteImport.update({
+  id: '/workspaces/$workspaceId',
+  path: '/workspaces/$workspaceId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/editor': typeof EditorRoute
+  '/api/$': typeof ApiSplatRoute
+  '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/editor': typeof EditorRoute
+  '/api/$': typeof ApiSplatRoute
+  '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/editor': typeof EditorRoute
+  '/api/$': typeof ApiSplatRoute
+  '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/editor' | '/api/$' | '/workspaces/$workspaceId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to: '/' | '/editor' | '/api/$' | '/workspaces/$workspaceId'
+  id: '__root__' | '/' | '/editor' | '/api/$' | '/workspaces/$workspaceId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  EditorRoute: typeof EditorRoute
+  ApiSplatRoute: typeof ApiSplatRoute
+  WorkspacesWorkspaceIdRoute: typeof WorkspacesWorkspaceIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -48,11 +78,35 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/editor': {
+      id: '/editor'
+      path: '/editor'
+      fullPath: '/editor'
+      preLoaderRoute: typeof EditorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/$': {
+      id: '/api/$'
+      path: '/api/$'
+      fullPath: '/api/$'
+      preLoaderRoute: typeof ApiSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/workspaces/$workspaceId': {
+      id: '/workspaces/$workspaceId'
+      path: '/workspaces/$workspaceId'
+      fullPath: '/workspaces/$workspaceId'
+      preLoaderRoute: typeof WorkspacesWorkspaceIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  EditorRoute: EditorRoute,
+  ApiSplatRoute: ApiSplatRoute,
+  WorkspacesWorkspaceIdRoute: WorkspacesWorkspaceIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

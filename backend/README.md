@@ -6,7 +6,7 @@ Bun + Hono learning-domain service backed by PostgreSQL through Drizzle ([ADR 00
 
 ```sh
 docker compose up -d --wait   # from the repo root: PostgreSQL 18 on 127.0.0.1:5433
-cp .env.example .env          # DATABASE_URL and TEST_DATABASE_URL
+cp .env.example .env          # database URLs, BETTER_AUTH_SECRET, BETTER_AUTH_URL, PORT
 bun install
 bun run db:migrate            # apply drizzle/ migrations to DATABASE_URL
 ```
@@ -15,15 +15,35 @@ bun run db:migrate            # apply drizzle/ migrations to DATABASE_URL
 
 | Command | Purpose |
 | --- | --- |
-| `bun run dev` | Serve on http://localhost:3000 |
+| `bun run dev` | Serve on http://localhost:3001 (`PORT`); the frontend forwards `/api/*` here |
 | `bun test` | Request-level integration tests; creates, migrates and empties `gurow_test` |
 | `bun run typecheck` | TypeScript check |
 | `bun run db:generate` | Generate a SQL migration from `src/db/schema.ts` changes; review and commit it |
 | `bun run db:migrate` | Apply committed migrations |
 
-## Identity
+## Identity and sign-in (T15)
 
-Learning routes act for the Account returned by the injected `IdentityResolver`. Production has no sign-in yet, so `src/index.ts` uses `noTrustedIdentity` and those routes answer 401. Integration tests use `fixtureIdentity`, which maps the `x-gurow-fixture-identity` header to fixture Accounts; it is never wired into the production entry point.
+Sign-in uses Better Auth email/password sessions ([ADR 0022](../docs/adr/0022-sign-in-with-better-auth-email-and-password.md)). Its user model is the `accounts` table, so a session names a domain Account directly. Sessions, credentials (password hashes) and verification tokens live in `auth_sessions`, `auth_credentials` and `auth_verifications`.
+
+`src/index.ts` serves `createServer`: every route under `/api`, Better Auth under `/api/auth/*`, and learning routes acting for the Account of a valid session cookie (`sessionIdentity`). Requests without one answer 401. The browser reaches it through the frontend's same-origin `/api` forwarder (`frontend/src/routes/api/$.ts`, backend origin from `GUROW_API_ORIGIN`, default `http://127.0.0.1:3001`).
+
+Integration tests of P2 rules use `createApp` with `fixtureIdentity`, which maps the `x-gurow-fixture-identity` header to fixture Accounts. The served backend never wires it, and `test/sign-in.test.ts` proves the header is refused there.
+
+| Route | Effect |
+| --- | --- |
+| `POST /api/auth/sign-up/email` `{ email, password, name, callbackURL? }` | Creates an Account (password at least 8 characters), signs it in and sends a verification link |
+| `POST /api/auth/sign-in/email` `{ email, password }` | Sets the session cookie; wrong credentials answer 401 |
+| `POST /api/auth/sign-out` | Ends the session server-side |
+| `GET /api/auth/verify-email?token=…` | Redeems the emailed link; the only way `emailVerified` becomes true |
+| `GET /api/account` | `{ account: { id, email, name, emailVerified } }`; no Coach/Learner type exists |
+| `PUT /api/personal/workspace` | Enters the Account's one Personal Workspace: 201 on creation, 200 afterwards, `{ workspace, learningPaths }` |
+| `GET /api/personal/workspaces/:workspaceId` | The same body for its owner; 404 `workspace_not_found` for every other Account |
+
+- `email_verified` is not a sign-up or update input; Better Auth ignores client claims, and only the verification token sets it. Invitation acceptance (T07) reads the same column.
+- `personal_workspaces_owner_key` decides concurrent first entries: `INSERT … ON CONFLICT DO NOTHING` then a read, so racing entries all return the one Workspace.
+- No email provider is integrated: the served backend logs each verification link (`[gurow] email verification for …`). Password reset, email change, Account deletion and social sign-in are Account lifecycle policies outside T15.
+
+`bun test test/sign-in.test.ts` covers sign-up/sign-in/sign-out, hashed credentials, refusal of anonymous, fixture-header, raw-ID, forged and signed-out sessions, one Workspace across sign-ins and 16 racing first entries, owner-only reads and writes across Account switching, client-claimed versus link-verified email with the invitation flow, sign-up over an existing address, and the absence of an Account type. `frontend/scripts/t15-sign-in-check.ts` runs the browser flow; results are in [the T15 report](../docs/validation/t15-sign-in-report.md).
 
 ## Review and learning-state interface (T09)
 
@@ -61,7 +81,7 @@ Returns 200 `{ "learningState": { "enrollmentId", "learningPathVersionId", "enro
 
 Review and send transactions lock **Enrollment FOR UPDATE before Submission**, retaining locks until commit. Learning-state and submitted-history reads use the same Enrollment lock, so their multiple queries cannot mix evidence across concurrent sends/reviews. Future revocation/lifecycle/evidence mutators must retain this contract. Published definitions and ownership are assumed stable; there are no content-edit or ownership-transfer APIs here.
 
-Current XP/Mastery remain derived from durable revision decisions. T10 additionally records XP Award/Correction and Mastery award/revocation transitions in the same transaction as each Review mutation. T11 persists scoped Access Overrides; T12 adds explicit Enrollment lifecycle and durable Task starts. Personal XP persistence and authentication-provider integration are not implemented. There is no generic Review overwrite endpoint.
+Current XP/Mastery remain derived from durable revision decisions. T10 additionally records XP Award/Correction and Mastery award/revocation transitions in the same transaction as each Review mutation. T11 persists scoped Access Overrides; T12 adds explicit Enrollment lifecycle and durable Task starts. T15 adds sign-in (see Identity and sign-in). There is no generic Review overwrite endpoint.
 
 Recorded times follow the accepted lock order (T14): sends, Reviews, revocations and personal actions read one `clock_timestamp()` after taking their locks (`src/db/clock.ts`) and reuse it for every record of that transition. A superseded revision's `supersededAt` equals its successor's `sentAt`, XP/Mastery events share their decision or revocation time, and a send that queued behind a Review is recorded after that decision. Transaction-start `now()` is not used for ordered history, because a request can begin before it waits for a lock.
 

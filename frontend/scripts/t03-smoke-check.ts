@@ -244,7 +244,7 @@ async function main() {
       }
     })
 
-    await page.goto(serverUrl, { waitUntil: 'networkidle0' })
+    await page.goto(`${serverUrl}/editor`, { waitUntil: 'networkidle0' })
 
     // Wait for WebGPU canvas and initial card labels
     await page.waitForSelector('#editor-canvas', { timeout: 10000 })

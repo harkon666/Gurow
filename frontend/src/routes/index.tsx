@@ -1,399 +1,84 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { WebGpuEditor, type WebGpuEditorActions } from '../components/editor/WebGpuEditor'
-import { SkillDetailPanel } from '../components/editor/SkillDetailPanel'
-import { SkillPrerequisiteList } from '../components/editor/SkillPrerequisiteList'
-import type { SelectedSkillInfo } from '../components/editor/types'
-import type {
-  PrerequisiteConnection,
-  SkillCard,
-  CameraState,
-  LearningPathCheckpoint,
-} from '../components/editor/protocol'
-import {
-  loadCheckpoint,
-  saveCheckpoint,
-  loadCameraState,
-  saveCameraState,
-  clearLocalScene,
-  CheckpointMismatchError,
-} from '../components/editor/checkpoint'
-import {
-  INITIAL_LEARNING_PATH_FIXTURE,
-  type FixtureSkill,
-  type FixtureTask,
-} from '../fixtures/learningPath'
+import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { ContextHeader } from '../components/workspace/ContextHeader'
+import { enterPersonalWorkspace, readAccount, signIn, signUp } from '../lib/api'
 
-const ACCOUNT_ID = 'fixture-user'
-const PATH_ID = INITIAL_LEARNING_PATH_FIXTURE.id
+/** The product entry: sign in, then enter the Account's own Personal Workspace (ADR 0012, 0022). */
+export const Route = createFileRoute('/')({ component: EntryPage })
 
-export const Route = createFileRoute('/')({ component: LearningPathEditorPage })
+function EntryPage() {
+  const navigate = useNavigate()
+  const [phase, setPhase] = useState<'checking' | 'signed-out' | 'entering'>('checking')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState<string | null>(null)
 
-function LearningPathEditorPage() {
-  const [mounted, setMounted] = useState(false)
-  const [selectedSkill, setSelectedSkill] = useState<SelectedSkillInfo | null>(null)
-  const [connections, setConnections] = useState<PrerequisiteConnection[]>([])
-  const [connectionRejection, setConnectionRejection] = useState<string | null>(null)
-  const [applicationSkills, setApplicationSkills] = useState<FixtureSkill[]>(
-    INITIAL_LEARNING_PATH_FIXTURE.skills
-  )
-  const [initialCards, setInitialCards] = useState<SkillCard[]>([])
-  const [initialConnections, setInitialConnections] = useState<PrerequisiteConnection[]>([])
-  const [initialCamera, setInitialCamera] = useState<CameraState | null>(null)
-  const [checkpointError, setCheckpointError] = useState<string | null>(null)
-  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
-  const [revision, setRevision] = useState<number>(1)
+  const enter = useCallback(async () => {
+    setPhase('entering')
+    const entered = await enterPersonalWorkspace()
+    if (!entered.ok) {
+      setPhase('signed-out')
+      if (entered.status !== 401) setError(`Could not open your Personal Workspace (${entered.error})`)
+      return
+    }
+    await navigate({ to: '/workspaces/$workspaceId', params: { workspaceId: entered.value.workspace.id }, replace: true })
+  }, [navigate])
 
-  const actionsRef = useRef<WebGpuEditorActions | null>(null)
-  const revisionRef = useRef<number>(1)
-  revisionRef.current = revision
-
-  const applicationSkillsRef = useRef<FixtureSkill[]>(applicationSkills)
-  applicationSkillsRef.current = applicationSkills
-
-  const isCheckpointRejectedRef = useRef<boolean>(false)
-  const checkpointErrorRef = useRef<string | null>(null)
-  checkpointErrorRef.current = checkpointError
-
-  // Load checkpoint & camera state on mount (ADR-0016)
   useEffect(() => {
-    try {
-      if (typeof window !== 'undefined') {
-        const savedCheckpoint = loadCheckpoint(window.localStorage, ACCOUNT_ID, PATH_ID)
-        const savedCamera = loadCameraState(window.localStorage, ACCOUNT_ID, PATH_ID)
+    void readAccount().then((result) => (result.ok ? enter() : setPhase('signed-out')))
+  }, [enter])
 
-        if (savedCheckpoint) {
-          // Checkpoint validated successfully with semantic integrity check
-          setInitialCards(savedCheckpoint.editor.cards)
-          setInitialConnections(savedCheckpoint.editor.connections)
-          setInitialCamera(savedCamera)
-          setRevision(savedCheckpoint.editor.revision)
-          setLastSavedAt(savedCheckpoint.saved_at)
-
-          const restoredSkills: FixtureSkill[] = savedCheckpoint.application.skills.map(
-            (s) => {
-              const editorCard = savedCheckpoint.editor.cards.find((c) => c.id === s.id)
-              return {
-                id: s.id,
-                title: editorCard?.title ?? s.id,
-                outcome: s.outcome,
-                initialPosition: editorCard?.position ?? { x: 0, y: 0 },
-                tasks: s.tasks,
-              }
-            }
-          )
-          setApplicationSkills(restoredSkills)
-        } else {
-          // Fallback to default fixture
-          setInitialCards(
-            INITIAL_LEARNING_PATH_FIXTURE.skills.map((s) => ({
-              id: s.id,
-              title: s.title,
-              position: { x: s.initialPosition.x, y: s.initialPosition.y },
-              size: { width: 180, height: 80 },
-            }))
-          )
-          setInitialConnections([])
-          setInitialCamera(savedCamera)
-          setApplicationSkills(INITIAL_LEARNING_PATH_FIXTURE.skills)
-        }
-      }
-    } catch (err: unknown) {
-      console.error('Local checkpoint validation failed:', err)
-      isCheckpointRejectedRef.current = true
-      const msg =
-        err instanceof CheckpointMismatchError
-          ? `Integrity mismatch: ${err.message}`
-          : err instanceof Error
-            ? err.message
-            : String(err)
-      setCheckpointError(msg)
-      // Mismatched associations must NOT be silently restored (AC 3)
-      setInitialCards(
-        INITIAL_LEARNING_PATH_FIXTURE.skills.map((s) => ({
-          id: s.id,
-          title: s.title,
-          position: { x: s.initialPosition.x, y: s.initialPosition.y },
-          size: { width: 180, height: 80 },
-        }))
-      )
-      setInitialConnections([])
-      setApplicationSkills(INITIAL_LEARNING_PATH_FIXTURE.skills)
-    } finally {
-      setMounted(true)
+  const submit = (mode: 'sign-in' | 'sign-up') => async (event?: FormEvent) => {
+    event?.preventDefault()
+    setError(null)
+    const result = mode === 'sign-in' ? await signIn(email, password) : await signUp(email, password)
+    if (!result.ok) {
+      setError(mode === 'sign-in' ? 'Sign-in failed: check your email and password.' : `Could not create the Account (${result.error}).`)
+      return
     }
-  }, [])
-
-  const handleActionsReady = useCallback((actions: WebGpuEditorActions) => {
-    actionsRef.current = actions
-  }, [])
-
-  const saveActiveCheckpoint = useCallback(
-    (currentSkills?: FixtureSkill[]) => {
-      // Guard: never overwrite or save if a checkpoint error or rejected state exists (ADR-0016)
-      if (checkpointErrorRef.current || isCheckpointRejectedRef.current) {
-        console.warn(
-          'Preserving rejected checkpoint: skipping save because of checkpoint error:',
-          checkpointErrorRef.current
-        )
-        return
-      }
-
-      const actions = actionsRef.current
-      if (!actions || typeof window === 'undefined') return
-
-      const snapshot = actions.exportSnapshot()
-      if (!snapshot) return
-
-      const skillsToSave = currentSkills ?? applicationSkillsRef.current
-      const nextRevision = revisionRef.current + 1
-
-      const checkpoint: LearningPathCheckpoint = {
-        version: 1,
-        saved_at: new Date().toISOString(),
-        editor: {
-          format_version: 1,
-          revision: nextRevision,
-          cards: snapshot.cards,
-          connections: snapshot.connections,
-        },
-        application: {
-          learning_path_id: PATH_ID,
-          skills: skillsToSave.map((s) => ({
-            id: s.id,
-            outcome: s.outcome,
-            tasks: s.tasks,
-          })),
-        },
-      }
-
-      try {
-        saveCheckpoint(window.localStorage, ACCOUNT_ID, PATH_ID, checkpoint)
-        setRevision(nextRevision)
-        setLastSavedAt(checkpoint.saved_at)
-        setCheckpointError(null)
-      } catch (err: unknown) {
-        console.error('Failed to save checkpoint:', err)
-        isCheckpointRejectedRef.current = true
-        const msg = err instanceof Error ? err.message : String(err)
-        setCheckpointError(msg)
-      }
-    },
-    []
-  )
-
-  const handleOperationCompleted = useCallback(() => {
-    saveActiveCheckpoint()
-  }, [saveActiveCheckpoint])
-
-  const handleCameraChanged = useCallback((camera: CameraState) => {
-    if (typeof window !== 'undefined') {
-      saveCameraState(window.localStorage, ACCOUNT_ID, PATH_ID, camera)
-    }
-  }, [])
-
-  const handleConnect = useCallback((fromId: string, toId: string) => {
-    actionsRef.current?.connectSkills(fromId, toId)
-  }, [])
-
-  const handleDisconnect = useCallback((fromId: string, toId: string) => {
-    actionsRef.current?.disconnectSkills(fromId, toId)
-  }, [])
-
-  const handleCreateSkill = useCallback(() => {
-    if (checkpointErrorRef.current || isCheckpointRejectedRef.current) return
-    // The actions adapter is published before asynchronous engine initialization.
-    // Do not add application data until a live document is available.
-    if (!actionsRef.current?.exportSnapshot()) return
-
-    const newIndex = applicationSkillsRef.current.length + 1
-    const newId = `skill-custom-${Date.now()}`
-    const newTitle = `Skill ${newIndex}`
-    const newPos = {
-      x: 320,
-      y: 120 + ((newIndex - 3) % 4) * 110,
-    }
-
-    const newSkill: FixtureSkill = {
-      id: newId,
-      title: newTitle,
-      outcome: `Master ${newTitle} and demonstrate core concepts`,
-      initialPosition: newPos,
-      tasks: [
-        {
-          id: `task-${newId}-intro`,
-          title: `Setup ${newTitle}`,
-          description: `Initial task for ${newTitle}`,
-          required: true,
-        },
-      ],
-    }
-
-    const nextSkills = [...applicationSkillsRef.current, newSkill]
-    applicationSkillsRef.current = nextSkills
-    setApplicationSkills(nextSkills)
-
-    actionsRef.current?.createCard(newId, newTitle, newPos)
-  }, [])
-
-  const handleUpdateTask = useCallback(
-    (taskId: string, updates: Partial<FixtureTask>) => {
-      if (!selectedSkill) return
-      setApplicationSkills((prevSkills) => {
-        const nextSkills = prevSkills.map((skill) => {
-          if (skill.id !== selectedSkill.id) return skill
-          return {
-            ...skill,
-            tasks: skill.tasks.map((task) => {
-              if (task.id !== taskId) return task
-              return { ...task, ...updates }
-            }),
-          }
-        })
-        setTimeout(() => saveActiveCheckpoint(nextSkills), 0)
-        return nextSkills
-      })
-    },
-    [selectedSkill, saveActiveCheckpoint]
-  )
-
-  const handleResetScene = useCallback(() => {
-    if (typeof window !== 'undefined') {
-      isCheckpointRejectedRef.current = false
-      clearLocalScene(window.localStorage, ACCOUNT_ID, PATH_ID)
-      window.location.reload()
-    }
-  }, [])
-
-  const handleSelectListSkill = useCallback((skill: SelectedSkillInfo | null) => {
-    setSelectedSkill(skill)
-    if (skill) {
-      actionsRef.current?.selectCard(skill.id)
-    } else {
-      actionsRef.current?.selectCard(null)
-    }
-  }, [])
-
-  // Resolve active skill's learning payload from application state
-  const currentSkillPayload = applicationSkills.find((s) => s.id === selectedSkill?.id)
+    await enter()
+  }
 
   return (
-    <main
-      className="w-full h-full flex flex-col overflow-hidden bg-slate-950 select-none"
-      data-checkpoint-saved-at={lastSavedAt ?? ''}
-      data-checkpoint-revision={revision}
-    >
-      {/* Top Figma-Style Header Bar */}
-      <header className="h-11 shrink-0 bg-slate-900/90 border-b border-slate-800/80 px-4 flex items-center justify-between z-30 select-none">
-        <div className="flex items-center gap-2.5">
-          <div className="w-5 h-5 rounded bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-[10px] tracking-wider">
-            G
-          </div>
-          <span className="font-semibold text-xs text-slate-200 tracking-tight">
-            Gurow
-          </span>
-          <span className="text-slate-600 text-xs">/</span>
-          <span className="text-xs text-slate-400 font-medium">
-            Editor
-          </span>
-        </div>
-
-        <div className="flex items-center gap-2.5">
-          <span
-            id="checkpoint-status-badge"
-            className="text-[11px] font-mono text-slate-400 bg-slate-950/80 px-2.5 py-1 rounded-lg border border-slate-800 flex items-center gap-1.5"
+    <main className="w-full h-full flex flex-col bg-slate-950">
+      <ContextHeader account={null} />
+      <section className="flex-1 flex items-center justify-center p-4">
+        {phase === 'signed-out' ? (
+          <form
+            id="sign-in-form"
+            onSubmit={submit('sign-in')}
+            className="w-full max-w-sm bg-slate-900/80 border border-slate-800 rounded-xl p-6 flex flex-col gap-3"
           >
-            <span
-              className={`w-2 h-2 rounded-full ${
-                checkpointError
-                  ? 'bg-red-400'
-                  : lastSavedAt
-                  ? 'bg-emerald-400'
-                  : 'bg-slate-400'
-              }`}
-            />
-            <span>
-              {checkpointError
-                ? 'Checkpoint Error (Preserved)'
-                : lastSavedAt
-                ? `Saved locally (rev #${revision})`
-                : 'Default Fixture'}
-            </span>
-          </span>
-
-          <button
-            id="btn-reset-scene"
-            onClick={handleResetScene}
-            className="text-xs text-slate-400 hover:text-slate-200 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/60 px-2.5 py-1 rounded-lg cursor-pointer transition-colors"
-            title="Clear local checkpoint and restore initial fixture"
-          >
-            Reset Scene
-          </button>
-        </div>
-      </header>
-
-      {/* Checkpoint Mismatch Alert Banner */}
-      {checkpointError && (
-        <div
-          id="checkpoint-error-alert"
-          className="bg-red-950/90 border-b border-red-800/80 px-4 py-2 text-xs text-red-200 flex items-center justify-between shadow-lg shrink-0 z-40"
-        >
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-red-400">⚠️ Checkpoint Error:</span>
-            <span>{checkpointError}</span>
-          </div>
-          <button
-            onClick={() => setCheckpointError(null)}
-            className="text-red-400 hover:text-red-200 font-bold ml-4 cursor-pointer"
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
-      {/* Editor Main Canvas & Panel Container */}
-      <section
-        id="canvas-editor-container"
-        className="w-full flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden bg-slate-950 relative"
-      >
-        {mounted ? (
-          <>
-            <SkillPrerequisiteList
-              skills={applicationSkills}
-              connections={connections}
-              selectedSkillId={selectedSkill?.id ?? null}
-              onSelectSkill={handleSelectListSkill}
-              className="w-full md:w-64 lg:w-72 shrink-0 md:h-full border-b md:border-b-0 md:border-r border-slate-800/80"
-            />
-            <WebGpuEditor
-              onSelectSkill={setSelectedSkill}
-              onConnectionsChange={setConnections}
-              onRejection={setConnectionRejection}
-              onActionsReady={handleActionsReady}
-              onCreateSkill={handleCreateSkill}
-              initialCards={initialCards}
-              initialConnections={initialConnections}
-              initialCamera={initialCamera}
-              onOperationCompleted={handleOperationCompleted}
-              onCameraChanged={handleCameraChanged}
-            />
-            <SkillDetailPanel
-              selectedSkill={selectedSkill}
-              allSkills={applicationSkills}
-              connections={connections}
-              connectionRejection={connectionRejection}
-              onClearRejection={() => setConnectionRejection(null)}
-              onConnect={handleConnect}
-              onDisconnect={handleDisconnect}
-              tasks={currentSkillPayload?.tasks}
-              outcome={currentSkillPayload?.outcome}
-              onUpdateTask={handleUpdateTask}
-            />
-          </>
+            <h1 className="text-lg font-semibold text-slate-100">Sign in to Gurow</h1>
+            <p className="text-xs text-slate-400">One Account for personal learning, coaching and learning with a Coach.</p>
+            <label className="text-xs text-slate-300 flex flex-col gap-1">
+              Email
+              <input id="email-input" type="email" required autoComplete="email" value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100" />
+            </label>
+            <label className="text-xs text-slate-300 flex flex-col gap-1">
+              Password
+              <input id="password-input" type="password" required minLength={8} autoComplete="current-password" value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-100" />
+            </label>
+            {error && <p id="auth-error" role="alert" className="text-xs text-red-300">{error}</p>}
+            <div className="flex gap-2 pt-1">
+              <button id="sign-in-btn" type="submit"
+                className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-sm rounded-lg py-2 cursor-pointer">
+                Sign in
+              </button>
+              <button id="sign-up-btn" type="button" onClick={(e) => e.currentTarget.form?.reportValidity() && void submit('sign-up')()}
+                className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm rounded-lg py-2 border border-slate-700 cursor-pointer">
+                Create account
+              </button>
+            </div>
+          </form>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">
-            Initializing Editor Environment...
-          </div>
+          <p id="entry-status" className="text-sm text-slate-500">
+            {phase === 'checking' ? 'Checking sign-in…' : 'Opening your Personal Workspace…'}
+          </p>
         )}
       </section>
     </main>

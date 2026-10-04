@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
+import { sessionIdentity, type Auth } from './auth'
 import type { Database } from './db/client'
 import { acceptInvitation, readEnrollment, type EnrollmentRefusal } from './enrollments'
 import type { IdentityResolver } from './identity'
@@ -9,6 +10,7 @@ import { changeEnrollmentStatus } from './lifecycle'
 import * as personal from './personal'
 import { readLearningState, recordReview, revokeApproval, type ReviewContents } from './reviews'
 import { readDraft, readSubmission, saveDraft, sendRevision, startTask, type SubmissionContents, type SubmissionRefusal } from './submissions'
+import { enterPersonalWorkspace, readAccount, readPersonalWorkspace } from './workspace'
 
 const REFUSAL_STATUS: Record<EnrollmentRefusal, ContentfulStatusCode> = {
   invitation_not_found: 404,
@@ -62,8 +64,11 @@ function parseContents(body: unknown): SubmissionContents | null {
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-/** The backend request interface; identity comes only from the injected resolver. */
-export function createApp({ db, identity }: { db: Database; identity: IdentityResolver }) {
+/**
+ * The backend request interface; identity comes only from the injected resolver.
+ * With `auth`, it also serves Better Auth's sign-in endpoints under `/auth`.
+ */
+export function createApp({ db, identity, auth }: { db: Database; identity: IdentityResolver; auth?: Auth }) {
   type Env = { Variables: { accountId: string } }
   const app = new Hono<Env>()
 
@@ -76,6 +81,15 @@ export function createApp({ db, identity }: { db: Database; identity: IdentityRe
   })
 
   app.get('/', (c) => c.text('Hello Hono!'))
+  if (auth) app.on(['GET', 'POST'], '/auth/*', (c) => auth.handler(c.req.raw))
+
+  app.use('/account', authenticate)
+  app.get('/account', async (c) => {
+    const account = await readAccount(db, c.get('accountId'))
+    if (!account) return c.json({ error: 'unauthenticated' }, 401)
+    return c.json({ account })
+  })
+
   app.use('/invitations/*', authenticate)
   app.use('/enrollments/*', authenticate)
 
@@ -223,6 +237,19 @@ export function createApp({ db, identity }: { db: Database; identity: IdentityRe
     ? c.json({ changed: result.changed, learningState: result.learningState })
     : c.json({ error: result.refusal }, PERSONAL_REFUSAL_STATUS[result.refusal])
 
+  // Entering is idempotent: the first entry creates the one Personal Workspace (201), later ones read it (200).
+  app.put('/personal/workspace', async (c) => {
+    const { created, ...entered } = await enterPersonalWorkspace(db, c.get('accountId'))
+    return c.json(entered, created ? 201 : 200)
+  })
+
+  app.get('/personal/workspaces/:workspaceId', async (c) => {
+    const workspaceId = c.req.param('workspaceId')
+    const workspace = UUID.test(workspaceId) ? await readPersonalWorkspace(db, workspaceId, c.get('accountId')) : null
+    if (!workspace) return c.json({ error: 'workspace_not_found' }, 404)
+    return c.json(workspace)
+  })
+
   app.get(`${personalPath}/learning-state`, async (c) => {
     const pathId = c.req.param('pathId')
     const learningState = UUID.test(pathId) ? await personal.readPersonalLearningState(db, pathId, c.get('accountId')) : null
@@ -271,4 +298,13 @@ export function createApp({ db, identity }: { db: Database; identity: IdentityRe
   })
 
   return app
+}
+
+/**
+ * The served backend: every route under `/api`, behind the same origin as the
+ * application, with identity taken only from Better Auth sessions (ADR 0022).
+ * The P2 fixture identity is never accepted here.
+ */
+export function createServer({ db, auth }: { db: Database; auth: Auth }) {
+  return new Hono().route('/api', createApp({ db, identity: sessionIdentity(auth), auth }))
 }

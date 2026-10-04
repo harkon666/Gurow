@@ -49,7 +49,7 @@ export async function acceptInvitation(db: Database, invitationId: string, accou
     if (!invitation) return { ok: false, refusal: 'invitation_not_found' }
 
     const [account] = await tx.select().from(accounts).where(eq(accounts.id, accountId))
-    if (!account?.emailVerifiedAt) return { ok: false, refusal: 'email_not_verified' }
+    if (!account?.emailVerified) return { ok: false, refusal: 'email_not_verified' }
     if (!sameEmail(account.email, invitation.email)) return { ok: false, refusal: 'email_mismatch' }
     if (invitation.workspaceOwnerId === accountId) return { ok: false, refusal: 'owner_cannot_enroll' }
 

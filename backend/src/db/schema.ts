@@ -1,13 +1,23 @@
 import { sql } from 'drizzle-orm'
-import { type AnyPgColumn, boolean, check, foreignKey, integer, pgEnum, pgTable, primaryKey, text, timestamp, unique, uuid, uniqueIndex } from 'drizzle-orm/pg-core'
+import { type AnyPgColumn, boolean, check, foreignKey, index, integer, pgEnum, pgTable, primaryKey, text, timestamp, unique, uuid, uniqueIndex } from 'drizzle-orm/pg-core'
 
-/** An identity usable for personal learning and contextual Coach and Learner roles (CONTEXT.md). */
+/**
+ * An identity usable for personal learning and contextual Coach and Learner roles
+ * (CONTEXT.md). It is also Better Auth's user model (ADR 0022), so it has no
+ * Coach/Learner type: authority is checked per action and context.
+ */
 export const accounts = pgTable('accounts', {
   id: uuid('id').primaryKey().defaultRandom(),
+  name: text('name').notNull().default(''),
   email: text('email').notNull(),
-  /** Null until the email is verified; only a verified email can redeem an Enrollment Invitation. */
-  emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
+  /**
+   * Set only by the identity integration after the address proves itself; only a
+   * verified email can redeem an Enrollment Invitation. Clients cannot write it.
+   */
+  emailVerified: boolean('email_verified').notNull().default(false),
+  image: text('image'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [uniqueIndex('accounts_email_lower_key').on(sql`lower(${t.email})`)])
 
 /** The ownership and management-authority boundary for coach-mode Learning Paths; one owning Coach in the MVP. */
@@ -395,3 +405,48 @@ export const personalOverrideRecords = pgTable('personal_override_records', {
   foreignKey({ columns: [t.learningPathId, t.skillId], foreignColumns: [personalSkills.learningPathId, personalSkills.skillId] }),
   check('personal_override_records_action', sql`${t.action} IN ('grant', 'revoke')`),
 ])
+
+/** A signed-in browser session of one Account, issued by Better Auth (ADR 0022). */
+export const authSessions = pgTable('auth_sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+  token: text('token').notNull().unique(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  ipAddress: text('ip_address'),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index('auth_sessions_account_idx').on(t.userId)])
+
+/**
+ * How an Account signs in: Better Auth's "account" model, renamed so it is not
+ * confused with the domain Account. The email/password credential stores only a hash.
+ */
+export const authCredentials = pgTable('auth_credentials', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+  accountId: text('provider_account_id').notNull(),
+  providerId: text('provider_id').notNull(),
+  accessToken: text('access_token'),
+  refreshToken: text('refresh_token'),
+  idToken: text('id_token'),
+  accessTokenExpiresAt: timestamp('access_token_expires_at', { withTimezone: true }),
+  refreshTokenExpiresAt: timestamp('refresh_token_expires_at', { withTimezone: true }),
+  scope: text('scope'),
+  password: text('password'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index('auth_credentials_account_idx').on(t.userId),
+  unique('auth_credentials_provider_key').on(t.providerId, t.accountId),
+])
+
+/** Short-lived identity proofs such as email verification tokens. */
+export const authVerifications = pgTable('auth_verifications', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  identifier: text('identifier').notNull(),
+  value: text('value').notNull(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index('auth_verifications_identifier_idx').on(t.identifier)])

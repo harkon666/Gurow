@@ -64,6 +64,13 @@
       "when": 1791134951093,
       "tag": "0008_warm_blink",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791138794475,
+      "tag": "0009_sign_in",
+      "breakpoints": true
     }
   ]
 }

@@ -11,14 +11,13 @@ import { accounts, coachWorkspaces, enrollmentInvitations, learningPaths, learni
  * test-only identity header values; they are not production authentication.
  */
 export async function seedEnrollmentFixture(db: Database) {
-  const verified = new Date('2026-10-01T00:00:00Z')
   const [coach, learner, peer, unrelated, otherCoach, unverified] = await db.insert(accounts).values([
-    { email: 'coach@gurow.test', emailVerifiedAt: verified },
-    { email: 'Learner@Gurow.test', emailVerifiedAt: verified },
-    { email: 'peer@gurow.test', emailVerifiedAt: verified },
-    { email: 'unrelated@gurow.test', emailVerifiedAt: verified },
-    { email: 'other-coach@gurow.test', emailVerifiedAt: verified },
-    { email: 'unverified@gurow.test', emailVerifiedAt: null },
+    { email: 'coach@gurow.test', emailVerified: true },
+    { email: 'Learner@Gurow.test', emailVerified: true },
+    { email: 'peer@gurow.test', emailVerified: true },
+    { email: 'unrelated@gurow.test', emailVerified: true },
+    { email: 'other-coach@gurow.test', emailVerified: true },
+    { email: 'unverified@gurow.test', emailVerified: false },
   ]).returning()
 
   const [workspace, otherWorkspace] = await db.insert(coachWorkspaces).values([

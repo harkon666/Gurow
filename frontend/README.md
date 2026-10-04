@@ -9,6 +9,17 @@ bun install
 bun --bun run dev
 ```
 
+## Routes and backend (T15)
+
+| Route | Purpose |
+| --- | --- |
+| `/` | Product entry: sign in or create an Account, then enter its Personal Workspace |
+| `/workspaces/$workspaceId` | The signed-in owner's Personal Workspace; other Accounts see "not available". It rechecks the Account when another tab signs in or out (`src/lib/session.ts`) and when the tab is resumed |
+| `/editor` | The P1 local-fixture editor (localStorage only, no Account data) until T16 |
+| `/api/*` | Same-origin forwarder to the Hono backend at `GUROW_API_ORIGIN` (default `http://127.0.0.1:3001`) |
+
+For local sign-in, run the backend (`cd ../backend && bun run dev`, with `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL=http://localhost:3000` in `backend/.env`) next to `bun run dev`. Verification links are printed in the backend log. `bun run check:t15` builds the app and runs the browser sign-in check against a separate `gurow_browser_test` database.
+
 # Building For Production
 
 To build this application for production:

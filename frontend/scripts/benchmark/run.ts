@@ -155,7 +155,7 @@ async function ready(page: Page, count: number): Promise<void> {
 }
 async function seed(page: Page, url: string, fixture: BenchmarkFixture): Promise<void> {
   await page.evaluate(entries => { localStorage.clear(); for (const [key, value] of entries) localStorage.setItem(key, value) }, fixtureStorageEntries(fixture))
-  await page.goto(url, { waitUntil: 'domcontentloaded' })
+  await page.goto(`${url}/editor`, { waitUntil: 'domcontentloaded' })
   await ready(page, fixture.size)
   const checkpointKey = fixtureStorageEntries(fixture)[0][0]
   const stored = await page.evaluate(key => localStorage.getItem(key), checkpointKey)
@@ -439,7 +439,7 @@ async function main(): Promise<number> {
     // values are not locked settings and leave only a 592px canvas with both
     // sidebars open. Never emulate DPR for a headed acceptance capture.
     if (options.headless) await page.setViewport({ width: 1600, height: 900 })
-    await page.goto(url, { waitUntil: 'domcontentloaded' })
+    await page.goto(`${url}/editor`, { waitUntil: 'domcontentloaded' })
     // A dedicated profile is intentionally persistent for reproduction, but
     // reruns must not inherit its previous fixture at the default-route probe.
     await page.evaluate(() => localStorage.clear())

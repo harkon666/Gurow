@@ -826,7 +826,7 @@ async function main(): Promise<number> {
 
     await evidence.phase(['AC1', 'AC2', 'AC3', 'AC4', 'AC5', 'AC6'], 'measure-canvas', async () => {
       console.log('[2/6] Measuring the settled canvas in the default route...')
-      await page.goto(serverUrl, { waitUntil: 'domcontentloaded' })
+      await page.goto(`${serverUrl}/editor`, { waitUntil: 'domcontentloaded' })
       await seedStorage(page, [])
       await reloadRoute(page, null)
       await selectCard(page, (await readUi(page)).labels[0].id)
@@ -896,7 +896,7 @@ async function main(): Promise<number> {
       const seeded = await launch(chromiumPath, otherProfileDir, options.headless)
       let otherBefore: string | null
       try {
-        await seeded.page.goto(serverUrl, { waitUntil: 'domcontentloaded' })
+        await seeded.page.goto(`${serverUrl}/editor`, { waitUntil: 'domcontentloaded' })
         await seedStorage(seeded.page, fixtureStorageEntries(primary))
         await reloadRoute(seeded.page, primary.size)
         otherBefore = await readStoredCheckpoint(seeded.page, key)
@@ -908,7 +908,7 @@ async function main(): Promise<number> {
 
       const survivor = await launch(chromiumPath, otherProfileDir, options.headless, false)
       try {
-        await survivor.page.goto(serverUrl, { waitUntil: 'domcontentloaded' })
+        await survivor.page.goto(`${serverUrl}/editor`, { waitUntil: 'domcontentloaded' })
         await waitForEditorSettled(survivor.page, primary.size)
         const stored = await readStoredCheckpoint(survivor.page, key)
         const ui = await readUi(survivor.page)

@@ -185,13 +185,13 @@ async function main() {
         return adapter
       }
     })
-    await page.goto(`${baseUrl}/`, { waitUntil: 'networkidle0' })
+    await page.goto(`${baseUrl}/editor`, { waitUntil: 'networkidle0' })
 
     const canvasChecks = []
     for (const dpr of [1, 1.5, 2]) {
       const checkPage = await browser.newPage()
       await checkPage.setViewport({ width: 1280, height: 800, deviceScaleFactor: dpr })
-      await checkPage.goto(baseUrl, { waitUntil: 'networkidle0' })
+      await checkPage.goto(`${baseUrl}/editor`, { waitUntil: 'networkidle0' })
       canvasChecks.push({ phase: 'initial', ...await checkCanvas(checkPage, dpr) })
       await checkPage.setViewport({ width: 1180, height: 800, deviceScaleFactor: dpr })
       await checkPage.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
