@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { boolean, check, foreignKey, integer, pgEnum, pgTable, primaryKey, text, timestamp, unique, uuid, uniqueIndex } from 'drizzle-orm/pg-core'
+import { type AnyPgColumn, boolean, check, foreignKey, integer, pgEnum, pgTable, primaryKey, text, timestamp, unique, uuid, uniqueIndex } from 'drizzle-orm/pg-core'
 
 /** An identity usable for personal learning and contextual Coach and Learner roles (CONTEXT.md). */
 export const accounts = pgTable('accounts', {
@@ -193,6 +193,30 @@ export const submissionReviews = pgTable('submission_reviews', {
 }, (t) => [
   check('submission_reviews_changes_feedback', sql`${t.decision} <> 'changes_requested' OR length(trim(${t.feedback})) > 0 AND ${t.feedback} IS NOT NULL`),
   check('submission_reviews_revocation', sql`(${t.revokedAt} IS NULL AND ${t.revocationReason} IS NULL) OR (${t.decision} = 'approval' AND ${t.revokedAt} IS NOT NULL AND ${t.revocationReason} IS NOT NULL AND length(trim(${t.revocationReason})) > 0)`),
+])
+
+/** Append-only Override Records. The latest record per Enrollment/Skill is the
+ * current exception; revocation names the exact grant, preventing stale withdrawal.
+ * All writers/readers hold the Enrollment lock. SQL rejects audit update/delete.
+ */
+export const overrideRecords = pgTable('override_records', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  sequence: integer('sequence').notNull().generatedAlwaysAsIdentity(),
+  enrollmentId: uuid('enrollment_id').notNull(),
+  learningPathVersionId: uuid('learning_path_version_id').notNull(),
+  skillId: uuid('skill_id').notNull(),
+  coachAccountId: uuid('coach_account_id').notNull().references(() => accounts.id),
+  learnerAccountId: uuid('learner_account_id').notNull().references(() => accounts.id),
+  action: text('action').notNull(),
+  grantRecordId: uuid('grant_record_id').references((): AnyPgColumn => overrideRecords.id),
+  reason: text('reason').notNull(),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  unique('override_records_sequence_key').on(t.sequence),
+  foreignKey({ columns: [t.enrollmentId, t.learningPathVersionId], foreignColumns: [enrollments.id, enrollments.learningPathVersionId] }),
+  foreignKey({ columns: [t.learningPathVersionId, t.skillId], foreignColumns: [versionSkills.learningPathVersionId, versionSkills.skillId] }),
+  check('override_records_action', sql`(${t.action} = 'grant' AND ${t.grantRecordId} IS NULL) OR (${t.action} = 'revoke' AND ${t.grantRecordId} IS NOT NULL)`),
+  check('override_records_reason', sql`length(trim(${t.reason})) > 0 AND length(${t.reason}) <= 500`),
 ])
 
 export const xpEvents = pgTable('xp_events', {

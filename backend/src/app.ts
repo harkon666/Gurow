@@ -4,6 +4,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { Database } from './db/client'
 import { acceptInvitation, readEnrollment, type EnrollmentRefusal } from './enrollments'
 import type { IdentityResolver } from './identity'
+import { changeAccessOverride } from './overrides'
 import { readLearningState, recordReview, revokeApproval, type ReviewContents } from './reviews'
 import { readDraft, readSubmission, saveDraft, sendRevision, type SubmissionContents, type SubmissionRefusal } from './submissions'
 
@@ -158,6 +159,22 @@ export function createApp({ db, identity }: { db: Database; identity: IdentityRe
     if (!result.ok) return c.json({ error: result.refusal }, result.refusal === 'coach_only' ? 403 : result.refusal === 'approval_already_revoked' ? 409 : 404)
     return c.json({ review: result.value })
   })
+
+  const overrideRoute = '/enrollments/:enrollmentId/skills/:skillId/access-overrides'
+  for (const action of ['grant', 'revoke'] as const) {
+    app.post(action === 'grant' ? overrideRoute : `${overrideRoute}/:grantRecordId/revoke`, async (c) => {
+      const enrollmentId = c.req.param('enrollmentId')
+      const skillId = c.req.param('skillId')
+      const grantRecordId = action === 'revoke' ? c.req.param('grantRecordId') : null
+      if (!UUID.test(enrollmentId) || !UUID.test(skillId) || (grantRecordId !== null && !UUID.test(grantRecordId))) return c.json({ error: 'override_not_found' }, 404)
+      const body: unknown = await c.req.json().catch(() => null)
+      const reason = typeof body === 'object' && body !== null ? (body as Record<string, unknown>).reason : null
+      if (typeof reason !== 'string' || reason.trim() === '' || reason.length > 500) return c.json({ error: 'invalid_override_reason' }, 422)
+      const result = await changeAccessOverride(db, enrollmentId, skillId, c.get('accountId'), reason, grantRecordId)
+      if (!result.ok) return c.json({ error: result.refusal }, result.refusal === 'coach_only' ? 403 : result.refusal === 'override_already_active' || result.refusal === 'override_not_active' ? 409 : 404)
+      return c.json({ overrideRecord: result.value }, action === 'grant' ? 201 : 200)
+    })
+  }
 
   app.get('/enrollments/:enrollmentId/learning-state', async (c) => {
     const enrollmentId = c.req.param('enrollmentId')

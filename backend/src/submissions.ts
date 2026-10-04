@@ -95,8 +95,8 @@ export interface SentRevision {
 /**
  * Sends contents as a new immutable Submission Revision of the Task's one
  * Submission in the Enrollment (ADR 0002). Only the learner may send, and only
- * with current Access: active Enrollment, ALL prerequisite Mastery and pinned
- * Enrollment-local XP threshold. Access Overrides are deferred to T11.
+ * with current Access: active Enrollment and either ordinary ALL prerequisite
+ * Mastery/pinned Enrollment-local XP gates or an active Skill Access Override.
  *
  * Integration lock contract: sends and future Review/Approval Revocation or
  * lifecycle mutators lock the Enrollment FOR UPDATE before reading/changing

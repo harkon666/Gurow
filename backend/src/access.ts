@@ -1,12 +1,15 @@
 import { and, asc, eq, isNull } from 'drizzle-orm'
 import type { Database } from './db/client'
-import { submissionReviews, submissionRevisions, submissions, versionPrerequisites, versionSkills, versionTasks } from './db/schema'
+import { overrideRecords, submissionReviews, submissionRevisions, submissions, versionPrerequisites, versionSkills, versionTasks } from './db/schema'
 
 /** Caller holds Enrollment FOR UPDATE through commit, including for coherent reads.
  * Published definitions are pinned; all evidence mutators use the same lock.
- * Overrides are deferred to T11. No personal or other Enrollment evidence is read.
+ * Overrides waive only progression gates, never Enrollment inactivity.
+ * No personal or other Enrollment evidence is read.
  */
 export async function deriveLearningState(db: Pick<Database, 'select'>, enrollmentId: string, versionId: string, ownerId: string, active: boolean) {
+  const overrideHistory = await db.select().from(overrideRecords).where(and(eq(overrideRecords.enrollmentId, enrollmentId), eq(overrideRecords.learningPathVersionId, versionId))).orderBy(asc(overrideRecords.sequence))
+  const latestOverrides = new Map(overrideHistory.map((record) => [record.skillId, record]))
   const definitions = await db.select().from(versionTasks).where(eq(versionTasks.learningPathVersionId, versionId)).orderBy(asc(versionTasks.taskId))
   const skills = await db.select().from(versionSkills).where(eq(versionSkills.learningPathVersionId, versionId)).orderBy(asc(versionSkills.skillId))
   const prerequisites = await db.select().from(versionPrerequisites).where(eq(versionPrerequisites.learningPathVersionId, versionId)).orderBy(asc(versionPrerequisites.prerequisiteSkillId))
@@ -26,11 +29,13 @@ export async function deriveLearningState(db: Pick<Database, 'select'>, enrollme
     return required.length > 0 && required.every((task) => task.approved)
   }).map((skill) => skill.skillId))
   return {
-    enrollmentId, learningPathVersionId: versionId, enrollmentStatus: active ? 'active' as const : 'inactive' as const, xp, tasks,
+    enrollmentId, learningPathVersionId: versionId, enrollmentStatus: active ? 'active' as const : 'inactive' as const, xp, tasks, overrideHistory,
     skills: skills.map((skill) => {
       const unmetPrerequisiteSkillIds = prerequisites.filter((edge) => edge.skillId === skill.skillId && !mastered.has(edge.prerequisiteSkillId)).map((edge) => edge.prerequisiteSkillId)
       const xpShortfall = Math.max(0, skill.xpThreshold - xp)
-      return { ...skill, mastery: mastered.has(skill.skillId), access: active && xpShortfall === 0 && unmetPrerequisiteSkillIds.length === 0, unmetPrerequisiteSkillIds, xpShortfall }
+      const latest = latestOverrides.get(skill.skillId)
+      const accessOverride = latest?.action === 'grant' ? latest : null
+      return { ...skill, mastery: mastered.has(skill.skillId), access: active && (accessOverride !== null || xpShortfall === 0 && unmetPrerequisiteSkillIds.length === 0), accessOverride, unmetPrerequisiteSkillIds, xpShortfall }
     }),
   }
 }

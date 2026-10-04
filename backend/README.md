@@ -53,7 +53,7 @@ All IDs are UUIDs and all routes require trusted identity. The actor is never ta
 Returns 200 `{ "learningState": { "enrollmentId", "learningPathVersionId", "enrollmentStatus", "xp", "tasks": [], "skills": [] } }` (keys shown schematically).
 
 - Each Task includes its pinned definition (`taskId`, `skillId`, `title`, `required`, `xpReward`, `learningPathVersionId`), `approved`, and `xpContribution`.
-- Each Skill includes its pinned definition (`skillId`, `title`, `learningOutcome`, `xpThreshold`, `learningPathVersionId`), independent booleans `mastery` and `access`, `unmetPrerequisiteSkillIds`, and nonnegative `xpShortfall`. `enrollmentStatus: "inactive"` disables all Access even when no rule shortfall remains.
+- Each Skill includes its pinned definition (`skillId`, `title`, `learningOutcome`, `xpThreshold`, `learningPathVersionId`), independent booleans `mastery` and `access`, `accessOverride` (active grant record or null), `unmetPrerequisiteSkillIds`, and nonnegative `xpShortfall`. `enrollmentStatus: "inactive"` disables all Access even when no rule shortfall remains.
 - XP sums one configured reward per Task with any valid owning-Coach Approval in this Enrollment. Mastery requires a nonempty set of Required Tasks, all approved; Enrichment does not block it. Access uses ALL prerequisite Mastery and Enrollment-local XP without spending XP. Matching logical IDs in other Versions never transfer progress.
 - Only learner and owning Coach may read state, including inactive history. Foreign/unknown Enrollments return 404 `enrollment_not_found`; anonymous requests return 401.
 
@@ -61,7 +61,34 @@ Returns 200 `{ "learningState": { "enrollmentId", "learningPathVersionId", "enro
 
 Review and send transactions lock **Enrollment FOR UPDATE before Submission**, retaining locks until commit. Learning-state and submitted-history reads use the same Enrollment lock, so their multiple queries cannot mix evidence across concurrent sends/reviews. Future revocation/lifecycle/evidence mutators must retain this contract. Published definitions and ownership are assumed stable; there are no content-edit or ownership-transfer APIs here.
 
-Current XP/Mastery remain derived from durable revision decisions. T10 additionally records XP Award/Correction and Mastery award/revocation transitions in the same transaction as each Review mutation. Overrides and Enrollment lifecycle APIs remain T11/T12; personal XP persistence and authentication-provider integration are not implemented. There is no generic Review overwrite endpoint.
+Current XP/Mastery remain derived from durable revision decisions. T10 additionally records XP Award/Correction and Mastery award/revocation transitions in the same transaction as each Review mutation. T11 persists scoped Access Overrides; Enrollment lifecycle APIs remain T12. Personal XP persistence and authentication-provider integration are not implemented. There is no generic Review overwrite endpoint.
+
+### Grant or withdraw one scoped Access Override (T11)
+
+`POST /enrollments/:enrollmentId/skills/:skillId/access-overrides`
+
+```json
+{ "reason": "Prior experience supports direct practice." }
+```
+
+- Only the owning Coach may grant or revoke. Reason is mandatory non-whitespace text, at most **500 characters**, stored verbatim. Other JSON fields cannot select the actor, learner, action, target or time.
+- Success is **201 after commit**, returning `{ "overrideRecord": ... }`. The record has `id`, monotonic `sequence`, `action: "grant"`, `coachAccountId`, `learnerAccountId`, `enrollmentId`, pinned `learningPathVersionId`, `skillId`, database-generated `occurredAt`, `reason`, and `grantRecordId: null`.
+- The exception waives both prerequisites and XP only for this Skill/Enrollment. It does not change XP, Mastery, ordinary diagnostics or any other Enrollment. An inactive Enrollment remains inaccessible. Coaches may manage exceptions while inactive without reactivating participation.
+
+`POST /enrollments/:enrollmentId/skills/:skillId/access-overrides/:grantRecordId/revoke`
+
+```json
+{ "reason": "Return to the ordinary progression route." }
+```
+
+- Revocation names the **exact active grant ID**, with the same reason rules. Success is **200 after commit**, returning a new `overrideRecord` with `action: "revoke"` and `grantRecordId` identifying the withdrawn grant. The original grant is not changed.
+- Ordinary current Access is restored, not blindly locked: met requirements still permit work. Existing work, private drafts, XP, Mastery and their histories remain unchanged. Eligible unsuperseded pending revisions remain reviewable; new sends use current Access.
+- Invalid reasons return 422 `invalid_override_reason`. Anonymous requests return 401; learners receive 403 `coach_only`; foreign/unknown Enrollments return 404 `enrollment_not_found`. Skills outside the pinned Version return 404 `skill_not_found`; malformed IDs or unknown/context-mismatched/non-grant revocation targets return 404 `override_not_found`.
+- Repeated grants return 409 `override_already_active`. Revoking an already withdrawn or superseded grant returns 409 `override_not_active`. Regrant creates a new ID, so retrying an old revoke cannot withdraw it. Rejected operations append no records.
+- Learning-state includes ordered `overrideHistory` plus each Skill's active `accessOverride` (grant record or null). Ordinary `xpShortfall` and `unmetPrerequisiteSkillIds` remain visible even while waived. These records are visible only to the learner and owning Coach; drafts are never included.
+- `override_records` is the single authority for exception state and audit. Migration `0005` adds pinned Enrollment/Version/Skill constraints and an update/delete-rejecting immutability trigger. Grants/revokes, sends, reviews and coherent reads share Enrollment `FOR UPDATE` through commit; failed record storage leaves no exception or audit effect. Sequence orders records; `clock_timestamp()` records action time after the lock is obtained. Published content and Workspace ownership are assumed stable, as for the existing learning routes.
+
+`bun test test/override.test.ts` covers both unmet gates together, complete automatic audit, grant/revoke/regrant and stale retries, concurrent exact operations, scoped authority/privacy, retained work and achievements, ordinary-rule restoration, inactive gating, fresh-connection persistence, immutable records, late rollback, and PostgreSQL-observed grant/send, revoke/send (both orders), and revoke/read serialization. Inactivity is direct test-only fault injection; lifecycle request proof remains T12. Intentional rollback tests log storage exceptions.
 
 ### Revoke one Approval (T10)
 
