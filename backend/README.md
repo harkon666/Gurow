@@ -147,3 +147,27 @@ Current XP/Mastery remain derived from durable revision decisions. T10 additiona
 `bun test test/revocation.test.ts` covers the T10 request seam, including multiple Approvals, last removal/restoration, Mastery history, dependent Access and retained work, privacy/authority, invalid/repeated/competing requests, Enrollment/Version isolation, zero-XP and Enrichment evidence, historical backfill, late transaction rollback, and fresh-connection readback. Intentional rollback tests log a storage exception.
 
 `bun test test/review.test.ts` exercises the two-Skill 20-XP reference flow, privacy/authority, feedback/history, stale and repeated decisions, Required/Enrichment/nonempty Mastery, Enrollment/Version isolation, ALL and independent XP gates, prior work after Access loss, competing decisions, both send/review orders, coherent reads, and rollback/commit persistence against PostgreSQL. Concurrency tests pause actual request INSERTs with test-only triggers and observe `pg_blocking_pids` before releasing their barrier; these triggers/functions are removed in `finally`. Loss of Access/deactivation is test-only database fault injection, not evidence of a lifecycle API. The rollback test intentionally produces a logged storage exception and asserts HTTP 500 with no committed decision/progress.
+
+## Personal learning interface (T13)
+
+Personal-mode Learning Paths share the `learning_paths`, `skills` and `tasks` identity tables with coach mode; a Path belongs to exactly one Coach Workspace or one Personal Workspace (`learning_paths_one_workspace`). Personal definitions are unversioned (`personal_skills`, `personal_tasks`, `personal_prerequisites`) and composite keys require their Path to be personal. No authoring route exists yet (T16); P2 tests seed Paths through `seedPersonalFixture`.
+
+All routes require trusted identity and act only for the Personal Workspace owner. Any other Account, including the owner's Coach, and any unknown, malformed or coach-mode Path ID receives 404 `learning_path_not_found` (ADR 0012); anonymous requests receive 401. Inside an owned Path, unknown or foreign targets return 404 `task_not_found` / `skill_not_found`. No route takes a reason, evidence or Review, and the actor is never read from a body.
+
+| Route | Effect |
+| --- | --- |
+| `GET /personal/learning-paths/:pathId/learning-state` | Current Path state and its histories |
+| `PUT` / `DELETE …/tasks/:taskId/completion` | Mark complete (needs current Access) / undo (allowed while locked) |
+| `PUT …/tasks/:taskId/reward` `{ "xpReward": 50 }` | Integer 0–1,000,000, otherwise 422 `invalid_reward` |
+| `POST …/tasks/:taskId/start` | Records the first start (needs current Access) |
+| `POST …/tasks/:taskId/archive` | One-way archival; no restoration policy is defined |
+| `PUT` / `DELETE …/skills/:skillId/mastery` | Declare / withdraw Mastery freely |
+| `PUT` / `DELETE …/skills/:skillId/access-override` | Grant / revoke a personal Access Override |
+
+- Mutations answer 200 `{ "changed", "learningState" }` after commit. A repeat (already complete, same reward, already declared/granted, …) answers `changed: false` and records nothing. Completion or start on a locked Skill returns 403 `skill_locked`; any change to an archived Task returns 409 `task_archived`.
+- `learningState` holds `xp`, `tasks` (definition, `startedAt`, `completed`, `completedAt`, `archivedAt`, `xpContribution`), `skills` (definition, `mastery`, `masteryDeclaredAt`, `access`, `accessOverride`, `unmetPrerequisiteSkillIds`, `xpShortfall`), and the ordered `xpHistory`, `masteryHistory` and `overrideHistory`.
+- XP is the sum of current rewards of completed Tasks in this Path only, archived ones included; other personal Paths and Enrollments never count (ADR 0009). A Skill has Access when its latest override is a grant, or when every Prerequisite Skill has declared Mastery and Path XP meets its threshold. Lower XP relocks already started work; the start record stays.
+- Each nonzero change in a Task's contribution appends an XP event with signed `amount`, `cause` (`completion`, `completion_undone`, `reward_change`) and `kind` (`award` for the Task's first completion event, otherwise `correction`). For a completed Task, a 20→50 edit records +30, undo −50 and completion again +50. Incomplete or zero-reward changes record nothing. Completion, rewards and archival never change Mastery; Mastery and overrides never change XP.
+- Every request holds the Path row lock through commit, so checks, changes, history and reads are one state. XP, Mastery and override histories reject UPDATE/DELETE in SQL. A late history failure rolls back the whole action.
+
+`bun test test/personal.test.ts` covers owner-only authority against the learner's Coach, peers and other Accounts; free Mastery; idempotent sequential and concurrent completion/undo; the 20→50 correction scenario; Path-local thresholds, relocking and the reasonless override; archival retention; separation from Enrollments in both directions; fresh-connection readback; immutable history; late rollback of each history kind; and a PostgreSQL-observed wait of a reward edit behind an in-flight completion. Intentional rollback tests log storage exceptions.

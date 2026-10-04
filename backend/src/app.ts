@@ -1,4 +1,4 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { Database } from './db/client'
@@ -6,6 +6,7 @@ import { acceptInvitation, readEnrollment, type EnrollmentRefusal } from './enro
 import type { IdentityResolver } from './identity'
 import { changeAccessOverride } from './overrides'
 import { changeEnrollmentStatus } from './lifecycle'
+import * as personal from './personal'
 import { readLearningState, recordReview, revokeApproval, type ReviewContents } from './reviews'
 import { readDraft, readSubmission, saveDraft, sendRevision, startTask, type SubmissionContents, type SubmissionRefusal } from './submissions'
 
@@ -29,9 +30,18 @@ const SUBMISSION_REFUSAL_STATUS: Record<SubmissionRefusal, ContentfulStatusCode>
   skill_locked: 403,
 }
 
+const PERSONAL_REFUSAL_STATUS: Record<personal.PersonalRefusal, ContentfulStatusCode> = {
+  learning_path_not_found: 404,
+  task_not_found: 404,
+  skill_not_found: 404,
+  task_archived: 409,
+  skill_locked: 403,
+}
+
 const MAX_TEXT_LENGTH = 50_000
 const MAX_URLS = 20
 const MAX_URL_LENGTH = 2_048
+const MAX_XP_REWARD = 1_000_000
 
 /**
  * Validates text and URL evidence without rewriting it: valid values are kept
@@ -199,6 +209,58 @@ export function createApp({ db, identity }: { db: Database; identity: IdentityRe
       if (!result.ok) return c.json({ error: result.refusal }, result.refusal === 'coach_only' ? 403 : result.refusal === 'override_already_active' || result.refusal === 'override_not_active' ? 409 : 404)
       return c.json({ overrideRecord: result.value }, action === 'grant' ? 201 : 200)
     })
+  }
+
+  // Personal mode (ADR 0009, 0012): owner-only, without reasons, evidence or Review.
+  // Toggles are idempotent: a repeat answers 200 with `changed: false` and records nothing.
+  app.use('/personal/*', authenticate)
+  const personalPath = '/personal/learning-paths/:pathId'
+  const NIL_UUID = '00000000-0000-0000-0000-000000000000'
+  // A malformed Path is unknown; a malformed Task/Skill is unknown only after ownership is checked.
+  const personalTarget = (pathId: string, targetId: string) => UUID.test(pathId) ? { pathId, targetId: UUID.test(targetId) ? targetId : NIL_UUID } : null
+  type PersonalResult = Awaited<ReturnType<typeof personal.completeTask>>
+  const personalResult = (c: Context<Env>, result: PersonalResult) => result.ok
+    ? c.json({ changed: result.changed, learningState: result.learningState })
+    : c.json({ error: result.refusal }, PERSONAL_REFUSAL_STATUS[result.refusal])
+
+  app.get(`${personalPath}/learning-state`, async (c) => {
+    const pathId = c.req.param('pathId')
+    const learningState = UUID.test(pathId) ? await personal.readPersonalLearningState(db, pathId, c.get('accountId')) : null
+    if (!learningState) return c.json({ error: 'learning_path_not_found' }, 404)
+    return c.json({ learningState })
+  })
+
+  const taskActions = [
+    ['PUT', 'completion', personal.completeTask],
+    ['DELETE', 'completion', personal.undoTaskCompletion],
+    ['POST', 'start', personal.startTask],
+    ['POST', 'archive', personal.archiveTask],
+  ] as const
+  for (const [method, action, perform] of taskActions) {
+    app.on(method, `${personalPath}/tasks/:taskId/${action}`, async (c) => {
+      const target = personalTarget(c.req.param('pathId'), c.req.param('taskId'))
+      if (!target) return c.json({ error: 'learning_path_not_found' }, 404)
+      return personalResult(c, await perform(db, target.pathId, target.targetId, c.get('accountId')))
+    })
+  }
+
+  app.put(`${personalPath}/tasks/:taskId/reward`, async (c) => {
+    const target = personalTarget(c.req.param('pathId'), c.req.param('taskId'))
+    if (!target) return c.json({ error: 'learning_path_not_found' }, 404)
+    const body: unknown = await c.req.json().catch(() => null)
+    const xpReward = typeof body === 'object' && body !== null ? (body as Record<string, unknown>).xpReward : null
+    if (typeof xpReward !== 'number' || !Number.isSafeInteger(xpReward) || xpReward < 0 || xpReward > MAX_XP_REWARD) return c.json({ error: 'invalid_reward' }, 422)
+    return personalResult(c, await personal.changeTaskReward(db, target.pathId, target.targetId, c.get('accountId'), xpReward))
+  })
+
+  for (const [segment, change] of [['mastery', personal.setMastery], ['access-override', personal.setAccessOverride]] as const) {
+    for (const method of ['PUT', 'DELETE'] as const) {
+      app.on(method, `${personalPath}/skills/:skillId/${segment}`, async (c) => {
+        const target = personalTarget(c.req.param('pathId'), c.req.param('skillId'))
+        if (!target) return c.json({ error: 'learning_path_not_found' }, 404)
+        return personalResult(c, await change(db, target.pathId, target.targetId, c.get('accountId'), method === 'PUT'))
+      })
+    }
   }
 
   app.get('/enrollments/:enrollmentId/learning-state', async (c) => {

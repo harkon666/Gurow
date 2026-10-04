@@ -57,6 +57,13 @@
       "when": 1791133116964,
       "tag": "0007_windy_sugar_man",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791134951093,
+      "tag": "0008_warm_blink",
+      "breakpoints": true
     }
   ]
 }

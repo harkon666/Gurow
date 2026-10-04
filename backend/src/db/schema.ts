@@ -18,13 +18,28 @@ export const coachWorkspaces = pgTable('coach_workspaces', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
-/** A coach-mode Learning Path, owned by exactly one Coach Workspace. */
+/** An Account's one owner-only private learning space (ADR 0012). */
+export const personalWorkspaces = pgTable('personal_workspaces', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  ownerAccountId: uuid('owner_account_id').notNull().references(() => accounts.id),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [unique('personal_workspaces_owner_key').on(t.ownerAccountId)])
+
+/**
+ * One Learning Path concept for both modes: a coach-mode Path belongs to exactly
+ * one Coach Workspace, a personal-mode Path to exactly one Personal Workspace.
+ */
 export const learningPaths = pgTable('learning_paths', {
   id: uuid('id').primaryKey().defaultRandom(),
-  coachWorkspaceId: uuid('coach_workspace_id').notNull().references(() => coachWorkspaces.id),
+  coachWorkspaceId: uuid('coach_workspace_id').references(() => coachWorkspaces.id),
+  personalWorkspaceId: uuid('personal_workspace_id').references(() => personalWorkspaces.id),
   title: text('title').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-})
+}, (t) => [
+  check('learning_paths_one_workspace', sql`num_nonnulls(${t.coachWorkspaceId}, ${t.personalWorkspaceId}) = 1`),
+  // Lets personal definitions require a personal-mode Path.
+  unique('learning_paths_id_personal_workspace_key').on(t.id, t.personalWorkspaceId),
+])
 
 /**
  * A published, immutable edition of a Learning Path. `enrollmentClosedAt` is an
@@ -46,7 +61,7 @@ export const learningPathVersions = pgTable('learning_path_versions', {
 export const skills = pgTable('skills', {
   id: uuid('id').primaryKey().defaultRandom(),
   learningPathId: uuid('learning_path_id').notNull().references(() => learningPaths.id),
-})
+}, (t) => [unique('skills_id_learning_path_key').on(t.id, t.learningPathId)])
 
 /** A Task's logical identity, owned by exactly one Skill (ADR 0004). */
 export const tasks = pgTable('tasks', {
@@ -279,4 +294,104 @@ export const masteryEvents = pgTable('mastery_events', {
   foreignKey({ columns: [t.enrollmentId, t.learningPathVersionId], foreignColumns: [enrollments.id, enrollments.learningPathVersionId] }),
   foreignKey({ columns: [t.learningPathVersionId, t.skillId], foreignColumns: [versionSkills.learningPathVersionId, versionSkills.skillId] }),
   check('mastery_events_action', sql`${t.action} IN ('award', 'revocation')`),
+])
+
+/**
+ * A Skill's editable definition in a personal-mode Path (unversioned). Mastery is
+ * the owner's free declaration: no evidence, Review or Task completion sets it.
+ */
+export const personalSkills = pgTable('personal_skills', {
+  skillId: uuid('skill_id').primaryKey(),
+  learningPathId: uuid('learning_path_id').notNull(),
+  personalWorkspaceId: uuid('personal_workspace_id').notNull(),
+  title: text('title').notNull(),
+  learningOutcome: text('learning_outcome').notNull(),
+  xpThreshold: integer('xp_threshold').notNull().default(0),
+  masteryDeclaredAt: timestamp('mastery_declared_at', { withTimezone: true }),
+}, (t) => [
+  unique('personal_skills_path_skill_key').on(t.learningPathId, t.skillId),
+  foreignKey({ columns: [t.skillId, t.learningPathId], foreignColumns: [skills.id, skills.learningPathId] }),
+  foreignKey({ columns: [t.learningPathId, t.personalWorkspaceId], foreignColumns: [learningPaths.id, learningPaths.personalWorkspaceId] }),
+  check('personal_skills_xp_threshold_nonnegative', sql`${t.xpThreshold} >= 0`),
+])
+
+/**
+ * A personal Task's editable definition and completion state. A completed Task
+ * contributes its current `xpReward`; an incomplete one contributes zero. Archival
+ * is one-way here and keeps the contribution.
+ */
+export const personalTasks = pgTable('personal_tasks', {
+  taskId: uuid('task_id').primaryKey(),
+  learningPathId: uuid('learning_path_id').notNull(),
+  skillId: uuid('skill_id').notNull(),
+  title: text('title').notNull(),
+  xpReward: integer('xp_reward').notNull().default(0),
+  startedAt: timestamp('started_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+  archivedAt: timestamp('archived_at', { withTimezone: true }),
+}, (t) => [
+  unique('personal_tasks_path_task_key').on(t.learningPathId, t.taskId),
+  foreignKey({ columns: [t.taskId, t.skillId], foreignColumns: [tasks.id, tasks.skillId] }),
+  foreignKey({ columns: [t.learningPathId, t.skillId], foreignColumns: [personalSkills.learningPathId, personalSkills.skillId] }),
+  check('personal_tasks_xp_reward_nonnegative', sql`${t.xpReward} >= 0`),
+])
+
+/** ALL prerequisite edges within one personal Path, satisfied by declared Mastery. */
+export const personalPrerequisites = pgTable('personal_prerequisites', {
+  learningPathId: uuid('learning_path_id').notNull(),
+  prerequisiteSkillId: uuid('prerequisite_skill_id').notNull(),
+  skillId: uuid('skill_id').notNull(),
+}, (t) => [
+  primaryKey({ name: 'personal_prerequisites_pk', columns: [t.learningPathId, t.prerequisiteSkillId, t.skillId] }),
+  foreignKey({ name: 'personal_prerequisites_source_fk', columns: [t.learningPathId, t.prerequisiteSkillId], foreignColumns: [personalSkills.learningPathId, personalSkills.skillId] }),
+  foreignKey({ name: 'personal_prerequisites_target_fk', columns: [t.learningPathId, t.skillId], foreignColumns: [personalSkills.learningPathId, personalSkills.skillId] }),
+  check('personal_prerequisites_no_self_edge', sql`${t.prerequisiteSkillId} <> ${t.skillId}`),
+])
+
+/**
+ * Append-only XP Award/Correction history of one personal Path. `cause` names
+ * the owner action; the signed amount is the change in the Task's contribution.
+ */
+export const personalXpEvents = pgTable('personal_xp_events', {
+  id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+  learningPathId: uuid('learning_path_id').notNull(),
+  taskId: uuid('task_id').notNull(),
+  actorAccountId: uuid('actor_account_id').notNull().references(() => accounts.id),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+  kind: text('kind').notNull(),
+  cause: text('cause').notNull(),
+  amount: integer('amount').notNull(),
+}, (t) => [
+  foreignKey({ columns: [t.learningPathId, t.taskId], foreignColumns: [personalTasks.learningPathId, personalTasks.taskId] }),
+  check('personal_xp_events_kind', sql`${t.kind} IN ('award', 'correction')`),
+  check('personal_xp_events_cause', sql`${t.cause} IN ('completion', 'completion_undone', 'reward_change')`),
+  check('personal_xp_events_nonzero', sql`${t.amount} <> 0`),
+])
+
+/** Append-only history of the owner's Mastery declarations and withdrawals. */
+export const personalMasteryEvents = pgTable('personal_mastery_events', {
+  id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+  learningPathId: uuid('learning_path_id').notNull(),
+  skillId: uuid('skill_id').notNull(),
+  actorAccountId: uuid('actor_account_id').notNull().references(() => accounts.id),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+  action: text('action').notNull(),
+}, (t) => [
+  foreignKey({ columns: [t.learningPathId, t.skillId], foreignColumns: [personalSkills.learningPathId, personalSkills.skillId] }),
+  check('personal_mastery_events_action', sql`${t.action} IN ('declare', 'withdraw')`),
+])
+
+/** Append-only personal Access Overrides; the latest record per Skill is current. No reason is required. */
+export const personalOverrideRecords = pgTable('personal_override_records', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  sequence: integer('sequence').notNull().generatedAlwaysAsIdentity(),
+  learningPathId: uuid('learning_path_id').notNull(),
+  skillId: uuid('skill_id').notNull(),
+  actorAccountId: uuid('actor_account_id').notNull().references(() => accounts.id),
+  action: text('action').notNull(),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+}, (t) => [
+  unique('personal_override_records_sequence_key').on(t.sequence),
+  foreignKey({ columns: [t.learningPathId, t.skillId], foreignColumns: [personalSkills.learningPathId, personalSkills.skillId] }),
+  check('personal_override_records_action', sql`${t.action} IN ('grant', 'revoke')`),
 ])

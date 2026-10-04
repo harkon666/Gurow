@@ -22,6 +22,7 @@
     "t10-revocation": {"cwd": "backend", "argv": ["bun", "test", "test/revocation.test.ts"], "timeout": 180},
     "t11-override": {"cwd": "backend", "argv": ["bun", "test", "test/override.test.ts"], "timeout": 180},
     "t12-lifecycle": {"cwd": "backend", "argv": ["bun", "test", "test/lifecycle.test.ts"], "timeout": 180},
+    "t13-personal": {"cwd": "backend", "argv": ["bun", "test", "test/personal.test.ts"], "timeout": 180},
     "t06-l3-08-regressions": {"cwd": "frontend", "argv": ["bun", "test", "src/components/editor/pointerMoveCoalescer.test.ts", "src/components/editor/selection.test.ts", "src/components/editor/protocol.test.ts", "scripts/benchmark/fixture.test.ts", "scripts/benchmark/report.test.ts", "scripts/benchmark/trace-summary.test.ts"], "timeout": 120},
     "t06-l3-08-engine-labels": {"cwd": ".", "argv": ["cargo", "test", "--manifest-path", "editor/Cargo.toml", "-p", "engine-core", "label"], "timeout": 300},
     "t06-l3-08-fixture-check-v5": {"cwd": "frontend", "argv": ["bun", "run", "scripts/benchmark/fixture-check.ts", "--contract", "../docs/benchmarks/p1/protocol-v5.json", "--out", "../.harness/t06/fixtures-v5"], "timeout": 900},
@@ -47,6 +48,7 @@
     "T10": ["db-up", "backend-types", "backend-tests", "t10-revocation"],
     "T11": ["db-up", "backend-types", "backend-tests", "t11-override"],
     "T12": ["db-up", "backend-types", "backend-tests", "t12-lifecycle"],
+    "T13": ["db-up", "backend-types", "backend-tests", "t13-personal"],
     "T06-L3-08": ["t06-l3-08-regressions", "t06-l3-08-engine-labels", "t06-l3-08-fixture-check-v5", "t04-browser", "t05-browser", "editor-lifecycle"],
     "T06-L3-06": ["t06-functional", "t06-l3-06-gate-tests", "t06-l3-08-fixture-check-v5", "frontend-types"]
   }
