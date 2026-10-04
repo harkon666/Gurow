@@ -172,7 +172,7 @@ Recorded times follow the accepted lock order (T14): sends, Reviews, revocations
 
 ## Personal learning interface (T13)
 
-Personal-mode Learning Paths share the `learning_paths`, `skills` and `tasks` identity tables with coach mode; a Path belongs to exactly one Coach Workspace or one Personal Workspace (`learning_paths_one_workspace`). Personal definitions are unversioned (`personal_skills`, `personal_tasks`, `personal_prerequisites`) and composite keys require their Path to be personal. No authoring route exists yet (T16); P2 tests seed Paths through `seedPersonalFixture`.
+Personal-mode Learning Paths share the `learning_paths`, `skills` and `tasks` identity tables with coach mode; a Path belongs to exactly one Coach Workspace or one Personal Workspace (`learning_paths_one_workspace`). Personal definitions are unversioned (`personal_skills`, `personal_tasks`, `personal_prerequisites`) and composite keys require their Path to be personal. P2 tests seed Paths through `seedPersonalFixture`; owners author them through the T16 routes below.
 
 All routes require trusted identity and act only for the Personal Workspace owner. Any other Account, including the owner's Coach, and any unknown, malformed or coach-mode Path ID receives 404 `learning_path_not_found` (ADR 0012); anonymous requests receive 401. Inside an owned Path, unknown or foreign targets return 404 `task_not_found` / `skill_not_found`. No route takes a reason, evidence or Review, and the actor is never read from a body.
 
@@ -193,6 +193,23 @@ All routes require trusted identity and act only for the Personal Workspace owne
 - Every request holds the Path row lock through commit, so checks, changes, history and reads are one state. XP, Mastery and override histories reject UPDATE/DELETE in SQL. A late history failure rolls back the whole action.
 
 `bun test test/personal.test.ts` covers owner-only authority against the learner's Coach, peers and other Accounts; free Mastery; idempotent sequential and concurrent completion/undo; the 20→50 correction scenario; Path-local thresholds, relocking and the reasonless override; archival retention; separation from Enrollments in both directions; fresh-connection readback; immutable history; late rollback of each history kind; and a PostgreSQL-observed wait of a reward edit behind an in-flight completion. Intentional rollback tests log storage exceptions.
+
+## Personal Path authoring (T16)
+
+A personal Path is saved as one document (`src/authoring.ts`, ADR 0016), shaped like the P1 local checkpoint: the editor snapshot (`format_version`, one card per Skill with its position, connections) beside the application payload (Path title and goal, Skill titles and outcomes, Tasks). Tasks never enter the snapshot; connections are stored once, as `personal_prerequisites`; card positions are the Path's Canvas Layout in `personal_skill_cards`. Camera, selection and undo history are never stored.
+
+| Route | Effect |
+| --- | --- |
+| `POST /personal/learning-paths` `{ title, goal }` | 201 with the new document at revision 0, in the caller's Personal Workspace (entered if needed); a blank title is 422 `invalid_learning_path` |
+| `GET /personal/learning-paths/:pathId` | `{ learningPath: { id, personalWorkspaceId, title, goal, revision }, editor, application }` for the owner; 404 otherwise |
+| `PUT /personal/learning-paths/:pathId/document` `{ expectedRevision, title, goal, editor, application }` | Saves the whole document and answers it with `revision + 1`; an unchanged document keeps the revision |
+
+- `learning_paths.revision` is the concurrency revision, distinct from a Learning Path Version and the snapshot format version. Under the Path row lock, a save whose `expectedRevision` is not the current revision answers 409 `stale_revision` with `current` (the accepted document) and writes nothing.
+- The whole save is refused, writing nothing, when it breaks an identity rule: a Skill ID already owned by another Path (409 `skill_owned_elsewhere`; the `skills` primary key decides concurrent claims), a Task ID owned elsewhere (409 `task_owned_elsewhere`), a Task under a different Skill than its own (409 `task_skill_mismatch`), or an archived Task (409 `task_archived`). Removing a stored Skill or active Task is 422 `skill_missing` / `task_missing`: deletion and archival from the editor follow in T30/T32.
+- Shape and association are checked before the database: every Skill has exactly one card with the same title, IDs are unique UUIDs, positions are finite within ±1,000,000, text is within its limits (422 `invalid_document`). Connections must join two Skills of the document (422 `connection_outside_path`) and keep the Prerequisite Graph acyclic, self-edges included (422 `prerequisite_cycle`). An invalid edit to a Path the caller does not own still answers 404.
+- Saves never write Task rewards, completion, starts, archival, Mastery, XP Thresholds or overrides: those stay with the T13 learning routes and their histories.
+
+`bun test test/authoring.test.ts` covers several Paths per owner with their own goal, Skills, Tasks and cards; reopening; the snapshot/payload split; learning records untouched by saves; the owner-only matrix; identity and graph refusals with no partial writes; concurrent Skill ID claims; stale and competing saves.
 
 ## P2 gate (T14)
 

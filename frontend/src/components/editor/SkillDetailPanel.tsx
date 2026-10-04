@@ -1,7 +1,18 @@
 import React, { useState } from 'react'
-import { INITIAL_LEARNING_PATH_FIXTURE, type FixtureTask } from '../../fixtures/learningPath'
+import { INITIAL_LEARNING_PATH_FIXTURE } from '../../fixtures/learningPath'
 import type { SelectedSkillInfo } from './types'
 import type { PrerequisiteConnection } from './protocol'
+
+/**
+ * A Task as the sidebar edits it. `required` exists only where the mode has
+ * Required and Enrichment Tasks; personal Tasks have none.
+ */
+export interface PanelTask {
+  id: string
+  title: string
+  description: string
+  required?: boolean
+}
 
 interface SkillDetailPanelProps {
   selectedSkill: SelectedSkillInfo | null
@@ -11,9 +22,13 @@ interface SkillDetailPanelProps {
   onDisconnect?: (fromId: string, toId: string) => void
   connectionRejection?: string | null
   onClearRejection?: () => void
-  tasks?: FixtureTask[]
+  tasks?: PanelTask[]
   outcome?: string
-  onUpdateTask?: (taskId: string, updates: Partial<FixtureTask>) => void
+  onUpdateTask?: (taskId: string, updates: Partial<PanelTask>) => void
+  /** Makes the learning outcome editable. */
+  onUpdateOutcome?: (outcome: string) => void
+  /** Offers adding a Task to the selected Skill. */
+  onAddTask?: () => void
 }
 
 interface ConnectionListItemProps {
@@ -59,6 +74,8 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
   tasks,
   outcome,
   onUpdateTask,
+  onUpdateOutcome,
+  onAddTask,
 }) => {
   const [selectedTargetId, setSelectedTargetId] = useState<string>('')
 
@@ -106,7 +123,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
   )
 
   const activeOutcome = outcome ?? fixtureSkill?.outcome ?? ''
-  const activeTasks = tasks ?? fixtureSkill?.tasks ?? []
+  const activeTasks: PanelTask[] = tasks ?? fixtureSkill?.tasks ?? []
 
   // Derived prerequisite connections for this skill
   const incomingPrereqs = connections.filter((c) => c.to_id === selectedSkill.id)
@@ -183,9 +200,21 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
           <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
             Learning Outcome
           </h4>
-          <p className="text-sm text-slate-300 leading-relaxed">
-            {activeOutcome}
-          </p>
+          {onUpdateOutcome ? (
+            <textarea
+              id="skill-outcome-input"
+              aria-label="Learning outcome"
+              value={activeOutcome}
+              onChange={(e) => onUpdateOutcome(e.target.value)}
+              rows={3}
+              className="w-full text-sm text-slate-200 bg-slate-950 border border-slate-700/80 rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-500 resize-none leading-relaxed"
+              placeholder="What the learner can do once this Skill is mastered…"
+            />
+          ) : (
+            <p className="text-sm text-slate-300 leading-relaxed">
+              {activeOutcome}
+            </p>
+          )}
         </div>
 
         {/* Prerequisite Connections Section */}
@@ -324,7 +353,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
                     >
                       Task Title:
                     </label>
-                    <span
+                    {task.required !== undefined && <span
                       id={`task-badge-${task.id}`}
                       className={`text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded ${
                         task.required
@@ -333,7 +362,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
                       }`}
                     >
                       {task.required ? 'Required' : 'Enrichment'}
-                    </span>
+                    </span>}
                   </div>
 
                   <input
@@ -366,7 +395,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
                     />
                   </div>
 
-                  <div className="pt-1 flex items-center justify-between">
+                  {task.required !== undefined && <div className="pt-1 flex items-center justify-between">
                     <label
                       htmlFor={`task-edit-required-${task.id}`}
                       className="flex items-center gap-2 cursor-pointer select-none text-[11px] text-slate-300"
@@ -382,7 +411,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
                       />
                       <span>Is Required Task (Mandatory for Skill Mastery)</span>
                     </label>
-                  </div>
+                  </div>}
                 </div>
               ))}
             </div>
@@ -390,6 +419,15 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
             <div className="text-xs text-slate-500 italic py-2">
               No tasks assigned yet to this skill definition.
             </div>
+          )}
+          {onAddTask && (
+            <button
+              id="add-task-btn"
+              onClick={onAddTask}
+              className="mt-3 w-full px-2 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded-lg text-xs font-medium transition-colors cursor-pointer"
+            >
+              + Add Task
+            </button>
           )}
         </div>
       </div>

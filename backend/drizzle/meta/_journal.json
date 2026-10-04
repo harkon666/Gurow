@@ -71,6 +71,13 @@
       "when": 1791138794475,
       "tag": "0009_sign_in",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791142113050,
+      "tag": "0010_personal_authoring",
+      "breakpoints": true
     }
   ]
 }

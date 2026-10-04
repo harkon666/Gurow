@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { type AnyPgColumn, boolean, check, foreignKey, index, integer, pgEnum, pgTable, primaryKey, text, timestamp, unique, uuid, uniqueIndex } from 'drizzle-orm/pg-core'
+import { type AnyPgColumn, boolean, check, doublePrecision, foreignKey, index, integer, pgEnum, pgTable, primaryKey, text, timestamp, unique, uuid, uniqueIndex } from 'drizzle-orm/pg-core'
 
 /**
  * An identity usable for personal learning and contextual Coach and Learner roles
@@ -44,8 +44,17 @@ export const learningPaths = pgTable('learning_paths', {
   coachWorkspaceId: uuid('coach_workspace_id').references(() => coachWorkspaces.id),
   personalWorkspaceId: uuid('personal_workspace_id').references(() => personalWorkspaces.id),
   title: text('title').notNull(),
+  /** The goal the Path's Skills work toward (CONTEXT.md: Learning Path). */
+  goal: text('goal').notNull().default(''),
+  /**
+   * Concurrency revision of the Path's editable content, the expected revision of
+   * every content save (ADR 0016). Distinct from a Learning Path Version and from
+   * the editor snapshot's format version.
+   */
+  revision: integer('revision').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
+  check('learning_paths_revision_nonnegative', sql`${t.revision} >= 0`),
   check('learning_paths_one_workspace', sql`num_nonnulls(${t.coachWorkspaceId}, ${t.personalWorkspaceId}) = 1`),
   // Lets personal definitions require a personal-mode Path.
   unique('learning_paths_id_personal_workspace_key').on(t.id, t.personalWorkspaceId),
@@ -318,6 +327,8 @@ export const personalSkills = pgTable('personal_skills', {
   learningOutcome: text('learning_outcome').notNull(),
   xpThreshold: integer('xp_threshold').notNull().default(0),
   masteryDeclaredAt: timestamp('mastery_declared_at', { withTimezone: true }),
+  /** Position in the Path's Skill list, as last saved by the owner. */
+  ordinal: integer('ordinal').notNull().default(0),
 }, (t) => [
   unique('personal_skills_path_skill_key').on(t.learningPathId, t.skillId),
   foreignKey({ columns: [t.skillId, t.learningPathId], foreignColumns: [skills.id, skills.learningPathId] }),
@@ -335,6 +346,9 @@ export const personalTasks = pgTable('personal_tasks', {
   learningPathId: uuid('learning_path_id').notNull(),
   skillId: uuid('skill_id').notNull(),
   title: text('title').notNull(),
+  description: text('description').notNull().default(''),
+  /** Position in its Skill's Task list, as last saved by the owner. */
+  ordinal: integer('ordinal').notNull().default(0),
   xpReward: integer('xp_reward').notNull().default(0),
   startedAt: timestamp('started_at', { withTimezone: true }),
   completedAt: timestamp('completed_at', { withTimezone: true }),
@@ -344,6 +358,22 @@ export const personalTasks = pgTable('personal_tasks', {
   foreignKey({ columns: [t.taskId, t.skillId], foreignColumns: [tasks.id, tasks.skillId] }),
   foreignKey({ columns: [t.learningPathId, t.skillId], foreignColumns: [personalSkills.learningPathId, personalSkills.skillId] }),
   check('personal_tasks_xp_reward_nonnegative', sql`${t.xpReward} >= 0`),
+])
+
+/**
+ * The one flat, manually positioned card of a personal Skill: the Path's Canvas
+ * Layout, kept apart from its learning definitions (ADR 0015, 0016). Camera,
+ * selection and undo history are never stored here.
+ */
+export const personalSkillCards = pgTable('personal_skill_cards', {
+  learningPathId: uuid('learning_path_id').notNull(),
+  skillId: uuid('skill_id').notNull(),
+  x: doublePrecision('x').notNull(),
+  y: doublePrecision('y').notNull(),
+}, (t) => [
+  primaryKey({ name: 'personal_skill_cards_pk', columns: [t.learningPathId, t.skillId] }),
+  foreignKey({ name: 'personal_skill_cards_skill_fk', columns: [t.learningPathId, t.skillId], foreignColumns: [personalSkills.learningPathId, personalSkills.skillId] }),
+  check('personal_skill_cards_bounds', sql`abs(${t.x}) <= 1000000 AND abs(${t.y}) <= 1000000`),
 ])
 
 /** ALL prerequisite edges within one personal Path, satisfied by declared Mastery. */

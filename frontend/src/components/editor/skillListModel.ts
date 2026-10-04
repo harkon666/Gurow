@@ -1,5 +1,12 @@
 import type { PrerequisiteConnection } from './protocol'
-import type { FixtureSkill, FixtureTask } from '../../fixtures/learningPath'
+
+/** What the list shows of a Skill, in P1 fixtures and in personal Paths alike. */
+export interface ListSkill {
+  id: string
+  title: string
+  outcome: string
+  tasks: { id: string; title: string }[]
+}
 
 export interface ResolvedPrerequisite {
   fromId: string
@@ -10,7 +17,7 @@ export interface SkillListItem {
   id: string
   title: string
   outcome: string
-  tasks: FixtureTask[]
+  tasks: ListSkill['tasks']
   prerequisites: ResolvedPrerequisite[]
 }
 
@@ -19,7 +26,7 @@ export interface SkillListItem {
  * ADR-0017: Provides a keyboard-accessible Skill/Prerequisite list.
  */
 export function resolveSkillPrerequisites(
-  skills: FixtureSkill[],
+  skills: ListSkill[],
   connections: PrerequisiteConnection[]
 ): SkillListItem[] {
   const skillTitleMap = new Map<string, string>()

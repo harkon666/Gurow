@@ -10,7 +10,7 @@ export async function readAccount(db: Database, accountId: string) {
 }
 
 async function readWorkspace(db: Database, workspace: typeof personalWorkspaces.$inferSelect) {
-  const paths = await db.select({ id: learningPaths.id, title: learningPaths.title }).from(learningPaths)
+  const paths = await db.select({ id: learningPaths.id, title: learningPaths.title, goal: learningPaths.goal }).from(learningPaths)
     .where(eq(learningPaths.personalWorkspaceId, workspace.id)).orderBy(asc(learningPaths.createdAt), asc(learningPaths.id))
   return { workspace: { id: workspace.id, createdAt: workspace.createdAt }, learningPaths: paths }
 }

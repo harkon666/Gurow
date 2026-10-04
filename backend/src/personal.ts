@@ -3,7 +3,7 @@ import type { Database } from './db/client'
 import { lockedTimestamp } from './db/clock'
 import { learningPaths, personalMasteryEvents, personalOverrideRecords, personalPrerequisites, personalSkills, personalTasks, personalWorkspaces, personalXpEvents } from './db/schema'
 
-type Tx = Parameters<Parameters<Database['transaction']>[0]>[0]
+export type Tx = Parameters<Parameters<Database['transaction']>[0]>[0]
 
 export type PersonalRefusal = 'learning_path_not_found' | 'task_not_found' | 'skill_not_found' | 'task_archived' | 'skill_locked'
 type Outcome = { ok: true; changed: boolean } | { ok: false; refusal: PersonalRefusal }
@@ -39,12 +39,12 @@ async function derivePersonalState(tx: Pick<Database, 'select'>, learningPathId:
  * All personal mutators and reads hold this lock through commit, so a check and its
  * change or a multi-query read observe one state.
  */
-async function lockOwnedPath(tx: Tx, learningPathId: string, accountId: string) {
-  const [path] = await tx.select({ id: learningPaths.id }).from(learningPaths)
+export async function lockOwnedPath(tx: Tx, learningPathId: string, accountId: string) {
+  const [path] = await tx.select({ path: learningPaths }).from(learningPaths)
     .innerJoin(personalWorkspaces, eq(personalWorkspaces.id, learningPaths.personalWorkspaceId))
     .where(and(eq(learningPaths.id, learningPathId), eq(personalWorkspaces.ownerAccountId, accountId)))
     .for('update', { of: learningPaths })
-  return path ?? null
+  return path?.path ?? null
 }
 
 async function readState(tx: Tx, learningPathId: string) {

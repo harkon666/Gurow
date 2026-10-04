@@ -30,6 +30,9 @@
     "t06-functional": {"cwd": "frontend", "argv": ["bun", "run", "scripts/t06-functional-check.ts"], "timeout": 900},
     "t15-backend-sign-in": {"cwd": "backend", "argv": ["bun", "test", "test/sign-in.test.ts"], "timeout": 180},
     "t15-sign-in": {"cwd": "frontend", "argv": ["bun", "run", "scripts/t15-sign-in-check.ts"], "timeout": 900},
+    "t16-backend-authoring": {"cwd": "backend", "argv": ["bun", "test", "test/authoring.test.ts"], "timeout": 180},
+    "t16-autosave": {"cwd": "frontend", "argv": ["bun", "test", "src/components/path/autosave.test.ts"], "timeout": 120},
+    "t16-path-authoring": {"cwd": "frontend", "argv": ["bun", "run", "scripts/t16-path-authoring-check.ts"], "timeout": 900},
     "t06-l3-06-gate-tests": {"cwd": "frontend", "argv": ["bun", "test", "scripts/benchmark/gate.test.ts", "scripts/benchmark/report.test.ts", "scripts/benchmark/fixture.test.ts", "scripts/benchmark/run.test.ts"], "timeout": 120}
   },
   "profiles": {
@@ -55,6 +58,7 @@
     "T14": ["db-up", "backend-types", "backend-tests", "t14-p2-gate", "t09-review", "t10-revocation", "t11-override", "t12-lifecycle", "t13-personal"],
     "T06-L3-08": ["t06-l3-08-regressions", "t06-l3-08-engine-labels", "t06-l3-08-fixture-check-v5", "t04-browser", "t05-browser", "editor-lifecycle"],
     "T15": ["db-up", "backend-types", "backend-tests", "t15-backend-sign-in", "frontend-types", "t15-sign-in", "t04-browser", "t05-browser", "editor-lifecycle", "t06-functional", "t44-label-scroll"],
+    "T16": ["db-up", "backend-types", "backend-tests", "t16-backend-authoring", "t13-personal", "t15-backend-sign-in", "frontend-types", "t16-autosave", "t16-path-authoring", "t15-sign-in", "t04-browser", "t05-browser", "editor-lifecycle", "t06-functional", "t44-label-scroll"],
     "T06-L3-06": ["t06-functional", "t06-l3-06-gate-tests", "t06-l3-08-fixture-check-v5", "frontend-types"]
   }
 }

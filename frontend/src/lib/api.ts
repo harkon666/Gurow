@@ -14,10 +14,35 @@ export interface Account {
 
 export interface PersonalWorkspace {
   workspace: { id: string; createdAt: string }
-  learningPaths: { id: string; title: string }[]
+  learningPaths: { id: string; title: string; goal: string }[]
 }
 
-export type ApiResult<T> = { ok: true; status: number; value: T } | { ok: false; status: number; error: string }
+export interface PathTask { id: string; title: string; description: string }
+export interface PathSkill { id: string; title: string; outcome: string; tasks: PathTask[] }
+
+/**
+ * A personal Learning Path as the backend stores it (ADR 0016): the editor snapshot
+ * (cards and connections, no Tasks) beside the application payload. `revision` is
+ * the concurrency revision every save must be based on.
+ */
+export interface PathDocument {
+  learningPath: { id: string; personalWorkspaceId: string; title: string; goal: string; revision: number }
+  editor: { format_version: 1; cards: { id: string; title: string; position: { x: number; y: number } }[]; connections: { from_id: string; to_id: string }[] }
+  application: { skills: PathSkill[] }
+}
+
+/** A save: the local document and the revision it was based on. */
+export interface PathSave {
+  expectedRevision: number
+  title: string
+  goal: string
+  editor: PathDocument['editor']
+  application: PathDocument['application']
+}
+
+export type ApiResult<T> =
+  | { ok: true; status: number; value: T }
+  | { ok: false; status: number; error: string; body: Record<string, unknown> | null }
 
 async function call<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<ApiResult<T>> {
   const response = await fetch(`/api${path}`, {
@@ -29,7 +54,7 @@ async function call<T>(path: string, init: { method?: string; body?: unknown } =
   const body = await response.json().catch(() => null) as Record<string, unknown> | null
   if (response.ok) return { ok: true, status: response.status, value: body as T }
   const error = body?.error ?? body?.message ?? body?.code
-  return { ok: false, status: response.status, error: typeof error === 'string' ? error : `HTTP ${response.status}` }
+  return { ok: false, status: response.status, error: typeof error === 'string' ? error : `HTTP ${response.status}`, body }
 }
 
 export const readAccount = () => call<{ account: Account }>('/account')
@@ -54,3 +79,11 @@ export const enterPersonalWorkspace = () => call<PersonalWorkspace>('/personal/w
 
 export const readPersonalWorkspace = (workspaceId: string) =>
   call<PersonalWorkspace>(`/personal/workspaces/${encodeURIComponent(workspaceId)}`)
+
+export const createLearningPath = (title: string, goal: string) => call<PathDocument>('/personal/learning-paths', { method: 'POST', body: { title, goal } })
+
+export const readLearningPath = (pathId: string) => call<PathDocument>(`/personal/learning-paths/${encodeURIComponent(pathId)}`)
+
+/** Saves the whole document; a stale save answers 409 with the accepted document in `body.current`. */
+export const saveLearningPath = (pathId: string, save: PathSave) =>
+  call<PathDocument>(`/personal/learning-paths/${encodeURIComponent(pathId)}/document`, { method: 'PUT', body: save })

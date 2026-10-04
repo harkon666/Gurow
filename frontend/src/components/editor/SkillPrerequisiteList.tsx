@@ -1,14 +1,14 @@
 import React, { useRef, useEffect, useState, useMemo } from 'react'
-import type { FixtureSkill } from '../../fixtures/learningPath'
 import type { PrerequisiteConnection } from './protocol'
 import type { SelectedSkillInfo } from './types'
 import {
   resolveSkillPrerequisites,
   getNextSkillIndex,
+  type ListSkill,
 } from './skillListModel'
 
 interface SkillPrerequisiteListProps {
-  skills: FixtureSkill[]
+  skills: ListSkill[]
   connections: PrerequisiteConnection[]
   selectedSkillId: string | null
   onSelectSkill: (skill: SelectedSkillInfo | null) => void

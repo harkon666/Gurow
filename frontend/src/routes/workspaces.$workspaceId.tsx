@@ -1,7 +1,7 @@
-import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useEffect, useRef, useState } from 'react'
+import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { ContextHeader } from '../components/workspace/ContextHeader'
-import { readAccount, readPersonalWorkspace, signOut, type Account, type PersonalWorkspace } from '../lib/api'
+import { createLearningPath, readAccount, readPersonalWorkspace, signOut, type Account, type PersonalWorkspace } from '../lib/api'
 import { onSessionChange } from '../lib/session'
 
 /**
@@ -59,6 +59,19 @@ function WorkspacePage() {
     return () => { current = false }
   }, [workspaceId, navigate, revalidation])
 
+  const [newPath, setNewPath] = useState({ title: '', goal: '' })
+  const [createError, setCreateError] = useState<string | null>(null)
+  const createPath = async (event: FormEvent) => {
+    event.preventDefault()
+    setCreateError(null)
+    const created = await createLearningPath(newPath.title.trim(), newPath.goal)
+    if (!created.ok) {
+      if (created.status === 401) return navigate({ to: '/', replace: true })
+      return setCreateError(`Could not create the Learning Path (${typeof created.body?.detail === 'string' ? created.body.detail : created.error}).`)
+    }
+    await navigate({ to: '/paths/$pathId', params: { pathId: created.value.learningPath.id } })
+  }
+
   const handleSignOut = async () => {
     await signOut()
     await navigate({ to: '/', replace: true })
@@ -89,11 +102,46 @@ function WorkspacePage() {
               ) : (
                 <ul className="flex flex-col gap-1">
                   {view.workspace.learningPaths.map((path) => (
-                    <li key={path.id} data-learning-path-id={path.id} className="text-sm text-slate-300">{path.title}</li>
+                    <li key={path.id} data-learning-path-id={path.id} className="text-sm">
+                      <Link to="/paths/$pathId" params={{ pathId: path.id }} className="text-slate-200 hover:text-emerald-300">{path.title}</Link>
+                      {path.goal && <span className="block text-xs text-slate-500">{path.goal}</span>}
+                    </li>
                   ))}
                 </ul>
               )}
             </div>
+            <form id="new-path-form" onSubmit={createPath} className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 flex flex-col gap-2">
+              <h2 className="text-sm font-medium text-slate-200">New Learning Path</h2>
+              <input
+                id="new-path-title"
+                aria-label="Learning Path title"
+                required
+                maxLength={200}
+                value={newPath.title}
+                onChange={(e) => setNewPath({ ...newPath, title: e.target.value })}
+                placeholder="Title"
+                className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-100"
+              />
+              <textarea
+                id="new-path-goal"
+                aria-label="Learning Path goal"
+                maxLength={2000}
+                value={newPath.goal}
+                onChange={(e) => setNewPath({ ...newPath, goal: e.target.value })}
+                placeholder="Goal: what this Path works toward"
+                rows={2}
+                className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-100 resize-none"
+              />
+              {createError && <p id="create-path-error" role="alert" className="text-xs text-red-300">{createError}</p>}
+              <button
+                id="create-path-btn"
+                type="submit"
+                disabled={newPath.title.trim() === ''}
+                className="self-start bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm rounded-lg px-3 py-1.5 cursor-pointer"
+              >
+                Create Learning Path
+              </button>
+            </form>
           </div>
         )}
         {view.state === 'unavailable' && (

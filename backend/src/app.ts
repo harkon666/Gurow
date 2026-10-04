@@ -2,6 +2,7 @@ import { Hono, type Context } from 'hono'
 import { createMiddleware } from 'hono/factory'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { sessionIdentity, type Auth } from './auth'
+import * as authoring from './authoring'
 import type { Database } from './db/client'
 import { acceptInvitation, readEnrollment, type EnrollmentRefusal } from './enrollments'
 import type { IdentityResolver } from './identity'
@@ -38,6 +39,17 @@ const PERSONAL_REFUSAL_STATUS: Record<personal.PersonalRefusal, ContentfulStatus
   skill_not_found: 404,
   task_archived: 409,
   skill_locked: 403,
+}
+
+const SAVE_REFUSAL_STATUS: Record<authoring.SaveRefusal, ContentfulStatusCode> = {
+  learning_path_not_found: 404,
+  stale_revision: 409,
+  skill_owned_elsewhere: 409,
+  task_owned_elsewhere: 409,
+  task_skill_mismatch: 409,
+  task_archived: 409,
+  skill_missing: 422,
+  task_missing: 422,
 }
 
 const MAX_TEXT_LENGTH = 50_000
@@ -248,6 +260,36 @@ export function createApp({ db, identity, auth }: { db: Database; identity: Iden
     const workspace = UUID.test(workspaceId) ? await readPersonalWorkspace(db, workspaceId, c.get('accountId')) : null
     if (!workspace) return c.json({ error: 'workspace_not_found' }, 404)
     return c.json(workspace)
+  })
+
+  // Authoring (ADR 0016): create a Path, read its document, and save a whole document
+  // against the revision it was based on. A stale save answers 409 with the accepted one.
+  app.post('/personal/learning-paths', async (c) => {
+    const input = authoring.parsePathInput(await c.req.json().catch(() => null))
+    if (!input.ok) return c.json({ error: 'invalid_learning_path', detail: input.detail }, 422)
+    return c.json(await authoring.createPersonalPath(db, c.get('accountId'), input.value), 201)
+  })
+
+  app.get(personalPath, async (c) => {
+    const pathId = c.req.param('pathId')
+    const document = UUID.test(pathId) ? await authoring.readPersonalPath(db, pathId, c.get('accountId')) : null
+    if (!document) return c.json({ error: 'learning_path_not_found' }, 404)
+    return c.json(document)
+  })
+
+  app.put(`${personalPath}/document`, async (c) => {
+    const pathId = c.req.param('pathId')
+    if (!UUID.test(pathId)) return c.json({ error: 'learning_path_not_found' }, 404)
+    const input = authoring.parseDocumentInput(await c.req.json().catch(() => null))
+    if (!input.ok) {
+      // An invalid edit to someone else's Path is still reported as no Path at all.
+      if (!await authoring.readPersonalPath(db, pathId, c.get('accountId'))) return c.json({ error: 'learning_path_not_found' }, 404)
+      return c.json({ error: 'refusal' in input ? input.refusal : 'invalid_document', detail: input.detail }, 422)
+    }
+    const result = await authoring.savePersonalPath(db, pathId, c.get('accountId'), input.value)
+    if (!result.ok && result.refusal === 'learning_path_not_found') return c.json({ error: result.refusal }, 404)
+    if (!result.ok) return c.json({ error: result.refusal, detail: result.detail, ...(result.current ? { current: result.current } : {}) }, SAVE_REFUSAL_STATUS[result.refusal])
+    return c.json(result.document)
   })
 
   app.get(`${personalPath}/learning-state`, async (c) => {

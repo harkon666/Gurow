@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as EditorRouteImport } from './routes/editor'
 import { Route as ApiSplatRouteImport } from './routes/api/$'
+import { Route as PathsPathIdRouteImport } from './routes/paths.$pathId'
 import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces.$workspaceId'
 
 const IndexRoute = IndexRouteImport.update({
@@ -29,6 +30,11 @@ const ApiSplatRoute = ApiSplatRouteImport.update({
   path: '/api/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PathsPathIdRoute = PathsPathIdRouteImport.update({
+  id: '/paths/$pathId',
+  path: '/paths/$pathId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WorkspacesWorkspaceIdRoute = WorkspacesWorkspaceIdRouteImport.update({
   id: '/workspaces/$workspaceId',
   path: '/workspaces/$workspaceId',
@@ -39,12 +45,14 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/editor': typeof EditorRoute
   '/api/$': typeof ApiSplatRoute
+  '/paths/$pathId': typeof PathsPathIdRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/editor': typeof EditorRoute
   '/api/$': typeof ApiSplatRoute
+  '/paths/$pathId': typeof PathsPathIdRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
 }
 export interface FileRoutesById {
@@ -52,20 +60,29 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/editor': typeof EditorRoute
   '/api/$': typeof ApiSplatRoute
+  '/paths/$pathId': typeof PathsPathIdRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/editor' | '/api/$' | '/workspaces/$workspaceId'
+  fullPaths:
+    '/' | '/editor' | '/api/$' | '/paths/$pathId' | '/workspaces/$workspaceId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/editor' | '/api/$' | '/workspaces/$workspaceId'
-  id: '__root__' | '/' | '/editor' | '/api/$' | '/workspaces/$workspaceId'
+  to: '/' | '/editor' | '/api/$' | '/paths/$pathId' | '/workspaces/$workspaceId'
+  id:
+    | '__root__'
+    | '/'
+    | '/editor'
+    | '/api/$'
+    | '/paths/$pathId'
+    | '/workspaces/$workspaceId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   EditorRoute: typeof EditorRoute
   ApiSplatRoute: typeof ApiSplatRoute
+  PathsPathIdRoute: typeof PathsPathIdRoute
   WorkspacesWorkspaceIdRoute: typeof WorkspacesWorkspaceIdRoute
 }
 
@@ -92,6 +109,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/paths/$pathId': {
+      id: '/paths/$pathId'
+      path: '/paths/$pathId'
+      fullPath: '/paths/$pathId'
+      preLoaderRoute: typeof PathsPathIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/workspaces/$workspaceId': {
       id: '/workspaces/$workspaceId'
       path: '/workspaces/$workspaceId'
@@ -106,6 +130,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   EditorRoute: EditorRoute,
   ApiSplatRoute: ApiSplatRoute,
+  PathsPathIdRoute: PathsPathIdRoute,
   WorkspacesWorkspaceIdRoute: WorkspacesWorkspaceIdRoute,
 }
 export const routeTree = rootRouteImport
