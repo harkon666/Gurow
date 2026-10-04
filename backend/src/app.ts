@@ -4,7 +4,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { Database } from './db/client'
 import { acceptInvitation, readEnrollment, type EnrollmentRefusal } from './enrollments'
 import type { IdentityResolver } from './identity'
-import { readLearningState, recordReview, type ReviewContents } from './reviews'
+import { readLearningState, recordReview, revokeApproval, type ReviewContents } from './reviews'
 import { readDraft, readSubmission, saveDraft, sendRevision, type SubmissionContents, type SubmissionRefusal } from './submissions'
 
 const REFUSAL_STATUS: Record<EnrollmentRefusal, ContentfulStatusCode> = {
@@ -145,6 +145,18 @@ export function createApp({ db, identity }: { db: Database; identity: IdentityRe
       return c.json({ error: result.refusal }, status)
     }
     return c.json({ review: result.value }, 201)
+  })
+
+  app.post(`${taskRoute}/submission/revisions/:revisionId/review/revoke`, async (c) => {
+    const params = taskParams(c.req.param())
+    const revisionId = c.req.param('revisionId')
+    if (!params || !UUID.test(revisionId)) return c.json({ error: 'approval_not_found' }, 404)
+    const body: unknown = await c.req.json().catch(() => null)
+    const reason = typeof body === 'object' && body !== null ? (body as Record<string, unknown>).reason : null
+    if (typeof reason !== 'string' || reason.trim() === '' || reason.length > MAX_TEXT_LENGTH) return c.json({ error: 'invalid_revocation' }, 422)
+    const result = await revokeApproval(db, params.enrollmentId, params.taskId, revisionId, c.get('accountId'), reason)
+    if (!result.ok) return c.json({ error: result.refusal }, result.refusal === 'coach_only' ? 403 : result.refusal === 'approval_already_revoked' ? 409 : 404)
+    return c.json({ review: result.value })
   })
 
   app.get('/enrollments/:enrollmentId/learning-state', async (c) => {

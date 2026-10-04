@@ -189,7 +189,40 @@ export const submissionReviews = pgTable('submission_reviews', {
   decidedAt: timestamp('decided_at', { withTimezone: true }).notNull().defaultNow(),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),
   revocationReason: text('revocation_reason'),
+  revokedByAccountId: uuid('revoked_by_account_id').references(() => accounts.id),
 }, (t) => [
   check('submission_reviews_changes_feedback', sql`${t.decision} <> 'changes_requested' OR length(trim(${t.feedback})) > 0 AND ${t.feedback} IS NOT NULL`),
   check('submission_reviews_revocation', sql`(${t.revokedAt} IS NULL AND ${t.revocationReason} IS NULL) OR (${t.decision} = 'approval' AND ${t.revokedAt} IS NOT NULL AND ${t.revocationReason} IS NOT NULL AND length(trim(${t.revocationReason})) > 0)`),
+])
+
+export const xpEvents = pgTable('xp_events', {
+  id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+  enrollmentId: uuid('enrollment_id').notNull(),
+  learningPathVersionId: uuid('learning_path_version_id').notNull(),
+  taskId: uuid('task_id').notNull(),
+  revisionId: uuid('revision_id').notNull().references(() => submissionReviews.revisionId),
+  actorAccountId: uuid('actor_account_id').references(() => accounts.id),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+  kind: text('kind').notNull(),
+  amount: integer('amount').notNull(),
+}, (t) => [
+  foreignKey({ columns: [t.enrollmentId, t.learningPathVersionId], foreignColumns: [enrollments.id, enrollments.learningPathVersionId] }),
+  foreignKey({ columns: [t.learningPathVersionId, t.taskId], foreignColumns: [versionTasks.learningPathVersionId, versionTasks.taskId] }),
+  check('xp_events_kind', sql`${t.kind} IN ('award', 'correction')`),
+  check('xp_events_nonzero', sql`${t.amount} <> 0`),
+])
+
+export const masteryEvents = pgTable('mastery_events', {
+  id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
+  enrollmentId: uuid('enrollment_id').notNull(),
+  learningPathVersionId: uuid('learning_path_version_id').notNull(),
+  skillId: uuid('skill_id').notNull(),
+  revisionId: uuid('revision_id').notNull().references(() => submissionReviews.revisionId),
+  actorAccountId: uuid('actor_account_id').references(() => accounts.id),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+  action: text('action').notNull(),
+}, (t) => [
+  foreignKey({ columns: [t.enrollmentId, t.learningPathVersionId], foreignColumns: [enrollments.id, enrollments.learningPathVersionId] }),
+  foreignKey({ columns: [t.learningPathVersionId, t.skillId], foreignColumns: [versionSkills.learningPathVersionId, versionSkills.skillId] }),
+  check('mastery_events_action', sql`${t.action} IN ('award', 'revocation')`),
 ])
