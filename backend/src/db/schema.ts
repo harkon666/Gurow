@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { boolean, foreignKey, integer, pgEnum, pgTable, primaryKey, text, timestamp, unique, uuid, uniqueIndex } from 'drizzle-orm/pg-core'
+import { boolean, check, foreignKey, integer, pgEnum, pgTable, primaryKey, text, timestamp, unique, uuid, uniqueIndex } from 'drizzle-orm/pg-core'
 
 /** An identity usable for personal learning and contextual Coach and Learner roles (CONTEXT.md). */
 export const accounts = pgTable('accounts', {
@@ -60,7 +60,23 @@ export const versionSkills = pgTable('version_skills', {
   skillId: uuid('skill_id').notNull().references(() => skills.id),
   title: text('title').notNull(),
   learningOutcome: text('learning_outcome').notNull(),
-}, (t) => [primaryKey({ columns: [t.learningPathVersionId, t.skillId] })])
+  xpThreshold: integer('xp_threshold').notNull().default(0),
+}, (t) => [
+  primaryKey({ columns: [t.learningPathVersionId, t.skillId] }),
+  check('version_skills_xp_threshold_nonnegative', sql`${t.xpThreshold} >= 0`),
+])
+
+/** ALL prerequisite edges, with both ends defined in the same pinned Version. */
+export const versionPrerequisites = pgTable('version_prerequisites', {
+  learningPathVersionId: uuid('learning_path_version_id').notNull(),
+  prerequisiteSkillId: uuid('prerequisite_skill_id').notNull(),
+  skillId: uuid('skill_id').notNull(),
+}, (t) => [
+  primaryKey({ name: 'version_prerequisites_pk', columns: [t.learningPathVersionId, t.prerequisiteSkillId, t.skillId] }),
+  foreignKey({ name: 'version_prerequisites_source_fk', columns: [t.learningPathVersionId, t.prerequisiteSkillId], foreignColumns: [versionSkills.learningPathVersionId, versionSkills.skillId] }),
+  foreignKey({ name: 'version_prerequisites_target_fk', columns: [t.learningPathVersionId, t.skillId], foreignColumns: [versionSkills.learningPathVersionId, versionSkills.skillId] }),
+  check('version_prerequisites_no_self_edge', sql`${t.prerequisiteSkillId} <> ${t.skillId}`),
+])
 
 /** A Task's definition in one Learning Path Version, under its Skill's definition in that Version. */
 export const versionTasks = pgTable('version_tasks', {
@@ -70,8 +86,10 @@ export const versionTasks = pgTable('version_tasks', {
   title: text('title').notNull(),
   /** Required Task: mandatory evidence for Mastery of its Skill; otherwise an Enrichment Task. */
   required: boolean('required').notNull(),
+  xpReward: integer('xp_reward').notNull().default(0),
 }, (t) => [
   primaryKey({ columns: [t.learningPathVersionId, t.taskId] }),
+  check('version_tasks_xp_reward_nonnegative', sql`${t.xpReward} >= 0`),
   // The definition sits under the Skill that owns the Task.
   foreignKey({ columns: [t.taskId, t.skillId], foreignColumns: [tasks.id, tasks.skillId] }),
   foreignKey({ columns: [t.learningPathVersionId, t.skillId], foreignColumns: [versionSkills.learningPathVersionId, versionSkills.skillId] }),
@@ -100,4 +118,78 @@ export const enrollments = pgTable('enrollments', {
   learningPathVersionId: uuid('learning_path_version_id').notNull().references(() => learningPathVersions.id),
   status: enrollmentStatus('status').notNull().default('active'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [unique('enrollments_account_version_key').on(t.accountId, t.learningPathVersionId)])
+}, (t) => [
+  unique('enrollments_account_version_key').on(t.accountId, t.learningPathVersionId),
+  // Lets learner work reference the Enrollment together with its pinned Version.
+  unique('enrollments_id_version_key').on(t.id, t.learningPathVersionId),
+])
+
+/**
+ * A learner's saved, editable work for one Task in one Enrollment, visible only
+ * to that learner (ADR 0002). Sending does not consume it.
+ */
+export const submissionDrafts = pgTable('submission_drafts', {
+  enrollmentId: uuid('enrollment_id').notNull(),
+  learningPathVersionId: uuid('learning_path_version_id').notNull(),
+  taskId: uuid('task_id').notNull(),
+  text: text('text').notNull(),
+  urls: text('urls').array().notNull(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ columns: [t.enrollmentId, t.taskId] }),
+  foreignKey({ columns: [t.enrollmentId, t.learningPathVersionId], foreignColumns: [enrollments.id, enrollments.learningPathVersionId] }),
+  // The Task is defined in the Enrollment's own Version.
+  foreignKey({ columns: [t.learningPathVersionId, t.taskId], foreignColumns: [versionTasks.learningPathVersionId, versionTasks.taskId] }),
+])
+
+/**
+ * Learner work sent for review for exactly one Task: at most one per Task and
+ * Enrollment, holding successive Submission Revisions (ADR 0002).
+ */
+export const submissions = pgTable('submissions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  enrollmentId: uuid('enrollment_id').notNull(),
+  learningPathVersionId: uuid('learning_path_version_id').notNull(),
+  taskId: uuid('task_id').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  unique('submissions_enrollment_task_key').on(t.enrollmentId, t.taskId),
+  foreignKey({ columns: [t.enrollmentId, t.learningPathVersionId], foreignColumns: [enrollments.id, enrollments.learningPathVersionId] }),
+  foreignKey({ columns: [t.learningPathVersionId, t.taskId], foreignColumns: [versionTasks.learningPathVersionId, versionTasks.taskId] }),
+])
+
+/**
+ * Immutable contents of one sending: text and URLs exactly as sent, not the
+ * content at those URLs. A database trigger rejects changes to sent contents;
+ * only `supersededAt` can be set, once, when a newer revision supersedes an
+ * undecided one.
+ */
+export const submissionRevisions = pgTable('submission_revisions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  submissionId: uuid('submission_id').notNull().references(() => submissions.id),
+  revisionNumber: integer('revision_number').notNull(),
+  text: text('text').notNull(),
+  urls: text('urls').array().notNull(),
+  sentAt: timestamp('sent_at', { withTimezone: true }).notNull().defaultNow(),
+  supersededAt: timestamp('superseded_at', { withTimezone: true }),
+}, (t) => [unique('submission_revisions_submission_number_key').on(t.submissionId, t.revisionNumber)])
+
+export const reviewDecision = pgEnum('review_decision', ['approval', 'changes_requested'])
+
+/**
+ * Minimal stored decision foundation, not a Review API. Future decision and
+ * revocation mutators must lock the target Enrollment FOR UPDATE before reading
+ * or changing progression, and retain that lock through commit (see sendRevision).
+ */
+export const submissionReviews = pgTable('submission_reviews', {
+  revisionId: uuid('revision_id').primaryKey().references(() => submissionRevisions.id),
+  coachAccountId: uuid('coach_account_id').notNull().references(() => accounts.id),
+  decision: reviewDecision('decision').notNull(),
+  feedback: text('feedback'),
+  decidedAt: timestamp('decided_at', { withTimezone: true }).notNull().defaultNow(),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  revocationReason: text('revocation_reason'),
+}, (t) => [
+  check('submission_reviews_changes_feedback', sql`${t.decision} <> 'changes_requested' OR length(trim(${t.feedback})) > 0 AND ${t.feedback} IS NOT NULL`),
+  check('submission_reviews_revocation', sql`(${t.revokedAt} IS NULL AND ${t.revocationReason} IS NULL) OR (${t.decision} = 'approval' AND ${t.revokedAt} IS NOT NULL AND ${t.revocationReason} IS NOT NULL AND length(trim(${t.revocationReason})) > 0)`),
+])

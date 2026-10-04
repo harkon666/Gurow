@@ -38,6 +38,7 @@
     "T06-L3-03": ["t06-l3-03-capture-tests", "frontend-types"],
     "T06-L3-09": ["t43-gpu-errors", "t05-browser", "editor-lifecycle"],
     "T07": ["db-up", "backend-types", "backend-tests"],
+    "T08": ["db-up", "backend-types", "backend-tests"],
     "T06-L3-08": ["t06-l3-08-regressions", "t06-l3-08-engine-labels", "t06-l3-08-fixture-check-v5", "t04-browser", "t05-browser", "editor-lifecycle"],
     "T06-L3-06": ["t06-functional", "t06-l3-06-gate-tests", "t06-l3-08-fixture-check-v5", "frontend-types"]
   }
