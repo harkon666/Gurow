@@ -1,7 +1,7 @@
 import { and, asc, eq, isNull, max, notExists, sql } from 'drizzle-orm'
 import type { Database } from './db/client'
 import { hasSkillAccess } from './access'
-import { coachWorkspaces, enrollments, learningPaths, learningPathVersions, submissionDrafts, submissionReviews, submissionRevisions, submissions, versionTasks } from './db/schema'
+import { coachWorkspaces, enrollments, learningPaths, learningPathVersions, submissionDrafts, submissionReviews, submissionRevisions, submissions, taskStarts, versionTasks } from './db/schema'
 
 /** Why a draft or Submission operation is refused; each maps to one HTTP status at the route. */
 export type SubmissionRefusal =
@@ -72,17 +72,43 @@ export async function readDraft(db: Database, enrollmentId: string, taskId: stri
 
 /** Saves the learner's draft for a Task, replacing its previous contents. */
 export async function saveDraft(db: Database, enrollmentId: string, taskId: string, accountId: string, contents: SubmissionContents): Promise<SubmissionResult<DraftRecord>> {
-  const context = await taskContext(db, enrollmentId, taskId, accountId)
-  if (!context.ok) return context
-  if (context.role !== 'learner') return { ok: false, refusal: 'draft_private' }
-  const [draft] = await db.insert(submissionDrafts)
-    .values({ enrollmentId, learningPathVersionId: context.enrollment.learningPathVersionId, taskId, ...contents })
-    .onConflictDoUpdate({
-      target: [submissionDrafts.enrollmentId, submissionDrafts.taskId],
-      set: { text: contents.text, urls: contents.urls, updatedAt: sql`now()` },
-    })
-    .returning()
-  return { ok: true, value: draft }
+  return db.transaction(async (tx) => {
+    const context = await taskContext(tx, enrollmentId, taskId, accountId)
+    if (!context.ok) return context
+    if (context.role !== 'learner') return { ok: false, refusal: 'draft_private' }
+    const [enrollment] = await tx.select().from(enrollments).where(eq(enrollments.id, enrollmentId)).for('update')
+    if (enrollment.status !== 'active') {
+      // Retain editing of existing private work, but do not begin a new Task via draft creation.
+      const [draft] = await tx.select().from(submissionDrafts).where(and(eq(submissionDrafts.enrollmentId, enrollmentId), eq(submissionDrafts.taskId, taskId)))
+      const [submission] = await tx.select().from(submissions).where(and(eq(submissions.enrollmentId, enrollmentId), eq(submissions.taskId, taskId)))
+      const [started] = await tx.select().from(taskStarts).where(and(eq(taskStarts.enrollmentId, enrollmentId), eq(taskStarts.taskId, taskId)))
+      if (!draft && !submission && !started) return { ok: false, refusal: 'enrollment_inactive' }
+    }
+    const [draft] = await tx.insert(submissionDrafts)
+      .values({ enrollmentId, learningPathVersionId: enrollment.learningPathVersionId, taskId, ...contents })
+      .onConflictDoUpdate({
+        target: [submissionDrafts.enrollmentId, submissionDrafts.taskId],
+        set: { text: contents.text, urls: contents.urls, updatedAt: sql`now()` },
+      })
+      .returning()
+    return { ok: true, value: draft }
+  })
+}
+
+/** Explicit durable start, not a read or a permission probe. Current gates apply even to retries. */
+export async function startTask(db: Database, enrollmentId: string, taskId: string, accountId: string) {
+  return db.transaction(async (tx) => {
+    const context = await taskContext(tx, enrollmentId, taskId, accountId)
+    if (!context.ok) return context
+    if (context.role !== 'learner') return { ok: false, refusal: 'learner_only' } as const
+    const [enrollment] = await tx.select().from(enrollments).where(eq(enrollments.id, enrollmentId)).for('update')
+    if (enrollment.status !== 'active') return { ok: false, refusal: 'enrollment_inactive' } as const
+    if (!await hasSkillAccess(tx, enrollmentId, enrollment.learningPathVersionId, taskId, context.ownerId)) return { ok: false, refusal: 'skill_locked' } as const
+    const [inserted] = await tx.insert(taskStarts).values({ enrollmentId, learningPathVersionId: enrollment.learningPathVersionId, taskId, startedAt: sql`clock_timestamp()` })
+      .onConflictDoNothing({ target: [taskStarts.enrollmentId, taskStarts.taskId] }).returning()
+    const record = inserted ?? (await tx.select().from(taskStarts).where(and(eq(taskStarts.enrollmentId, enrollmentId), eq(taskStarts.taskId, taskId))))[0]
+    return { ok: true, value: record, created: Boolean(inserted) } as const
+  })
 }
 
 export interface SentRevision {

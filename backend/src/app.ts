@@ -5,8 +5,9 @@ import type { Database } from './db/client'
 import { acceptInvitation, readEnrollment, type EnrollmentRefusal } from './enrollments'
 import type { IdentityResolver } from './identity'
 import { changeAccessOverride } from './overrides'
+import { changeEnrollmentStatus } from './lifecycle'
 import { readLearningState, recordReview, revokeApproval, type ReviewContents } from './reviews'
-import { readDraft, readSubmission, saveDraft, sendRevision, type SubmissionContents, type SubmissionRefusal } from './submissions'
+import { readDraft, readSubmission, saveDraft, sendRevision, startTask, type SubmissionContents, type SubmissionRefusal } from './submissions'
 
 const REFUSAL_STATUS: Record<EnrollmentRefusal, ContentfulStatusCode> = {
   invitation_not_found: 404,
@@ -83,11 +84,35 @@ export function createApp({ db, identity }: { db: Database; identity: IdentityRe
     return c.json({ enrollment })
   })
 
+  for (const action of ['deactivate', 'reactivate'] as const) {
+    app.post(`/enrollments/:enrollmentId/${action}`, async (c) => {
+      const enrollmentId = c.req.param('enrollmentId')
+      if (!UUID.test(enrollmentId)) return c.json({ error: 'enrollment_not_found' }, 404)
+      const raw = await c.req.text()
+      let body: unknown = {}
+      try { if (raw !== '') body = JSON.parse(raw) } catch { body = null }
+      if (typeof body !== 'object' || body === null || Array.isArray(body)) return c.json({ error: 'invalid_lifecycle_reason' }, 422)
+      const { reason = null } = body as Record<string, unknown>
+      if ((reason !== null && (typeof reason !== 'string' || reason.trim() === '' || reason.length > 500)) || (action === 'reactivate' && reason === null)) return c.json({ error: 'invalid_lifecycle_reason' }, 422)
+      const result = await changeEnrollmentStatus(db, enrollmentId, c.get('accountId'), action, reason as string | null)
+      if (!result.ok) return c.json({ error: result.refusal }, result.refusal === 'enrollment_not_found' ? 404 : result.refusal === 'coach_only' ? 403 : result.refusal === 'invalid_lifecycle_reason' ? 422 : 409)
+      return c.json({ enrollment: result.enrollment, lifecycleRecord: result.lifecycleRecord })
+    })
+  }
+
   // Drafts and Submissions of one Task in one Enrollment (ADR 0002).
   const taskRoute = '/enrollments/:enrollmentId/tasks/:taskId'
   const taskParams = ({ enrollmentId, taskId }: { enrollmentId: string; taskId: string }) =>
     UUID.test(enrollmentId) && UUID.test(taskId) ? { enrollmentId, taskId } : null
   const contents = async (c: { req: { json: () => Promise<unknown> } }) => parseContents(await c.req.json().catch(() => null))
+
+  app.post(`${taskRoute}/start`, async (c) => {
+    const params = taskParams(c.req.param())
+    if (!params) return c.json({ error: 'enrollment_not_found' }, 404)
+    const result = await startTask(db, params.enrollmentId, params.taskId, c.get('accountId'))
+    if (!result.ok) return c.json({ error: result.refusal }, SUBMISSION_REFUSAL_STATUS[result.refusal])
+    return c.json({ taskStart: result.value, created: result.created }, result.created ? 201 : 200)
+  })
 
   app.get(`${taskRoute}/draft`, async (c) => {
     const params = taskParams(c.req.param())

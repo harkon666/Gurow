@@ -61,7 +61,7 @@ Returns 200 `{ "learningState": { "enrollmentId", "learningPathVersionId", "enro
 
 Review and send transactions lock **Enrollment FOR UPDATE before Submission**, retaining locks until commit. Learning-state and submitted-history reads use the same Enrollment lock, so their multiple queries cannot mix evidence across concurrent sends/reviews. Future revocation/lifecycle/evidence mutators must retain this contract. Published definitions and ownership are assumed stable; there are no content-edit or ownership-transfer APIs here.
 
-Current XP/Mastery remain derived from durable revision decisions. T10 additionally records XP Award/Correction and Mastery award/revocation transitions in the same transaction as each Review mutation. T11 persists scoped Access Overrides; Enrollment lifecycle APIs remain T12. Personal XP persistence and authentication-provider integration are not implemented. There is no generic Review overwrite endpoint.
+Current XP/Mastery remain derived from durable revision decisions. T10 additionally records XP Award/Correction and Mastery award/revocation transitions in the same transaction as each Review mutation. T11 persists scoped Access Overrides; T12 adds explicit Enrollment lifecycle and durable Task starts. Personal XP persistence and authentication-provider integration are not implemented. There is no generic Review overwrite endpoint.
 
 ### Grant or withdraw one scoped Access Override (T11)
 
@@ -89,6 +89,43 @@ Current XP/Mastery remain derived from durable revision decisions. T10 additiona
 - `override_records` is the single authority for exception state and audit. Migration `0005` adds pinned Enrollment/Version/Skill constraints and an update/delete-rejecting immutability trigger. Grants/revokes, sends, reviews and coherent reads share Enrollment `FOR UPDATE` through commit; failed record storage leaves no exception or audit effect. Sequence orders records; `clock_timestamp()` records action time after the lock is obtained. Published content and Workspace ownership are assumed stable, as for the existing learning routes.
 
 `bun test test/override.test.ts` covers both unmet gates together, complete automatic audit, grant/revoke/regrant and stale retries, concurrent exact operations, scoped authority/privacy, retained work and achievements, ordinary-rule restoration, inactive gating, fresh-connection persistence, immutable records, late rollback, and PostgreSQL-observed grant/send, revoke/send (both orders), and revoke/read serialization. Inactivity is direct test-only fault injection; lifecycle request proof remains T12. Intentional rollback tests log storage exceptions.
+
+### Deactivate or reactivate participation (T12)
+
+`POST /enrollments/:enrollmentId/deactivate`
+
+```json
+{ "reason": "Participation paused until next term." }
+```
+
+- The owning Coach must supply a non-whitespace reason of at most **500 characters**, stored verbatim. The learner may self-deactivate with no body, `{}`, or a null/omitted reason; an optional supplied reason follows the same text rules. JSON null, arrays, malformed JSON and invalid reasons return 422 `invalid_lifecycle_reason`.
+- Only the learner concerned and owning Coach may deactivate. Anonymous requests return 401; foreign/unknown/malformed Enrollment targets return 404 `enrollment_not_found`. Neither body fields nor invitations select the actor or change authority.
+- Success is **200 after commit**, returning `{ "enrollment": ..., "lifecycleRecord": ... }`. The record contains `id`, monotonic `sequence`, `enrollmentId`, pinned `learningPathVersionId`, `actorAccountId`, `learnerAccountId`, `action: "deactivate"`, `reason` (nullable for self-deactivation), and database-generated `occurredAt`.
+- Inactivity blocks Task starts and all new Submissions/revisions, even with an active Skill Access Override. Invitations reuse the inactive Enrollment unchanged, including when its Version is closed to new Enrollments; closed Versions still reject new Enrollments.
+- Deactivation changes no Approval, XP, Mastery, sent work, draft, override or progression history. Eligible unsuperseded work sent while active and with valid Access remains reviewable; inactive Approvals can award XP/Mastery without reactivation or reward duplication. Changes Requested remains available, but sending corrections requires active participation and current Access.
+- Learner and owning Coach retain submitted/history access. Draft contents remain learner-only. Existing private work remains editable while inactive; a first draft for a Task with no prior draft, Submission or explicit start is rejected with 403 `enrollment_inactive`, so draft creation cannot begin new inactive activity.
+
+`POST /enrollments/:enrollmentId/reactivate`
+
+```json
+{ "reason": "The learner is ready to resume." }
+```
+
+- Only the owning Coach may explicitly reactivate, even after learner self-deactivation. Reason is mandatory and follows the same 500-character rules. A learner with a valid reason receives 403 `coach_only`; foreign actors receive 404. The same Enrollment, Version, progress, work and overrides are retained.
+- Success is **200 after commit** with the same response shape and a new `action: "reactivate"` audit record. Current ordinary gates and active scoped overrides are evaluated—not a blanket restoration of every Skill's Access.
+- Repeating an already-applied status returns 409 `enrollment_already_inactive` or `enrollment_already_active`, without another record. Competing same transitions produce one success and one conflict. Ordered `lifecycleHistory` is exposed only in the learner/owning-Coach learning-state response.
+- Migration `0006` creates pinned lifecycle audit records and an update/delete-rejecting trigger. The status update and audit append share Enrollment `FOR UPDATE` through commit; a late audit error rolls back both. Sequence orders records, while `clock_timestamp()` captures action time after acquiring the lock. Preexisting inactive rows have no fabricated lifecycle history.
+
+### Explicit durable Task start (T12)
+
+`POST /enrollments/:enrollmentId/tasks/:taskId/start`
+
+- This is a state-changing operation, not a read or permission probe. Only the learner may start a Task defined in the Enrollment's pinned Version, with active participation and current Skill Access (ordinary rules or active scoped override).
+- First success is **201 after commit** `{ "taskStart": { "enrollmentId", "learningPathVersionId", "taskId", "startedAt" }, "created": true }`. A permitted retry returns 200, the same record/time, and `created: false`. Current gates are checked even on retries; inactive requests return 403 `enrollment_inactive`, locked Skills 403 `skill_locked`, owning Coach 403 `learner_only`, foreign Enrollment actors 404, and out-of-Version Tasks 404 `task_not_found`.
+- Migration `0007` stores at most one explicit start per Task/Enrollment with pinned-Version constraints. Starts and draft writes share the Enrollment lock with lifecycle, sends, reviews and overrides. Reads do not start Tasks. Existing draft/save/send clients need not call start first; existing work is preserved without inventing historical start times. Draft preparation remains separate from the explicit start marker and does not create one.
+- Learning-state includes `taskStarts`, ordered by Task UUID and visible only to learner/owning Coach. Starts never grant XP or Mastery. No product UI or production authentication integration is added.
+
+`bun test test/lifecycle.test.ts` exercises actual lifecycle/start Hono requests against PostgreSQL: all actors, input/target/context spoofing, immutable automatic audit, self-deactivation, invitations/admission and override interactions, pending Approval and Changes Requested, reward nonduplication, nonzero progress/work/privacy through resumption, current unmet/met gates, fresh-connection persistence, late audit rollback, competing transitions/starts, and PostgreSQL-observed lifecycle/send/start/read ordering. Test-only barrier triggers are removed in `finally`; intentional rollback errors are logged. Existing suites retain their earlier direct-database fault-injection cases as regressions, not substitutes for this request proof.
 
 ### Revoke one Approval (T10)
 

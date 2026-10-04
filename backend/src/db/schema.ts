@@ -219,6 +219,36 @@ export const overrideRecords = pgTable('override_records', {
   check('override_records_reason', sql`length(trim(${t.reason})) > 0 AND length(${t.reason}) <= 500`),
 ])
 
+/** Append-only participation audit, independent of progress and Access Overrides. */
+export const enrollmentLifecycleRecords = pgTable('enrollment_lifecycle_records', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  sequence: integer('sequence').notNull().generatedAlwaysAsIdentity(),
+  enrollmentId: uuid('enrollment_id').notNull(),
+  learningPathVersionId: uuid('learning_path_version_id').notNull(),
+  actorAccountId: uuid('actor_account_id').notNull().references(() => accounts.id),
+  learnerAccountId: uuid('learner_account_id').notNull().references(() => accounts.id),
+  action: text('action').notNull(),
+  reason: text('reason'),
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  unique('enrollment_lifecycle_records_sequence_key').on(t.sequence),
+  foreignKey({ columns: [t.enrollmentId, t.learningPathVersionId], foreignColumns: [enrollments.id, enrollments.learningPathVersionId] }),
+  check('enrollment_lifecycle_records_action', sql`${t.action} IN ('deactivate', 'reactivate')`),
+  check('enrollment_lifecycle_records_reason', sql`(${t.reason} IS NOT NULL AND length(trim(${t.reason})) > 0 AND length(${t.reason}) <= 500) OR (${t.reason} IS NULL AND ${t.action} = 'deactivate' AND ${t.actorAccountId} = ${t.learnerAccountId})`),
+])
+
+/** First explicit Task start; retries never reset the learner's work or start time. */
+export const taskStarts = pgTable('task_starts', {
+  enrollmentId: uuid('enrollment_id').notNull(),
+  learningPathVersionId: uuid('learning_path_version_id').notNull(),
+  taskId: uuid('task_id').notNull(),
+  startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ columns: [t.enrollmentId, t.taskId] }),
+  foreignKey({ columns: [t.enrollmentId, t.learningPathVersionId], foreignColumns: [enrollments.id, enrollments.learningPathVersionId] }),
+  foreignKey({ columns: [t.learningPathVersionId, t.taskId], foreignColumns: [versionTasks.learningPathVersionId, versionTasks.taskId] }),
+])
+
 export const xpEvents = pgTable('xp_events', {
   id: integer('id').primaryKey().generatedAlwaysAsIdentity(),
   enrollmentId: uuid('enrollment_id').notNull(),
