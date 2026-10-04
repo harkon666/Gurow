@@ -4,6 +4,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import type { Database } from './db/client'
 import { acceptInvitation, readEnrollment, type EnrollmentRefusal } from './enrollments'
 import type { IdentityResolver } from './identity'
+import { readLearningState, recordReview, type ReviewContents } from './reviews'
 import { readDraft, readSubmission, saveDraft, sendRevision, type SubmissionContents, type SubmissionRefusal } from './submissions'
 
 const REFUSAL_STATUS: Record<EnrollmentRefusal, ContentfulStatusCode> = {
@@ -123,6 +124,34 @@ export function createApp({ db, identity }: { db: Database; identity: IdentityRe
     const result = await sendRevision(db, params.enrollmentId, params.taskId, c.get('accountId'), sent)
     if (!result.ok) return c.json({ error: result.refusal }, SUBMISSION_REFUSAL_STATUS[result.refusal])
     return c.json(result.value, 201)
+  })
+
+  app.post(`${taskRoute}/submission/revisions/:revisionId/review`, async (c) => {
+    const params = taskParams(c.req.param())
+    const revisionId = c.req.param('revisionId')
+    if (!params || !UUID.test(revisionId)) return c.json({ error: 'revision_not_found' }, 404)
+    const body: unknown = await c.req.json().catch(() => null)
+    if (typeof body !== 'object' || body === null) return c.json({ error: 'invalid_review' }, 422)
+    const { decision, feedback = null } = body as Record<string, unknown>
+    if ((decision !== 'approval' && decision !== 'changes_requested') ||
+      (feedback !== null && (typeof feedback !== 'string' || feedback.length > MAX_TEXT_LENGTH)) ||
+      (decision === 'changes_requested' && (typeof feedback !== 'string' || feedback.trim() === ''))) {
+      return c.json({ error: 'invalid_review' }, 422)
+    }
+    const result = await recordReview(db, params.enrollmentId, params.taskId, revisionId, c.get('accountId'), { decision, feedback } as ReviewContents)
+    if (!result.ok) {
+      const status = result.refusal === 'coach_only' ? 403 :
+        result.refusal === 'revision_superseded' || result.refusal === 'revision_already_reviewed' ? 409 : 404
+      return c.json({ error: result.refusal }, status)
+    }
+    return c.json({ review: result.value }, 201)
+  })
+
+  app.get('/enrollments/:enrollmentId/learning-state', async (c) => {
+    const enrollmentId = c.req.param('enrollmentId')
+    const learningState = UUID.test(enrollmentId) ? await readLearningState(db, enrollmentId, c.get('accountId')) : null
+    if (!learningState) return c.json({ error: 'enrollment_not_found' }, 404)
+    return c.json({ learningState })
   })
 
   return app

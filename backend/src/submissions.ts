@@ -44,7 +44,7 @@ type Executor = Pick<Database, 'select'>
  * an unknown ID, gets the same refusal. The Task must be defined in the
  * Enrollment's own Version.
  */
-async function taskContext(db: Executor, enrollmentId: string, taskId: string, accountId: string) {
+export async function taskContext(db: Executor, enrollmentId: string, taskId: string, accountId: string) {
   const [row] = await db
     .select({ enrollment: enrollments, ownerId: coachWorkspaces.ownerAccountId, taskId: versionTasks.taskId })
     .from(enrollments)
@@ -141,23 +141,27 @@ export async function sendRevision(db: Database, enrollmentId: string, taskId: s
 
 /**
  * Reads the Task's Submission with every sent revision, for the learner and the
- * owning Coach only (ADR 0013). Draft contents are never part of it.
+ * owning Coach only (ADR 0013). Draft contents are never part of it. The shared
+ * Enrollment lock keeps history coherent with concurrent sends and decisions.
  */
 export async function readSubmission(db: Database, enrollmentId: string, taskId: string, accountId: string): Promise<SubmissionResult<SubmissionView>> {
-  const context = await taskContext(db, enrollmentId, taskId, accountId)
-  if (!context.ok) return context
-  const [submission] = await db.select().from(submissions)
-    .where(and(eq(submissions.enrollmentId, enrollmentId), eq(submissions.taskId, taskId)))
-  if (!submission) return { ok: false, refusal: 'submission_not_found' }
-  const revisions = await db.select({ revision: submissionRevisions, review: submissionReviews }).from(submissionRevisions)
-    .leftJoin(submissionReviews, eq(submissionReviews.revisionId, submissionRevisions.id))
-    .where(eq(submissionRevisions.submissionId, submission.id)).orderBy(asc(submissionRevisions.revisionNumber))
-  return {
-    ok: true,
-    value: { ...submission, revisions: revisions.map(({ revision, review }): RevisionView => ({
-      ...revision,
-      status: review ? (review.revokedAt ? 'approval_revoked' : review.decision) : revision.supersededAt ? 'superseded' : 'pending',
-      ...(review ? { review } : {}),
-    })) },
-  }
+  return db.transaction(async (tx) => {
+    const context = await taskContext(tx, enrollmentId, taskId, accountId)
+    if (!context.ok) return context
+    await tx.select().from(enrollments).where(eq(enrollments.id, enrollmentId)).for('update')
+    const [submission] = await tx.select().from(submissions)
+      .where(and(eq(submissions.enrollmentId, enrollmentId), eq(submissions.taskId, taskId)))
+    if (!submission) return { ok: false, refusal: 'submission_not_found' }
+    const revisions = await tx.select({ revision: submissionRevisions, review: submissionReviews }).from(submissionRevisions)
+      .leftJoin(submissionReviews, eq(submissionReviews.revisionId, submissionRevisions.id))
+      .where(eq(submissionRevisions.submissionId, submission.id)).orderBy(asc(submissionRevisions.revisionNumber))
+    return {
+      ok: true,
+      value: { ...submission, revisions: revisions.map(({ revision, review }): RevisionView => ({
+        ...revision,
+        status: review ? (review.revokedAt ? 'approval_revoked' : review.decision) : revision.supersededAt ? 'superseded' : 'pending',
+        ...(review ? { review } : {}),
+      })) },
+    }
+  })
 }

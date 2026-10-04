@@ -1,21 +1,15 @@
-import { and, eq, isNull } from 'drizzle-orm'
+import { and, asc, eq, isNull } from 'drizzle-orm'
 import type { Database } from './db/client'
 import { submissionReviews, submissionRevisions, submissions, versionPrerequisites, versionSkills, versionTasks } from './db/schema'
 
-/**
- * Current ordinary Access under the Enrollment's pinned rules. Caller must hold
- * the Enrollment FOR UPDATE through commit; every future Review/revocation
- * mutator must take that same lock before changing its progression evidence.
- * Overrides are not modeled here; their API and persistence belong to T11.
+/** Caller holds Enrollment FOR UPDATE through commit, including for coherent reads.
+ * Published definitions are pinned; all evidence mutators use the same lock.
+ * Overrides are deferred to T11. No personal or other Enrollment evidence is read.
  */
-export async function hasSkillAccess(db: Pick<Database, 'select'>, enrollmentId: string, versionId: string, taskId: string, ownerId: string): Promise<boolean> {
-  const definitions = await db.select().from(versionTasks).where(eq(versionTasks.learningPathVersionId, versionId))
-  const target = definitions.find((task) => task.taskId === taskId)
-  if (!target) return false
-  const [skill] = await db.select().from(versionSkills)
-    .where(and(eq(versionSkills.learningPathVersionId, versionId), eq(versionSkills.skillId, target.skillId)))
-  if (!skill) return false
-
+export async function deriveLearningState(db: Pick<Database, 'select'>, enrollmentId: string, versionId: string, ownerId: string, active: boolean) {
+  const definitions = await db.select().from(versionTasks).where(eq(versionTasks.learningPathVersionId, versionId)).orderBy(asc(versionTasks.taskId))
+  const skills = await db.select().from(versionSkills).where(eq(versionSkills.learningPathVersionId, versionId)).orderBy(asc(versionSkills.skillId))
+  const prerequisites = await db.select().from(versionPrerequisites).where(eq(versionPrerequisites.learningPathVersionId, versionId)).orderBy(asc(versionPrerequisites.prerequisiteSkillId))
   const approvals = await db.select({ taskId: submissions.taskId }).from(submissions)
     .innerJoin(submissionRevisions, eq(submissionRevisions.submissionId, submissions.id))
     .innerJoin(submissionReviews, eq(submissionReviews.revisionId, submissionRevisions.id))
@@ -25,14 +19,25 @@ export async function hasSkillAccess(db: Pick<Database, 'select'>, enrollmentId:
       isNull(submissionReviews.revokedAt), isNull(submissionRevisions.supersededAt),
     ))
   const approvedTasks = new Set(approvals.map((approval) => approval.taskId))
-  // Each Task contributes its pinned reward once, regardless of approved revision count.
-  const xp = definitions.reduce((total, task) => total + (approvedTasks.has(task.taskId) ? task.xpReward : 0), 0)
-  if (xp < skill.xpThreshold) return false
+  const tasks = definitions.map((task) => ({ ...task, approved: approvedTasks.has(task.taskId), xpContribution: approvedTasks.has(task.taskId) ? task.xpReward : 0 }))
+  const xp = tasks.reduce((total, task) => total + task.xpContribution, 0)
+  const mastered = new Set(skills.filter((skill) => {
+    const required = tasks.filter((task) => task.skillId === skill.skillId && task.required)
+    return required.length > 0 && required.every((task) => task.approved)
+  }).map((skill) => skill.skillId))
+  return {
+    enrollmentId, learningPathVersionId: versionId, enrollmentStatus: active ? 'active' as const : 'inactive' as const, xp, tasks,
+    skills: skills.map((skill) => {
+      const unmetPrerequisiteSkillIds = prerequisites.filter((edge) => edge.skillId === skill.skillId && !mastered.has(edge.prerequisiteSkillId)).map((edge) => edge.prerequisiteSkillId)
+      const xpShortfall = Math.max(0, skill.xpThreshold - xp)
+      return { ...skill, mastery: mastered.has(skill.skillId), access: active && xpShortfall === 0 && unmetPrerequisiteSkillIds.length === 0, unmetPrerequisiteSkillIds, xpShortfall }
+    }),
+  }
+}
 
-  const prerequisites = await db.select().from(versionPrerequisites)
-    .where(and(eq(versionPrerequisites.learningPathVersionId, versionId), eq(versionPrerequisites.skillId, target.skillId)))
-  return prerequisites.every((edge) => {
-    const required = definitions.filter((task) => task.skillId === edge.prerequisiteSkillId && task.required)
-    return required.length > 0 && required.every((task) => approvedTasks.has(task.taskId))
-  })
+/** The send gate uses exactly the same derivation as the readable progress view. */
+export async function hasSkillAccess(db: Pick<Database, 'select'>, enrollmentId: string, versionId: string, taskId: string, ownerId: string): Promise<boolean> {
+  const state = await deriveLearningState(db, enrollmentId, versionId, ownerId, true)
+  const task = state.tasks.find((task) => task.taskId === taskId)
+  return Boolean(task && state.skills.find((skill) => skill.skillId === task.skillId)?.access)
 }

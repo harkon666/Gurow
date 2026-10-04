@@ -177,9 +177,9 @@ export const submissionRevisions = pgTable('submission_revisions', {
 export const reviewDecision = pgEnum('review_decision', ['approval', 'changes_requested'])
 
 /**
- * Minimal stored decision foundation, not a Review API. Future decision and
- * revocation mutators must lock the target Enrollment FOR UPDATE before reading
- * or changing progression, and retain that lock through commit (see sendRevision).
+ * Durable, revision-specific decision. Review and future revocation mutators
+ * lock the target Enrollment FOR UPDATE before reading or changing progression,
+ * retaining it through commit (see recordReview and sendRevision).
  */
 export const submissionReviews = pgTable('submission_reviews', {
   revisionId: uuid('revision_id').primaryKey().references(() => submissionRevisions.id),
