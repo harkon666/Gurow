@@ -83,7 +83,9 @@ export const SkillCardOverlay: React.FC<SkillCardOverlayProps> = ({
   return (
     <div
       id="labels-overlay"
-      className="absolute inset-0 pointer-events-none overflow-hidden"
+      // Clip without creating a scroll container: scrollIntoView/find must not
+      // move HTML labels independently of the WebGPU camera.
+      className="absolute inset-0 pointer-events-none overflow-clip"
     >
       <div
         id="labels-camera"

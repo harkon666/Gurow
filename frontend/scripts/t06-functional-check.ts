@@ -49,8 +49,8 @@ const selectedId = (page: Page) => page.$eval('#selected-skill-id', el => el.tex
 const zoomLabel = (page: Page) => page.$eval('#editor-zoom-label', el => el.textContent?.trim())
 
 /**
- * Clicks the canvas where the card's label is visible. ElementHandle.click would
- * scrollIntoView the label and scroll the clipped overlay off the canvas.
+ * Clicks a visible canvas point rather than an off-canvas label centre.
+ * The non-scrolling label overlay is separately covered by label-scroll-check.
  */
 async function select(page: Page, id: string) {
   const point = await page.$eval(`#card-label-${id}`, el => {

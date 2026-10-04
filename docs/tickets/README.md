@@ -70,6 +70,11 @@ T06 / #7 has a prepared [benchmark contract and L3 execution breakdown](t06-l3/R
 | [T06-L3-08](t06-l3/profile-and-fix-primary-bottleneck.md) | [#42](https://github.com/harkon666/Gurow/issues/42) | P1 | Profile the primary pan, zoom and drag path and fix the measured bottleneck | L3-03 | Profile names the bottleneck; fix plus before/after v4 capture |
 | [T06-L3-09](t06-l3/surface-invisible-webgpu-canvas.md) | [#43](https://github.com/harkon666/Gurow/issues/43) | P1 | Report a WebGPU canvas that silently renders nothing, and make it render on native Wayland | — | Silent WebGPU failure enters the recovery path; native Wayland renders or is documented |
 
+### P1 follow-up bugs
+
+| Ticket source | GitHub issue | Stage | Title | Blocked by | What it delivers |
+| --- | --- | --- | --- | --- | --- |
+| [T44](https://github.com/harkon666/Gurow/issues/44) | [#44](https://github.com/harkon666/Gurow/issues/44) | P1 | Keep HTML labels aligned when scrolled into view | None | Non-scrolling clipped labels with browser regression coverage. |
 
 ```mermaid
 flowchart TD
