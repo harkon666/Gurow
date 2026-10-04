@@ -29,6 +29,10 @@ interface SkillDetailPanelProps {
   onUpdateOutcome?: (outcome: string) => void
   /** Offers adding a Task to the selected Skill. */
   onAddTask?: () => void
+  /** Learning records of the selected Skill (Access, Mastery, XP), shown after its outcome. */
+  learning?: React.ReactNode
+  /** Learning controls shown inside each Task card. */
+  renderTaskExtra?: (taskId: string) => React.ReactNode
 }
 
 interface ConnectionListItemProps {
@@ -76,6 +80,8 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
   onUpdateTask,
   onUpdateOutcome,
   onAddTask,
+  learning,
+  renderTaskExtra,
 }) => {
   const [selectedTargetId, setSelectedTargetId] = useState<string>('')
 
@@ -216,6 +222,8 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
             </p>
           )}
         </div>
+
+        {learning}
 
         {/* Prerequisite Connections Section */}
         <div id="skill-prerequisites-section" className="space-y-3">
@@ -412,6 +420,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
                       <span>Is Required Task (Mandatory for Skill Mastery)</span>
                     </label>
                   </div>}
+                  {renderTaskExtra?.(task.id)}
                 </div>
               ))}
             </div>

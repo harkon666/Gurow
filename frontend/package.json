@@ -18,6 +18,7 @@
     "smoke-check:t05": "bun run scripts/t05-smoke-check.ts",
     "check:t06": "bun run scripts/t06-functional-check.ts",
     "check:t15": "bun run scripts/t15-sign-in-check.ts",
+    "check:t17": "bun run scripts/t17-personal-learning-check.ts",
     "capture:p1": "bun run scripts/benchmark/run.ts --contract ../docs/benchmarks/p1/protocol-v5.json --out ../.harness/t06/primary",
     "capture:p1:gate": "bun run scripts/benchmark/gate.ts --out ../.harness/t06/gate",
     "trace:p1": "bun run scripts/benchmark/run.ts --trace --contract ../docs/benchmarks/p1/protocol-v5.json --out ../.harness/t06/trace",

@@ -11,7 +11,7 @@ import type {
 import { useWasmEditor } from './useWasmEditor'
 import { EditorToolbar } from './EditorToolbar'
 import { WebGpuEnableHint } from './WebGpuEnableHint'
-import { SkillCardOverlay } from './SkillCardOverlay'
+import { SkillCardOverlay, type LabelStatus } from './SkillCardOverlay'
 
 export interface WebGpuEditorActions {
   createCard: (id: string, title: string, position: Point, size?: Size) => void
@@ -44,6 +44,8 @@ interface WebGpuEditorProps {
   onOperationCompleted?: () => void
   onCameraChanged?: (camera: CameraState) => void
   onGpuStatusChange?: (status: GpuStatus) => void
+  /** Learning status shown on each card label. */
+  labelStatus?: Record<string, LabelStatus>
 }
 
 export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
@@ -58,6 +60,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
   onOperationCompleted,
   onCameraChanged,
   onGpuStatusChange,
+  labelStatus,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -280,7 +283,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
         />
 
         {/* HTML Labels Overlay: positioned from engine output */}
-        <SkillCardOverlay labels={labels} camera={labelCamera} benchmarkRevision={benchmarkRevision} />
+        <SkillCardOverlay labels={labels} camera={labelCamera} benchmarkRevision={benchmarkRevision} status={labelStatus} />
       </div>
     </div>
   )

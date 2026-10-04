@@ -154,6 +154,19 @@ export const setMastery = (db: Database, learningPathId: string, skillId: string
   return { ok: true, changed: true }
 })
 
+/**
+ * Sets a Skill's XP Threshold, a progression rule of the owner's Path. Access is
+ * derived from it at read time, so a higher threshold can relock started work;
+ * XP, Mastery, work and overrides are not touched.
+ */
+export const setXpThreshold = (db: Database, learningPathId: string, skillId: string, accountId: string, xpThreshold: number) => act(db, learningPathId, accountId, async (tx) => {
+  const skill = await findSkill(tx, learningPathId, skillId)
+  if (!skill) return { ok: false, refusal: 'skill_not_found' }
+  if (skill.xpThreshold === xpThreshold) return { ok: true, changed: false }
+  await tx.update(personalSkills).set({ xpThreshold }).where(eq(personalSkills.skillId, skillId))
+  return { ok: true, changed: true }
+})
+
 /** Waives both gates for one Skill without a reason; XP and Mastery are not touched. */
 export const setAccessOverride = (db: Database, learningPathId: string, skillId: string, accountId: string, granted: boolean) => act(db, learningPathId, accountId, async (tx, now) => {
   if (!await findSkill(tx, learningPathId, skillId)) return { ok: false, refusal: 'skill_not_found' }

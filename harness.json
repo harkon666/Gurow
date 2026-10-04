@@ -33,6 +33,9 @@
     "t16-backend-authoring": {"cwd": "backend", "argv": ["bun", "test", "test/authoring.test.ts"], "timeout": 180},
     "t16-autosave": {"cwd": "frontend", "argv": ["bun", "test", "src/components/path/autosave.test.ts"], "timeout": 120},
     "t16-path-authoring": {"cwd": "frontend", "argv": ["bun", "run", "scripts/t16-path-authoring-check.ts"], "timeout": 900},
+    "t17-backend-tracking": {"cwd": "backend", "argv": ["bun", "test", "test/personal-tracking.test.ts"], "timeout": 180},
+    "t17-learning-records": {"cwd": "frontend", "argv": ["bun", "test", "src/components/path/learning.test.ts"], "timeout": 120},
+    "t17-personal-learning": {"cwd": "frontend", "argv": ["bun", "run", "scripts/t17-personal-learning-check.ts"], "timeout": 900},
     "t06-l3-06-gate-tests": {"cwd": "frontend", "argv": ["bun", "test", "scripts/benchmark/gate.test.ts", "scripts/benchmark/report.test.ts", "scripts/benchmark/fixture.test.ts", "scripts/benchmark/run.test.ts"], "timeout": 120}
   },
   "profiles": {
@@ -59,6 +62,7 @@
     "T06-L3-08": ["t06-l3-08-regressions", "t06-l3-08-engine-labels", "t06-l3-08-fixture-check-v5", "t04-browser", "t05-browser", "editor-lifecycle"],
     "T15": ["db-up", "backend-types", "backend-tests", "t15-backend-sign-in", "frontend-types", "t15-sign-in", "t04-browser", "t05-browser", "editor-lifecycle", "t06-functional", "t44-label-scroll"],
     "T16": ["db-up", "backend-types", "backend-tests", "t16-backend-authoring", "t13-personal", "t15-backend-sign-in", "frontend-types", "t16-autosave", "t16-path-authoring", "t15-sign-in", "t04-browser", "t05-browser", "editor-lifecycle", "t06-functional", "t44-label-scroll"],
+    "T17": ["db-up", "backend-types", "backend-tests", "t17-backend-tracking", "t13-personal", "t16-backend-authoring", "frontend-types", "t17-learning-records", "t16-autosave", "t17-personal-learning", "t16-path-authoring", "t15-sign-in", "t04-browser", "t05-browser", "editor-lifecycle", "t06-functional", "t44-label-scroll"],
     "T06-L3-06": ["t06-functional", "t06-l3-06-gate-tests", "t06-l3-08-fixture-check-v5", "frontend-types"]
   }
 }

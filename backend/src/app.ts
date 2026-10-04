@@ -56,6 +56,7 @@ const MAX_TEXT_LENGTH = 50_000
 const MAX_URLS = 20
 const MAX_URL_LENGTH = 2_048
 const MAX_XP_REWARD = 1_000_000
+const MAX_XP_THRESHOLD = 1_000_000_000
 
 /**
  * Validates text and URL evidence without rewriting it: valid values are kept
@@ -320,6 +321,15 @@ export function createApp({ db, identity, auth }: { db: Database; identity: Iden
     const xpReward = typeof body === 'object' && body !== null ? (body as Record<string, unknown>).xpReward : null
     if (typeof xpReward !== 'number' || !Number.isSafeInteger(xpReward) || xpReward < 0 || xpReward > MAX_XP_REWARD) return c.json({ error: 'invalid_reward' }, 422)
     return personalResult(c, await personal.changeTaskReward(db, target.pathId, target.targetId, c.get('accountId'), xpReward))
+  })
+
+  app.put(`${personalPath}/skills/:skillId/xp-threshold`, async (c) => {
+    const target = personalTarget(c.req.param('pathId'), c.req.param('skillId'))
+    if (!target) return c.json({ error: 'learning_path_not_found' }, 404)
+    const body: unknown = await c.req.json().catch(() => null)
+    const xpThreshold = typeof body === 'object' && body !== null ? (body as Record<string, unknown>).xpThreshold : null
+    if (typeof xpThreshold !== 'number' || !Number.isSafeInteger(xpThreshold) || xpThreshold < 0 || xpThreshold > MAX_XP_THRESHOLD) return c.json({ error: 'invalid_threshold' }, 422)
+    return personalResult(c, await personal.setXpThreshold(db, target.pathId, target.targetId, c.get('accountId'), xpThreshold))
   })
 
   for (const [segment, change] of [['mastery', personal.setMastery], ['access-override', personal.setAccessOverride]] as const) {

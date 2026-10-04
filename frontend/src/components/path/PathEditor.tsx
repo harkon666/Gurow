@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { WebGpuEditor, type WebGpuEditorActions } from '../editor/WebGpuEditor'
 import { SkillDetailPanel, type PanelTask } from '../editor/SkillDetailPanel'
 import { SkillPrerequisiteList } from '../editor/SkillPrerequisiteList'
 import { loadCameraState, saveCameraState } from '../editor/checkpoint'
 import type { CameraState, PrerequisiteConnection } from '../editor/protocol'
 import type { GpuStatus, SelectedSkillInfo } from '../editor/types'
-import { readLearningPath, saveLearningPath, type PathDocument, type PathSave, type PathSkill } from '../../lib/api'
+import { performLearningAction, readLearningPath, readLearningState, saveLearningPath, type ApiResult, type LearningAction, type LearningState, type PathDocument, type PathSave, type PathSkill } from '../../lib/api'
 import { Autosave, type SaveOutcome, type SaveState } from './autosave'
+import { LearningRecords, type LearningOutcome } from './learning'
+import { describeAction, LearningStatus, SkillLearning, SkillStatusChips, TaskLearning, type PersonalLearningView } from './LearningPanel'
 
 const AUTOSAVE_DELAY_MS = 500
 
@@ -14,6 +16,25 @@ type LocalDocument = Omit<PathSave, 'expectedRevision'>
 
 /** Where a new Skill's card is first placed; the owner then arranges it on the canvas. */
 const newCardPosition = (index: number) => ({ x: 80 + (index % 4) * 240, y: 100 + Math.floor(index / 4) * 160 })
+
+const REFUSALS: Record<string, string> = {
+  skill_locked: 'this Skill is locked',
+  task_not_found: 'this Task is not saved yet',
+  skill_not_found: 'this Skill is not saved yet',
+  task_archived: 'this Task is archived',
+  learning_path_not_found: 'this Path is not available to the signed-in Account',
+  unauthenticated: 'you are signed out',
+}
+
+/** Only a backend answer carrying the records counts; anything else changes nothing shown. */
+async function learningOutcome(request: Promise<ApiResult<{ learningState: LearningState }>>): Promise<LearningOutcome<LearningState>> {
+  try {
+    const result = await request
+    return result.ok ? { kind: 'ok', state: result.value.learningState } : { kind: 'failed', detail: REFUSALS[result.error] ?? result.error }
+  } catch {
+    return { kind: 'failed', detail: 'the backend could not be reached' }
+  }
+}
 
 const editorInput = (document: PathDocument) => ({
   cards: document.editor.cards.map((card) => ({ id: card.id, title: card.title, position: card.position })),
@@ -25,6 +46,8 @@ const editorInput = (document: PathDocument) => ({
  * connections, selection, undo and camera; React owns the Path's goal, Skill
  * outcomes and Tasks. Completed edits autosave the whole document against the
  * accepted revision. Camera is stored only locally, per Account and Path.
+ * The Path's learning records (completion, rewards, Mastery, thresholds, overrides)
+ * are separate backend actions that never touch the document or its revision.
  */
 export function PathEditor({ accountId, initial }: { accountId: string; initial: PathDocument }) {
   const pathId = initial.learningPath.id
@@ -41,11 +64,25 @@ export function PathEditor({ accountId, initial }: { accountId: string; initial:
   // The engine loads asynchronously; until then there is no document to add a card to.
   const [gpuStatus, setGpuStatus] = useState<GpuStatus>('initializing')
   const editorReady = gpuStatus !== 'initializing'
+  const [learning, setLearning] = useState<PersonalLearningView>({ records: null, pending: null, failed: null, loadError: null })
+  const learningRef = useRef<LearningRecords<LearningState, LearningAction> | null>(null)
 
   // Read by the autosave when it builds a save, so they follow every edit at once.
   const local = useRef({ skills, title, goal })
   const actionsRef = useRef<WebGpuEditorActions | null>(null)
   const autosaveRef = useRef<Autosave<LocalDocument> | null>(null)
+
+  // Learning records are the Path's own (ADR 0009), read and changed apart from its document.
+  useEffect(() => {
+    const records = new LearningRecords<LearningState, LearningAction>({
+      read: () => learningOutcome(readLearningState(pathId)),
+      send: (action) => learningOutcome(performLearningAction(pathId, action)),
+      onView: setLearning,
+    })
+    learningRef.current = records
+    void records.refresh()
+    return () => records.close()
+  }, [pathId])
 
   useEffect(() => {
     const build = (): LocalDocument | null => {
@@ -61,7 +98,11 @@ export function PathEditor({ accountId, initial }: { accountId: string; initial:
     const send = async (document: LocalDocument, expectedRevision: number): Promise<SaveOutcome> => {
       // Always sent: only the backend can say whether this tab is still on the accepted revision.
       const result = await saveLearningPath(pathId, { expectedRevision, ...document })
-      if (result.ok) return { kind: 'accepted', revision: result.value.learningPath.revision }
+      if (result.ok) {
+        // Skills and Tasks the save added can now be tracked.
+        void learningRef.current?.refresh()
+        return { kind: 'accepted', revision: result.value.learningPath.revision }
+      }
       const detail = typeof result.body?.detail === 'string' ? result.body.detail : result.error
       if (result.error === 'stale_revision') {
         const current = result.body?.current as PathDocument | undefined
@@ -154,6 +195,7 @@ export function PathEditor({ accountId, initial }: { accountId: string; initial:
     setConnectionRejection(null)
     setLoaded(editorInput(document))
     autosaveRef.current?.reset(document.learningPath.revision)
+    void learningRef.current?.refresh()
   }
 
   const handleSelectListSkill = useCallback((skill: SelectedSkillInfo | null) => {
@@ -162,6 +204,18 @@ export function PathEditor({ accountId, initial }: { accountId: string; initial:
   }, [])
 
   const selected = skills.find((skill) => skill.id === selectedId)
+
+  const records = learning.records
+  const skillTitles = useMemo(() => new Map(skills.map((skill) => [skill.id, skill.title])), [skills])
+  const taskTitles = useMemo(() => new Map([
+    ...(records?.tasks ?? []).map((task) => [task.taskId, task.title] as const),
+    ...skills.flatMap((skill) => skill.tasks.map((task) => [task.id, task.title] as const)),
+  ]), [skills, records])
+  const labelStatus = useMemo(() => records
+    ? Object.fromEntries(records.skills.map((skill) => [skill.skillId, { locked: !skill.access, mastered: skill.mastery }]))
+    : undefined, [records])
+  const learningSkill = (id: string) => records?.skills.find((skill) => skill.skillId === id)
+  const act = (action: LearningAction) => void learningRef.current?.perform(action)
 
   return (
     <div id="path-editor" data-path-id={pathId} data-gpu-status={gpuStatus} className="flex-1 min-h-0 flex flex-col">
@@ -183,6 +237,13 @@ export function PathEditor({ accountId, initial }: { accountId: string; initial:
             className="flex-1 text-xs text-slate-200 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded px-2 py-1"
           />
         </label>
+        <LearningStatus
+          view={learning}
+          describe={(action) => describeAction(action, taskTitles, skillTitles)}
+          onRetry={() => void learningRef.current?.retry()}
+          onDismiss={() => learningRef.current?.dismiss()}
+          onReload={() => void learningRef.current?.refresh()}
+        />
         <SaveStatus state={saveState} onRetry={() => autosaveRef.current?.retry()} onLoadAccepted={loadAccepted} />
       </div>
       <section className="w-full flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden relative">
@@ -221,6 +282,7 @@ export function PathEditor({ accountId, initial }: { accountId: string; initial:
             connections={connections}
             selectedSkillId={selectedId}
             onSelectSkill={handleSelectListSkill}
+            renderStatus={(id) => <SkillStatusChips skill={learningSkill(id)} />}
             className="flex-1 min-h-0"
           />
         </div>
@@ -235,6 +297,7 @@ export function PathEditor({ accountId, initial }: { accountId: string; initial:
           onOperationCompleted={edited}
           onCameraChanged={handleCameraChanged}
           onGpuStatusChange={setGpuStatus}
+          labelStatus={labelStatus}
         />
         <SkillDetailPanel
           selectedSkill={selectedSkill}
@@ -249,6 +312,8 @@ export function PathEditor({ accountId, initial }: { accountId: string; initial:
           onUpdateTask={handleUpdateTask}
           onUpdateOutcome={handleUpdateOutcome}
           onAddTask={handleAddTask}
+          learning={selectedId && <SkillLearning view={learning} skillId={selectedId} skillTitles={skillTitles} taskTitles={taskTitles} onAction={act} />}
+          renderTaskExtra={(taskId) => <TaskLearning view={learning} taskId={taskId} onAction={act} />}
         />
       </section>
     </div>

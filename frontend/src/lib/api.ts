@@ -87,3 +87,76 @@ export const readLearningPath = (pathId: string) => call<PathDocument>(`/persona
 /** Saves the whole document; a stale save answers 409 with the accepted document in `body.current`. */
 export const saveLearningPath = (pathId: string, save: PathSave) =>
   call<PathDocument>(`/personal/learning-paths/${encodeURIComponent(pathId)}/document`, { method: 'PUT', body: save })
+
+/** A Skill's current Access, Mastery and rule as the backend derives them for the owner. */
+export interface LearningSkill {
+  skillId: string
+  title: string
+  learningOutcome: string
+  xpThreshold: number
+  mastery: boolean
+  access: boolean
+  accessOverride: { action: 'grant' } | null
+  unmetPrerequisiteSkillIds: string[]
+  xpShortfall: number
+}
+
+export interface LearningTask {
+  taskId: string
+  skillId: string
+  title: string
+  xpReward: number
+  completed: boolean
+  xpContribution: number
+  archivedAt: string | null
+}
+
+/** One recorded change in a Task's contribution: its first completion is the award, later ones corrections. */
+export interface XpEvent {
+  id: number
+  taskId: string
+  occurredAt: string
+  kind: 'award' | 'correction'
+  cause: 'completion' | 'completion_undone' | 'reward_change'
+  amount: number
+}
+
+/**
+ * A personal Path's learning records (ADR 0001, 0009): XP from this Path only, the
+ * owner's Mastery declarations and overrides, and the XP history explaining the total.
+ * They live outside the Path document and never change its revision.
+ */
+export interface LearningState {
+  learningPathId: string
+  xp: number
+  skills: LearningSkill[]
+  tasks: LearningTask[]
+  xpHistory: XpEvent[]
+  masteryHistory: { id: number; skillId: string; occurredAt: string; action: 'declare' | 'withdraw' }[]
+  overrideHistory: { skillId: string; occurredAt: string; action: 'grant' | 'revoke' }[]
+}
+
+/** One owner action on the Path's learning records; every one is idempotent, so a retry never multiplies it. */
+export type LearningAction =
+  | { kind: 'complete' | 'undo-completion'; taskId: string }
+  | { kind: 'reward'; taskId: string; xpReward: number }
+  | { kind: 'mastery' | 'override'; skillId: string; on: boolean }
+  | { kind: 'threshold'; skillId: string; xpThreshold: number }
+
+const learningRoute = (pathId: string) => `/personal/learning-paths/${encodeURIComponent(pathId)}`
+
+export const readLearningState = (pathId: string) => call<{ learningState: LearningState }>(`${learningRoute(pathId)}/learning-state`)
+
+export function performLearningAction(pathId: string, action: LearningAction) {
+  const at = learningRoute(pathId)
+  const target = (kind: 'tasks' | 'skills', id: string, segment: string) => `${at}/${kind}/${encodeURIComponent(id)}/${segment}`
+  type Changed = { changed: boolean; learningState: LearningState }
+  switch (action.kind) {
+    case 'complete': return call<Changed>(target('tasks', action.taskId, 'completion'), { method: 'PUT' })
+    case 'undo-completion': return call<Changed>(target('tasks', action.taskId, 'completion'), { method: 'DELETE' })
+    case 'reward': return call<Changed>(target('tasks', action.taskId, 'reward'), { method: 'PUT', body: { xpReward: action.xpReward } })
+    case 'mastery': return call<Changed>(target('skills', action.skillId, 'mastery'), { method: action.on ? 'PUT' : 'DELETE' })
+    case 'override': return call<Changed>(target('skills', action.skillId, 'access-override'), { method: action.on ? 'PUT' : 'DELETE' })
+    case 'threshold': return call<Changed>(target('skills', action.skillId, 'xp-threshold'), { method: 'PUT', body: { xpThreshold: action.xpThreshold } })
+  }
+}

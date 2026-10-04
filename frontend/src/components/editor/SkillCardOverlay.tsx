@@ -9,12 +9,17 @@ interface SkillCardOverlayProps {
   /** Engine camera from CameraChanged; places every label through one transform. */
   camera: CameraState
   benchmarkRevision?: LabelRevision
+  /** Learning status per card, in modes that track it; absent in the P1 editor. */
+  status?: Record<string, LabelStatus>
 }
+
+export interface LabelStatus { locked: boolean; mastered: boolean }
 
 export const SkillCardOverlay: React.FC<SkillCardOverlayProps> = ({
   labels,
   camera,
   benchmarkRevision,
+  status,
 }) => {
   const renderStart = performance.now()
   // Layout effects run after DOM mutation but before the browser may paint.
@@ -59,6 +64,17 @@ export const SkillCardOverlay: React.FC<SkillCardOverlayProps> = ({
               >
                 Skill
               </span>
+              {status?.[label.card_id] && (
+                <span
+                  id={`card-status-${label.card_id}`}
+                  data-locked={status[label.card_id].locked}
+                  data-mastered={status[label.card_id].mastered}
+                  className="flex gap-1 text-[9px] font-mono"
+                >
+                  {status[label.card_id].locked && <span className="px-1 rounded bg-red-950/70 text-red-300">Locked</span>}
+                  {status[label.card_id].mastered && <span className="px-1 rounded bg-violet-950/70 text-violet-300">Mastery</span>}
+                </span>
+              )}
               {label.selected && (
                 <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shadow-[0_0_6px_#60a5fa]" />
               )}
@@ -77,7 +93,7 @@ export const SkillCardOverlay: React.FC<SkillCardOverlayProps> = ({
           </span>
         </div>
       )),
-    [labels]
+    [labels, status]
   )
 
   return (

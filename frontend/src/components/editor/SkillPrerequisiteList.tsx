@@ -14,6 +14,8 @@ interface SkillPrerequisiteListProps {
   onSelectSkill: (skill: SelectedSkillInfo | null) => void
   disabled?: boolean
   className?: string
+  /** A Skill's current status (e.g. Access and Mastery), shown under its title. */
+  renderStatus?: (skillId: string) => React.ReactNode
 }
 
 export const SkillPrerequisiteList: React.FC<SkillPrerequisiteListProps> = ({
@@ -23,6 +25,7 @@ export const SkillPrerequisiteList: React.FC<SkillPrerequisiteListProps> = ({
   onSelectSkill,
   disabled = false,
   className = '',
+  renderStatus,
 }) => {
   const listRef = useRef<HTMLDivElement | null>(null)
   const items = useMemo(
@@ -177,6 +180,8 @@ export const SkillPrerequisiteList: React.FC<SkillPrerequisiteListProps> = ({
                   {skill.tasks.length} {skill.tasks.length === 1 ? 'task' : 'tasks'}
                 </span>
               </div>
+
+              {renderStatus?.(skill.id)}
 
               {/* Prerequisites description */}
               <div className="mt-1 flex flex-wrap gap-1 items-center text-[10px]">

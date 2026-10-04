@@ -185,6 +185,7 @@ All routes require trusted identity and act only for the Personal Workspace owne
 | `POST …/tasks/:taskId/archive` | One-way archival; no restoration policy is defined |
 | `PUT` / `DELETE …/skills/:skillId/mastery` | Declare / withdraw Mastery freely |
 | `PUT` / `DELETE …/skills/:skillId/access-override` | Grant / revoke a personal Access Override |
+| `PUT …/skills/:skillId/xp-threshold` `{ "xpThreshold": 40 }` | Sets the Skill's XP Threshold (T17); integer 0–1,000,000,000, otherwise 422 `invalid_threshold` |
 
 - Mutations answer 200 `{ "changed", "learningState" }` after commit. A repeat (already complete, same reward, already declared/granted, …) answers `changed: false` and records nothing. Completion or start on a locked Skill returns 403 `skill_locked`; any change to an archived Task returns 409 `task_archived`.
 - `learningState` holds `xp`, `tasks` (definition, `startedAt`, `completed`, `completedAt`, `archivedAt`, `xpContribution`), `skills` (definition, `mastery`, `masteryDeclaredAt`, `access`, `accessOverride`, `unmetPrerequisiteSkillIds`, `xpShortfall`), and the ordered `xpHistory`, `masteryHistory` and `overrideHistory`.
@@ -207,7 +208,9 @@ A personal Path is saved as one document (`src/authoring.ts`, ADR 0016), shaped 
 - `learning_paths.revision` is the concurrency revision, distinct from a Learning Path Version and the snapshot format version. Under the Path row lock, a save whose `expectedRevision` is not the current revision answers 409 `stale_revision` with `current` (the accepted document) and writes nothing.
 - The whole save is refused, writing nothing, when it breaks an identity rule: a Skill ID already owned by another Path (409 `skill_owned_elsewhere`; the `skills` primary key decides concurrent claims), a Task ID owned elsewhere (409 `task_owned_elsewhere`), a Task under a different Skill than its own (409 `task_skill_mismatch`), or an archived Task (409 `task_archived`). Removing a stored Skill or active Task is 422 `skill_missing` / `task_missing`: deletion and archival from the editor follow in T30/T32.
 - Shape and association are checked before the database: every Skill has exactly one card with the same title, IDs are unique UUIDs, positions are finite within ±1,000,000, text is within its limits (422 `invalid_document`). Connections must join two Skills of the document (422 `connection_outside_path`) and keep the Prerequisite Graph acyclic, self-edges included (422 `prerequisite_cycle`). An invalid edit to a Path the caller does not own still answers 404.
-- Saves never write Task rewards, completion, starts, archival, Mastery, XP Thresholds or overrides: those stay with the T13 learning routes and their histories.
+- Saves never write Task rewards, completion, starts, archival, Mastery, XP Thresholds or overrides: those stay with the T13 learning routes and their histories. Those routes in turn never change the document revision, so tracking progress never makes an open editor stale.
+
+A threshold is a progression rule rather than a learning record: it has no history, and changing it changes Access only (a higher one relocks started work while keeping completions, XP and declared Mastery). `bun test test/personal-tracking.test.ts` (T17) exercises it and the learning routes on Paths authored through these document routes, including Path-local XP across two authored Paths.
 
 `bun test test/authoring.test.ts` covers several Paths per owner with their own goal, Skills, Tasks and cards; reopening; the snapshot/payload split; learning records untouched by saves; the owner-only matrix; identity and graph refusals with no partial writes; concurrent Skill ID claims; stale and competing saves.
 
