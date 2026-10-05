@@ -1,10 +1,17 @@
+import { Link } from '@tanstack/react-router'
 import type { Account } from '../../lib/api'
 
+/** The learning context a page acts in; a coach context may name its Workspace. */
+export type LearningContext = { kind: 'personal' } | { kind: 'coach'; workspaceName?: string }
+
 /**
- * Names the active learning context and the signed-in Account (US05, ADR 0010).
- * Personal mode is a context of the Account, not an Account type.
+ * Names the active learning context and the signed-in Account (US05, ADR 0010), and
+ * switches between them. Personal and Coach are contexts of one Account, not Account
+ * types; each page shows only its own context's data.
  */
-export function ContextHeader({ account, onSignOut }: { account: Account | null; onSignOut?: () => void }) {
+export function ContextHeader({ account, onSignOut, context = { kind: 'personal' } }: { account: Account | null; onSignOut?: () => void; context?: LearningContext }) {
+  const contextName = context.kind === 'personal' ? 'Personal Workspace' : `Coaching${context.workspaceName ? ` · ${context.workspaceName}` : ''}`
+  const switchClass = (active: boolean) => `px-2 py-0.5 rounded-md border ${active ? 'text-slate-100 border-slate-600 bg-slate-800' : 'text-slate-400 border-transparent hover:text-slate-200'}`
   return (
     <header className="h-11 shrink-0 bg-slate-900/90 border-b border-slate-800/80 px-4 flex items-center justify-between">
       <div className="flex items-center gap-2.5">
@@ -15,9 +22,13 @@ export function ContextHeader({ account, onSignOut }: { account: Account | null;
         {account && (
           <>
             <span className="text-slate-600 text-xs">/</span>
-            <span id="active-context" data-context="personal" className="text-xs text-emerald-300 font-medium">
-              Personal Workspace
+            <span id="active-context" data-context={context.kind} className={`text-xs font-medium ${context.kind === 'personal' ? 'text-emerald-300' : 'text-sky-300'}`}>
+              {contextName}
             </span>
+            <nav id="context-switch" aria-label="Learning context" className="ml-3 flex items-center gap-1 text-[11px]">
+              <Link id="switch-to-personal" to="/" aria-current={context.kind === 'personal' ? 'page' : undefined} className={switchClass(context.kind === 'personal')}>Personal</Link>
+              <Link id="switch-to-coach" to="/coach" aria-current={context.kind === 'coach' ? 'page' : undefined} className={switchClass(context.kind === 'coach')}>Coaching</Link>
+            </nav>
           </>
         )}
       </div>

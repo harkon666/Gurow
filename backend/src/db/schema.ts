@@ -71,7 +71,11 @@ export const learningPathVersions = pgTable('learning_path_versions', {
   publishedAt: timestamp('published_at', { withTimezone: true }),
   enrollmentClosedAt: timestamp('enrollment_closed_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [unique('learning_path_versions_path_number_key').on(t.learningPathId, t.versionNumber)])
+}, (t) => [
+  unique('learning_path_versions_path_number_key').on(t.learningPathId, t.versionNumber),
+  // An unpublished Version is the Path's Learning Path Draft: at most one per Path.
+  uniqueIndex('learning_path_versions_one_draft_key').on(t.learningPathId).where(sql`${t.publishedAt} IS NULL`),
+])
 
 /**
  * A Skill's logical identity, stable across the Versions of its one Learning
@@ -95,6 +99,10 @@ export const versionSkills = pgTable('version_skills', {
   title: text('title').notNull(),
   learningOutcome: text('learning_outcome').notNull(),
   xpThreshold: integer('xp_threshold').notNull().default(0),
+  /** Optional Skill: enrichment a learner may skip; it must not be a Prerequisite of a required Skill. */
+  optional: boolean('optional').notNull().default(false),
+  /** Position in the Version's Skill list, as last saved by the Coach. */
+  ordinal: integer('ordinal').notNull().default(0),
 }, (t) => [
   primaryKey({ columns: [t.learningPathVersionId, t.skillId] }),
   check('version_skills_xp_threshold_nonnegative', sql`${t.xpThreshold} >= 0`),
@@ -121,12 +129,30 @@ export const versionTasks = pgTable('version_tasks', {
   /** Required Task: mandatory evidence for Mastery of its Skill; otherwise an Enrichment Task. */
   required: boolean('required').notNull(),
   xpReward: integer('xp_reward').notNull().default(0),
+  description: text('description').notNull().default(''),
+  /** Position in its Skill's Task list, as last saved by the Coach. */
+  ordinal: integer('ordinal').notNull().default(0),
 }, (t) => [
   primaryKey({ columns: [t.learningPathVersionId, t.taskId] }),
   check('version_tasks_xp_reward_nonnegative', sql`${t.xpReward} >= 0`),
   // The definition sits under the Skill that owns the Task.
   foreignKey({ columns: [t.taskId, t.skillId], foreignColumns: [tasks.id, tasks.skillId] }),
   foreignKey({ columns: [t.learningPathVersionId, t.skillId], foreignColumns: [versionSkills.learningPathVersionId, versionSkills.skillId] }),
+])
+
+/**
+ * The one flat, manually positioned card of a Skill in one Version: that Version's
+ * Canvas Layout, kept apart from its learning content (ADR 0005, 0015).
+ */
+export const versionSkillCards = pgTable('version_skill_cards', {
+  learningPathVersionId: uuid('learning_path_version_id').notNull(),
+  skillId: uuid('skill_id').notNull(),
+  x: doublePrecision('x').notNull(),
+  y: doublePrecision('y').notNull(),
+}, (t) => [
+  primaryKey({ name: 'version_skill_cards_pk', columns: [t.learningPathVersionId, t.skillId] }),
+  foreignKey({ name: 'version_skill_cards_skill_fk', columns: [t.learningPathVersionId, t.skillId], foreignColumns: [versionSkills.learningPathVersionId, versionSkills.skillId] }),
+  check('version_skill_cards_bounds', sql`abs(${t.x}) <= 1000000 AND abs(${t.y}) <= 1000000`),
 ])
 
 /** An offer to join exactly one published Version, addressed to one email. */

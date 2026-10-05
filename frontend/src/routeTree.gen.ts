@@ -12,8 +12,11 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as EditorRouteImport } from './routes/editor'
 import { Route as ApiSplatRouteImport } from './routes/api/$'
+import { Route as CoachIndexRouteImport } from './routes/coach.index'
 import { Route as PathsPathIdRouteImport } from './routes/paths.$pathId'
 import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces.$workspaceId'
+import { Route as CoachPathsPathIdRouteImport } from './routes/coach.paths.$pathId'
+import { Route as CoachWorkspacesWorkspaceIdRouteImport } from './routes/coach.workspaces.$workspaceId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -30,6 +33,11 @@ const ApiSplatRoute = ApiSplatRouteImport.update({
   path: '/api/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CoachIndexRoute = CoachIndexRouteImport.update({
+  id: '/coach/',
+  path: '/coach/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PathsPathIdRoute = PathsPathIdRouteImport.update({
   id: '/paths/$pathId',
   path: '/paths/$pathId',
@@ -40,6 +48,17 @@ const WorkspacesWorkspaceIdRoute = WorkspacesWorkspaceIdRouteImport.update({
   path: '/workspaces/$workspaceId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CoachPathsPathIdRoute = CoachPathsPathIdRouteImport.update({
+  id: '/coach/paths/$pathId',
+  path: '/coach/paths/$pathId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CoachWorkspacesWorkspaceIdRoute =
+  CoachWorkspacesWorkspaceIdRouteImport.update({
+    id: '/coach/workspaces/$workspaceId',
+    path: '/coach/workspaces/$workspaceId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -47,6 +66,9 @@ export interface FileRoutesByFullPath {
   '/api/$': typeof ApiSplatRoute
   '/paths/$pathId': typeof PathsPathIdRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
+  '/coach/': typeof CoachIndexRoute
+  '/coach/paths/$pathId': typeof CoachPathsPathIdRoute
+  '/coach/workspaces/$workspaceId': typeof CoachWorkspacesWorkspaceIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -54,6 +76,9 @@ export interface FileRoutesByTo {
   '/api/$': typeof ApiSplatRoute
   '/paths/$pathId': typeof PathsPathIdRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
+  '/coach': typeof CoachIndexRoute
+  '/coach/paths/$pathId': typeof CoachPathsPathIdRoute
+  '/coach/workspaces/$workspaceId': typeof CoachWorkspacesWorkspaceIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -62,13 +87,31 @@ export interface FileRoutesById {
   '/api/$': typeof ApiSplatRoute
   '/paths/$pathId': typeof PathsPathIdRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
+  '/coach/': typeof CoachIndexRoute
+  '/coach/paths/$pathId': typeof CoachPathsPathIdRoute
+  '/coach/workspaces/$workspaceId': typeof CoachWorkspacesWorkspaceIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    '/' | '/editor' | '/api/$' | '/paths/$pathId' | '/workspaces/$workspaceId'
+    | '/'
+    | '/editor'
+    | '/api/$'
+    | '/paths/$pathId'
+    | '/workspaces/$workspaceId'
+    | '/coach/'
+    | '/coach/paths/$pathId'
+    | '/coach/workspaces/$workspaceId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/editor' | '/api/$' | '/paths/$pathId' | '/workspaces/$workspaceId'
+  to:
+    | '/'
+    | '/editor'
+    | '/api/$'
+    | '/paths/$pathId'
+    | '/workspaces/$workspaceId'
+    | '/coach'
+    | '/coach/paths/$pathId'
+    | '/coach/workspaces/$workspaceId'
   id:
     | '__root__'
     | '/'
@@ -76,6 +119,9 @@ export interface FileRouteTypes {
     | '/api/$'
     | '/paths/$pathId'
     | '/workspaces/$workspaceId'
+    | '/coach/'
+    | '/coach/paths/$pathId'
+    | '/coach/workspaces/$workspaceId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -84,6 +130,9 @@ export interface RootRouteChildren {
   ApiSplatRoute: typeof ApiSplatRoute
   PathsPathIdRoute: typeof PathsPathIdRoute
   WorkspacesWorkspaceIdRoute: typeof WorkspacesWorkspaceIdRoute
+  CoachIndexRoute: typeof CoachIndexRoute
+  CoachPathsPathIdRoute: typeof CoachPathsPathIdRoute
+  CoachWorkspacesWorkspaceIdRoute: typeof CoachWorkspacesWorkspaceIdRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -109,6 +158,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/coach/': {
+      id: '/coach/'
+      path: '/coach'
+      fullPath: '/coach/'
+      preLoaderRoute: typeof CoachIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/paths/$pathId': {
       id: '/paths/$pathId'
       path: '/paths/$pathId'
@@ -123,6 +179,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspacesWorkspaceIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/coach/paths/$pathId': {
+      id: '/coach/paths/$pathId'
+      path: '/coach/paths/$pathId'
+      fullPath: '/coach/paths/$pathId'
+      preLoaderRoute: typeof CoachPathsPathIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/coach/workspaces/$workspaceId': {
+      id: '/coach/workspaces/$workspaceId'
+      path: '/coach/workspaces/$workspaceId'
+      fullPath: '/coach/workspaces/$workspaceId'
+      preLoaderRoute: typeof CoachWorkspacesWorkspaceIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -132,6 +202,9 @@ const rootRouteChildren: RootRouteChildren = {
   ApiSplatRoute: ApiSplatRoute,
   PathsPathIdRoute: PathsPathIdRoute,
   WorkspacesWorkspaceIdRoute: WorkspacesWorkspaceIdRoute,
+  CoachIndexRoute: CoachIndexRoute,
+  CoachPathsPathIdRoute: CoachPathsPathIdRoute,
+  CoachWorkspacesWorkspaceIdRoute: CoachWorkspacesWorkspaceIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

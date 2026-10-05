@@ -16,8 +16,14 @@ export const SNAPSHOT_FORMAT_VERSION = 1
 
 export interface CardInput { id: string; title: string; position: { x: number; y: number } }
 export interface ConnectionInput { from_id: string; to_id: string }
-export interface TaskInput { id: string; title: string; description: string }
-export interface SkillInput { id: string; title: string; outcome: string; tasks: TaskInput[] }
+/**
+ * `required` and `xpReward` (Task) and `optional` and `xpThreshold` (Skill) are
+ * Draft content in coach mode; personal documents carry none of them, since
+ * personal rewards and thresholds are the owner's learning records.
+ */
+export interface TaskInput { id: string; title: string; description: string; required?: boolean; xpReward?: number }
+export interface SkillInput { id: string; title: string; outcome: string; optional?: boolean; xpThreshold?: number; tasks: TaskInput[] }
+export type DocumentMode = 'personal' | 'coach'
 
 /** The owner's edit, based on `expectedRevision`. */
 export interface DocumentInput {
@@ -28,12 +34,13 @@ export interface DocumentInput {
   application: { skills: SkillInput[] }
 }
 
-export const LIMITS = { title: 200, goal: 2_000, outcome: 2_000, description: 10_000, skills: 1_000, tasks: 5_000, connections: 5_000, coordinate: 1_000_000 }
+export const LIMITS = { title: 200, goal: 2_000, outcome: 2_000, description: 10_000, skills: 1_000, tasks: 5_000, connections: 5_000, coordinate: 1_000_000, xpReward: 1_000_000, xpThreshold: 1_000_000_000 }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 type Parsed<T> = { ok: true; value: T } | { ok: false; detail: string }
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value)
 const isText = (value: unknown, max: number): value is string => typeof value === 'string' && value.length <= max
+const isAmount = (value: unknown, max: number): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= max
 
 /** Validates a new Path's title and goal; the title must name the Path. */
 export function parsePathInput(body: unknown): Parsed<{ title: string; goal: string }> {
@@ -44,13 +51,18 @@ export function parsePathInput(body: unknown): Parsed<{ title: string; goal: str
   return { ok: true, value: { title, goal } }
 }
 
+export type DocumentRefusal = 'prerequisite_cycle' | 'connection_outside_path' | 'optional_prerequisite'
+
 /**
  * Checks a document's shape and its internal association: every card names
  * exactly one Skill of the payload with the same title, IDs are unique, and
  * connections join two distinct Skills of this document without forming a cycle.
+ * In coach mode it also checks the Draft's rules: every Task is Required or
+ * Enrichment with a reward, every Skill has an XP Threshold and is required or
+ * Optional, and no Optional Skill is a Prerequisite of a required Skill.
  * Ownership of the IDs is checked later, against the database.
  */
-export function parseDocumentInput(body: unknown): Parsed<DocumentInput> | { ok: false; refusal: 'prerequisite_cycle' | 'connection_outside_path'; detail: string } {
+export function parseDocumentInput(body: unknown, mode: DocumentMode = 'personal'): Parsed<DocumentInput> | { ok: false; refusal: DocumentRefusal; detail: string } {
   const fail = (detail: string) => ({ ok: false as const, detail })
   if (!isObject(body) || !isObject(body.editor) || !isObject(body.application)) return fail('expected expectedRevision, title, goal, editor and application')
   const { expectedRevision, title, goal, editor, application } = body
@@ -72,6 +84,9 @@ export function parseDocumentInput(body: unknown): Parsed<DocumentInput> | { ok:
     ids.add(skill.id.toLowerCase())
     if (!isText(skill.title, LIMITS.title) || !isText(skill.outcome, LIMITS.outcome)) return fail(`Skill ${skill.id} needs a title and learning outcome within the length limits`)
     if (!Array.isArray(skill.tasks)) return fail(`Skill ${skill.id} needs a tasks array`)
+    if (mode === 'coach' && (typeof skill.optional !== 'boolean' || !isAmount(skill.xpThreshold, LIMITS.xpThreshold))) {
+      return fail(`Skill ${skill.id} needs optional (true or false) and an xpThreshold of 0–${LIMITS.xpThreshold}`)
+    }
     taskCount += skill.tasks.length
     if (taskCount > LIMITS.tasks) return fail('too many Tasks')
     const parsedTasks: TaskInput[] = []
@@ -80,9 +95,16 @@ export function parseDocumentInput(body: unknown): Parsed<DocumentInput> | { ok:
       if (ids.has(task.id.toLowerCase())) return fail(`ID ${task.id} is used twice`)
       ids.add(task.id.toLowerCase())
       if (!isText(task.title, LIMITS.title) || !isText(task.description, LIMITS.description)) return fail(`Task ${task.id} needs a title and description within the length limits`)
-      parsedTasks.push({ id: task.id.toLowerCase(), title: task.title, description: task.description })
+      if (mode === 'coach') {
+        if (typeof task.required !== 'boolean' || !isAmount(task.xpReward, LIMITS.xpReward)) return fail(`Task ${task.id} needs required (true or false) and an xpReward of 0–${LIMITS.xpReward}`)
+        parsedTasks.push({ id: task.id.toLowerCase(), title: task.title, description: task.description, required: task.required, xpReward: task.xpReward })
+      } else {
+        parsedTasks.push({ id: task.id.toLowerCase(), title: task.title, description: task.description })
+      }
     }
-    parsedSkills.push({ id: skill.id.toLowerCase(), title: skill.title, outcome: skill.outcome, tasks: parsedTasks })
+    parsedSkills.push(mode === 'coach'
+      ? { id: skill.id.toLowerCase(), title: skill.title, outcome: skill.outcome, optional: skill.optional as boolean, xpThreshold: skill.xpThreshold as number, tasks: parsedTasks }
+      : { id: skill.id.toLowerCase(), title: skill.title, outcome: skill.outcome, tasks: parsedTasks })
   }
 
   // One flat card per Skill: the snapshot and the payload name the same Skills.
@@ -116,6 +138,12 @@ export function parseDocumentInput(body: unknown): Parsed<DocumentInput> | { ok:
   }
   const cycle = findCycle(parsedSkills.map((skill) => skill.id), parsedConnections)
   if (cycle) return { ok: false, refusal: 'prerequisite_cycle', detail: `the Prerequisites form a cycle through ${cycle.join(' → ')}` }
+  // An Optional Skill may be skipped, so a required Skill cannot depend on it.
+  const optional = new Set(parsedSkills.filter((skill) => skill.optional).map((skill) => skill.id))
+  const blocking = parsedConnections.find((edge) => optional.has(edge.from_id) && !optional.has(edge.to_id))
+  if (blocking) {
+    return { ok: false, refusal: 'optional_prerequisite', detail: `Optional Skill "${skillTitles.get(blocking.from_id)}" cannot be a Prerequisite of required Skill "${skillTitles.get(blocking.to_id)}"` }
+  }
 
   return { ok: true, value: { expectedRevision, title, goal, editor: { format_version: SNAPSHOT_FORMAT_VERSION, cards: parsedCards, connections: parsedConnections }, application: { skills: parsedSkills } } }
 }
@@ -150,7 +178,7 @@ function findCycle(skillIds: string[], connections: ConnectionInput[]): string[]
 }
 
 /** Where a Skill without a stored card is first placed: a simple grid in list order. */
-const defaultPosition = (index: number) => ({ x: 80 + (index % 4) * 240, y: 100 + Math.floor(index / 4) * 160 })
+export const defaultPosition = (index: number) => ({ x: 80 + (index % 4) * 240, y: 100 + Math.floor(index / 4) * 160 })
 
 /** Reads a Path document; archived Tasks are out of active use and not edited here. */
 async function readDocument(tx: Tx, path: typeof learningPaths.$inferSelect) {

@@ -78,6 +78,13 @@
       "when": 1791142113050,
       "tag": "0010_personal_authoring",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791148166892,
+      "tag": "0011_coach_drafts",
+      "breakpoints": true
     }
   ]
 }

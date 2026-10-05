@@ -76,7 +76,14 @@ async function workspacePage(page: Page) {
     contextKind: await page.$eval('#active-context', (el) => (el as HTMLElement).dataset.context),
     email: await text(page, '#account-email'),
     verification: await text(page, '#email-verification-status'),
-    header: await text(page, 'header'),
+    // The context switch (T18) names the contexts one Account can act in; everything else
+    // in the header names the active context and the Account, never an Account type.
+    header: await page.$eval('header', (el) => {
+      const copy = el.cloneNode(true) as HTMLElement
+      copy.querySelector('#context-switch')?.remove()
+      return copy.textContent?.trim() ?? ''
+    }),
+    contextSwitch: await page.$$eval('#context-switch a', (links) => links.map((a) => `${a.textContent}:${a.getAttribute('aria-current') ?? ''}`)),
     paths: await text(page, '#workspace-paths'),
   }
 }
@@ -129,6 +136,7 @@ async function main() {
     check(ada.email === 'ada@gurow.test', `account shown as ${ada.email}`)
     check(ada.verification === 'Email not verified', `new Account shown as ${ada.verification}`)
     check(!/coach|learner/i.test(ada.header), `the header names an Account type: ${ada.header}`)
+    check(JSON.stringify(ada.contextSwitch) === JSON.stringify(['Personal:page', 'Coaching:']), `context switch: ${ada.contextSwitch}`)
     check(ada.paths.includes('No Learning Paths yet.'), `unexpected Workspace contents: ${ada.paths}`)
     pass('sign-up enters a Personal Workspace', `${ada.id}, context "${ada.context}", ${ada.email}, ${ada.verification}`)
 

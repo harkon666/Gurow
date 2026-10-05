@@ -3,6 +3,7 @@ import { createMiddleware } from 'hono/factory'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { sessionIdentity, type Auth } from './auth'
 import * as authoring from './authoring'
+import * as coaching from './coaching'
 import type { Database } from './db/client'
 import { acceptInvitation, readEnrollment, type EnrollmentRefusal } from './enrollments'
 import type { IdentityResolver } from './identity'
@@ -48,6 +49,17 @@ const SAVE_REFUSAL_STATUS: Record<authoring.SaveRefusal, ContentfulStatusCode> =
   task_owned_elsewhere: 409,
   task_skill_mismatch: 409,
   task_archived: 409,
+  skill_missing: 422,
+  task_missing: 422,
+}
+
+const DRAFT_REFUSAL_STATUS: Record<coaching.DraftRefusal, ContentfulStatusCode> = {
+  learning_path_not_found: 404,
+  no_open_draft: 409,
+  stale_revision: 409,
+  skill_owned_elsewhere: 409,
+  task_owned_elsewhere: 409,
+  task_skill_mismatch: 409,
   skill_missing: 422,
   task_missing: 422,
 }
@@ -341,6 +353,60 @@ export function createApp({ db, identity, auth }: { db: Database; identity: Iden
       })
     }
   }
+
+  // Coach mode (ADR 0010, 0011): a Coach Workspace and its Paths answer only to the
+  // Workspace's owner; every other Account, learners included, finds nothing.
+  app.use('/coach/*', authenticate)
+  const coachPath = '/coach/learning-paths/:pathId'
+
+  app.get('/coach/workspaces', async (c) => c.json({ workspaces: await coaching.listCoachWorkspaces(db, c.get('accountId')) }))
+
+  app.post('/coach/workspaces', async (c) => {
+    const input = coaching.parseWorkspaceInput(await c.req.json().catch(() => null))
+    if (!input.ok) return c.json({ error: 'invalid_workspace', detail: input.detail }, 422)
+    return c.json({ workspace: await coaching.createCoachWorkspace(db, c.get('accountId'), input.value) }, 201)
+  })
+
+  app.get('/coach/workspaces/:workspaceId', async (c) => {
+    const workspaceId = c.req.param('workspaceId')
+    const workspace = UUID.test(workspaceId) ? await coaching.readCoachWorkspace(db, workspaceId, c.get('accountId')) : null
+    if (!workspace) return c.json({ error: 'workspace_not_found' }, 404)
+    return c.json(workspace)
+  })
+
+  app.post('/coach/workspaces/:workspaceId/learning-paths', async (c) => {
+    const workspaceId = c.req.param('workspaceId')
+    if (!UUID.test(workspaceId)) return c.json({ error: 'workspace_not_found' }, 404)
+    const input = authoring.parsePathInput(await c.req.json().catch(() => null))
+    // Without ownership there is no Workspace, whatever the body.
+    if (!input.ok) {
+      if (!await coaching.readCoachWorkspace(db, workspaceId, c.get('accountId'))) return c.json({ error: 'workspace_not_found' }, 404)
+      return c.json({ error: 'invalid_learning_path', detail: input.detail }, 422)
+    }
+    const document = await coaching.createCoachPath(db, workspaceId, c.get('accountId'), input.value)
+    if (!document) return c.json({ error: 'workspace_not_found' }, 404)
+    return c.json(document, 201)
+  })
+
+  app.get(coachPath, async (c) => {
+    const pathId = c.req.param('pathId')
+    const document = UUID.test(pathId) ? await coaching.readCoachPath(db, pathId, c.get('accountId')) : null
+    if (!document) return c.json({ error: 'learning_path_not_found' }, 404)
+    return c.json(document)
+  })
+
+  app.put(`${coachPath}/draft`, async (c) => {
+    const pathId = c.req.param('pathId')
+    if (!UUID.test(pathId)) return c.json({ error: 'learning_path_not_found' }, 404)
+    const input = authoring.parseDocumentInput(await c.req.json().catch(() => null), 'coach')
+    if (!input.ok) {
+      if (!await coaching.readCoachPath(db, pathId, c.get('accountId'))) return c.json({ error: 'learning_path_not_found' }, 404)
+      return c.json({ error: 'refusal' in input ? input.refusal : 'invalid_document', detail: input.detail }, 422)
+    }
+    const result = await coaching.saveCoachDraft(db, pathId, c.get('accountId'), input.value)
+    if (!result.ok) return c.json({ error: result.refusal, detail: result.detail, ...(result.current ? { current: result.current } : {}) }, DRAFT_REFUSAL_STATUS[result.refusal])
+    return c.json(result.document)
+  })
 
   app.get('/enrollments/:enrollmentId/learning-state', async (c) => {
     const enrollmentId = c.req.param('enrollmentId')

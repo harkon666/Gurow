@@ -16,10 +16,13 @@ bun --bun run dev
 | `/` | Product entry: sign in or create an Account, then enter its Personal Workspace |
 | `/workspaces/$workspaceId` | The signed-in owner's Personal Workspace; other Accounts see "not available". It rechecks the Account when another tab signs in or out (`src/lib/session.ts`) and when the tab is resumed |
 | `/paths/$pathId` | One personal Learning Path for its owner: the editor autosaves the document (T16), and the learning panels track Task completion, rewards, Mastery declarations, XP Thresholds and Access Overrides, showing only backend-confirmed records (T17) |
+| `/coach` | The owning-Coach context: the Coach Workspaces the Account owns and a form to create one (T18). The header's Personal/Coaching switch changes context; coach pages never read personal data |
+| `/coach/workspaces/$workspaceId` | One Coach Workspace and its Learning Paths, for its owner only |
+| `/coach/paths/$pathId` | A Path's Draft in the same editor, with Draft rules: Required/Enrichment Tasks, rewards, Optional Skills and XP Thresholds |
 | `/editor` | The P1 local-fixture editor (localStorage only, no Account data) until T16 |
 | `/api/*` | Same-origin forwarder to the Hono backend at `GUROW_API_ORIGIN` (default `http://127.0.0.1:3001`) |
 
-For local sign-in, run the backend (`cd ../backend && bun run dev`, with `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL=http://localhost:3000` in `backend/.env`) next to `bun run dev`. Verification links are printed in the backend log. `bun run check:t15` builds the app and runs the browser sign-in check against a separate `gurow_browser_test` database. `bun run check:t17` does the same for the personal learning flow on `gurow_t17_browser_test`.
+For local sign-in, run the backend (`cd ../backend && bun run dev`, with `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL=http://localhost:3000` in `backend/.env`) next to `bun run dev`. Verification links are printed in the backend log. `bun run check:t15` builds the app and runs the browser sign-in check against a separate `gurow_browser_test` database. `bun run check:t17` does the same for the personal learning flow on `gurow_t17_browser_test`. `bun run check:t18` covers Coach Workspaces and Drafts on `gurow_t18_browser_test`.
 
 # Building For Production
 

@@ -17,8 +17,12 @@ export interface PersonalWorkspace {
   learningPaths: { id: string; title: string; goal: string }[]
 }
 
-export interface PathTask { id: string; title: string; description: string }
-export interface PathSkill { id: string; title: string; outcome: string; tasks: PathTask[] }
+/**
+ * `required`/`xpReward` (Task) and `optional`/`xpThreshold` (Skill) are a Coach's
+ * Draft rules; personal Paths have none of them in their document.
+ */
+export interface PathTask { id: string; title: string; description: string; required?: boolean; xpReward?: number }
+export interface PathSkill { id: string; title: string; outcome: string; optional?: boolean; xpThreshold?: number; tasks: PathTask[] }
 
 /**
  * A personal Learning Path as the backend stores it (ADR 0016): the editor snapshot
@@ -28,6 +32,13 @@ export interface PathSkill { id: string; title: string; outcome: string; tasks: 
 export interface PathDocument {
   learningPath: { id: string; personalWorkspaceId: string; title: string; goal: string; revision: number }
   editor: { format_version: 1; cards: { id: string; title: string; position: { x: number; y: number } }[]; connections: { from_id: string; to_id: string }[] }
+  application: { skills: PathSkill[] }
+}
+
+/** What both modes' documents share: the editor snapshot, the application payload and the revision. */
+export interface EditablePathDocument {
+  learningPath: { id: string; title: string; goal: string; revision: number }
+  editor: PathDocument['editor']
   application: { skills: PathSkill[] }
 }
 
@@ -160,3 +171,28 @@ export function performLearningAction(pathId: string, action: LearningAction) {
     case 'threshold': return call<Changed>(target('skills', action.skillId, 'xp-threshold'), { method: 'PUT', body: { xpThreshold: action.xpThreshold } })
   }
 }
+
+/** A Coach Workspace the signed-in Account owns (ADR 0011). */
+export interface CoachWorkspaceSummary { id: string; name: string; createdAt: string }
+export interface CoachWorkspace { workspace: CoachWorkspaceSummary; learningPaths: { id: string; title: string; goal: string }[] }
+
+/** A coach-mode Path with its open Draft, the Path's one unpublished Version. */
+export interface CoachPathDocument extends EditablePathDocument {
+  learningPath: { id: string; coachWorkspaceId: string; title: string; goal: string; revision: number }
+  draft: { id: string; versionNumber: number } | null
+}
+
+export const listCoachWorkspaces = () => call<{ workspaces: CoachWorkspaceSummary[] }>('/coach/workspaces')
+
+export const createCoachWorkspace = (name: string) => call<{ workspace: CoachWorkspaceSummary }>('/coach/workspaces', { method: 'POST', body: { name } })
+
+export const readCoachWorkspace = (workspaceId: string) => call<CoachWorkspace>(`/coach/workspaces/${encodeURIComponent(workspaceId)}`)
+
+export const createCoachPath = (workspaceId: string, title: string, goal: string) =>
+  call<CoachPathDocument>(`/coach/workspaces/${encodeURIComponent(workspaceId)}/learning-paths`, { method: 'POST', body: { title, goal } })
+
+export const readCoachPath = (pathId: string) => call<CoachPathDocument>(`/coach/learning-paths/${encodeURIComponent(pathId)}`)
+
+/** Saves the whole Draft; a stale save answers 409 with the accepted document in `body.current`. */
+export const saveCoachDraft = (pathId: string, save: PathSave) =>
+  call<CoachPathDocument>(`/coach/learning-paths/${encodeURIComponent(pathId)}/draft`, { method: 'PUT', body: save })

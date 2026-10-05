@@ -214,6 +214,26 @@ A threshold is a progression rule rather than a learning record: it has no histo
 
 `bun test test/authoring.test.ts` covers several Paths per owner with their own goal, Skills, Tasks and cards; reopening; the snapshot/payload split; learning records untouched by saves; the owner-only matrix; identity and graph refusals with no partial writes; concurrent Skill ID claims; stale and competing saves.
 
+## Coach Workspaces and Learning Path Drafts (T18)
+
+`src/coaching.ts` serves the owning-Coach context (ADR 0010, 0011). A Coach Workspace has exactly one owner, its Coach, whose authority covers the Paths inside it and nothing else. Every other Account, including learners of those Paths and other Coaches, receives 404 for the Workspace, its Paths and their Drafts; anonymous requests receive 401. Coach routes never open personal Paths, and personal routes never open coach-mode Paths.
+
+| Route | Effect |
+| --- | --- |
+| `GET /coach/workspaces` | The Coach Workspaces the caller owns |
+| `POST /coach/workspaces` `{ name }` | 201 with a new Workspace owned by the caller; a blank name is 422 `invalid_workspace` |
+| `GET /coach/workspaces/:workspaceId` | `{ workspace, learningPaths }` for the owner |
+| `POST /coach/workspaces/:workspaceId/learning-paths` `{ title, goal }` | 201 with the new Path and its first Draft (Version 1, unpublished) |
+| `GET /coach/learning-paths/:pathId` | `{ learningPath: { id, coachWorkspaceId, title, goal, revision }, draft: { id, versionNumber } \| null, editor, application }` |
+| `PUT /coach/learning-paths/:pathId/draft` `{ expectedRevision, title, goal, editor, application }` | Saves the whole Draft against the Path revision, as in T16 |
+
+- A Learning Path Draft is the Path's one unpublished `learning_path_versions` row (`learning_path_versions_one_draft_key`); its content lives in `version_skills`, `version_tasks`, `version_prerequisites` and its Canvas Layout in `version_skill_cards` (migration `0011_coach_drafts`). Nobody can enrol in it (409 `version_not_published`), so a Draft never awards XP or Mastery. Publication follows in T19.
+- The document is the T16 document plus the Draft's rules. Each Skill has `optional` and `xpThreshold` (0–1,000,000,000), and each Task has `required` and `xpReward` (0–1,000,000). Missing or out-of-range values are 422 `invalid_document`. Incomplete Drafts are accepted, for example a required Skill with no Required Task.
+- Besides the T16 checks (`prerequisite_cycle`, `connection_outside_path`), a connection from an Optional Skill to a required Skill is 422 `optional_prerequisite`, with both titles in `detail`.
+- Skill and Task IDs are claimed for the Path: an ID of another Path (personal or coach) is 409 `skill_owned_elsewhere` / `task_owned_elsewhere`, and a Task under another Skill is 409 `task_skill_mismatch`. A stale `expectedRevision` is 409 `stale_revision` with `current`. Removing a Skill or Task is 422 `skill_missing` / `task_missing` until T32. In every case nothing is written.
+
+`bun test test/coach-authoring.test.ts` covers Workspace ownership and the full non-owner matrix, two Paths on one subject, ID claims across Paths and modes, every Draft rule and its validation, the Optional-Prerequisite rule, cycles and outside connections, no enrolment in a Draft, stale and competing saves.
+
 ## P2 gate (T14)
 
 `bun test test/p2-gate.test.ts` runs competing requests across Enrollment, Submission, Review, revocation, override and lifecycle boundaries over the SPEC reference Path, plus the end-to-end reference flow, privacy matrix, lifecycle and personal 20→50 checks. Forced orders hold a row lock from a separate connection and observe `pg_blocking_pids` before starting the competing request. Unforced storms assert order-independent invariants in SQL at full timestamp precision. These invariants cover contiguous revision numbers, supersession at the successor's send, no Review on superseded work, no successor sent while a reviewed revision was pending, events at their causal time, one Submission per Task, and no revision sent while inactive. They also check that each Task's contribution moves only between zero and its reward. Results are recorded in [the P2 gate report](../docs/validation/t14-p2-gate-report.md).
