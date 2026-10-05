@@ -166,6 +166,9 @@ async function main() {
     await page.evaluate(() => localStorage.clear())
     await page.reload({ waitUntil: 'networkidle0' })
     await page.waitForSelector('#card-label-skill-rust-basics')
+    // Labels and the badge text appear while the renderer is still initializing; "+ Skill"
+    // is enabled only once it is ready, and a click before that does nothing.
+    await page.waitForSelector('#editor-add-card-btn:not([disabled])')
     const badge = await page.$eval('#gpu-status-badge', el => el.textContent ?? '')
     check(badge.includes('WebGPU Rust Editor'), `WebGPU renderer not active: "${badge}"`)
     const fixtureIds = (await labels(page)).map(l => l.id)
