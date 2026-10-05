@@ -6,7 +6,7 @@ import { enrollments, versionPrerequisites, versionSkills, versionTasks } from '
 import { FIXTURE_IDENTITY_HEADER, fixtureIdentity } from '../src/identity'
 import { waitForBlockedBy } from './support/blocking'
 import { prepareTestDatabase, resetTestDatabase, TEST_DATABASE_URL } from './support/database'
-import { seedEnrollmentFixture, type EnrollmentFixture } from './support/fixtures'
+import { amendPublished, seedEnrollmentFixture, type EnrollmentFixture } from './support/fixtures'
 
 let db: Database, close: () => Promise<void>, fx: EnrollmentFixture, app: ReturnType<typeof createApp>, enrollmentId: string
 beforeAll(async () => { ({ db, close } = await prepareTestDatabase()) })
@@ -16,8 +16,8 @@ beforeEach(async () => {
   fx = await seedEnrollmentFixture(db)
   app = createApp({ db, identity: fixtureIdentity(fx.identities) })
   enrollmentId = (await (await request(`/invitations/${fx.invitations.toLearner.id}/accept`, 'learner', 'POST')).json() as any).enrollment.id
-  await db.update(versionSkills).set({ xpThreshold: 20 }).where(and(eq(versionSkills.learningPathVersionId, fx.versions.version1.id), eq(versionSkills.skillId, fx.content.skillB.id)))
-  await db.insert(versionPrerequisites).values({ learningPathVersionId: fx.versions.version1.id, prerequisiteSkillId: fx.content.skillA.id, skillId: fx.content.skillB.id })
+  await amendPublished(db, (tx) => tx.update(versionSkills).set({ xpThreshold: 20 }).where(and(eq(versionSkills.learningPathVersionId, fx.versions.version1.id), eq(versionSkills.skillId, fx.content.skillB.id))))
+  await amendPublished(db, (tx) => tx.insert(versionPrerequisites).values({ learningPathVersionId: fx.versions.version1.id, prerequisiteSkillId: fx.content.skillA.id, skillId: fx.content.skillB.id }))
 })
 type Actor = keyof EnrollmentFixture['identities'] | null
 async function request(path: string, actor: Actor = 'learner', method = 'GET', body?: unknown) {
@@ -38,7 +38,7 @@ const approve = (id: string) => request(`${submissionPath()}/revisions/${id}/rev
 
 it('AC1/2/5: one owning-Coach grant waives both unmet gates only in the target Enrollment/Skill', async () => {
   // Keep a different Skill locked too, so a blanket Enrollment bypass cannot pass.
-  await db.update(versionSkills).set({ xpThreshold: 20 }).where(and(eq(versionSkills.learningPathVersionId, fx.versions.version1.id), eq(versionSkills.skillId, fx.content.skillA.id)))
+  await amendPublished(db, (tx) => tx.update(versionSkills).set({ xpThreshold: 20 }).where(and(eq(versionSkills.learningPathVersionId, fx.versions.version1.id), eq(versionSkills.skillId, fx.content.skillA.id))))
   const peer = (await (await request(`/invitations/${fx.invitations.toPeer.id}/accept`, 'peer', 'POST')).json() as any).enrollment.id
   const [other] = await db.insert(enrollments).values({ accountId: fx.accounts.learner.id, learningPathVersionId: fx.versions.version2.id }).returning()
   const peerBefore = await state('peer', peer), otherBefore = await state('learner', other.id), before = await state()
@@ -71,7 +71,7 @@ async function granted() {
 }
 
 it('AC2/3/5: revocation preserves achievements, sent work and private draft; pending eligible work remains reviewable', async () => {
-  await db.update(versionTasks).set({ xpReward: 7 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskB.id)))
+  await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward: 7 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskB.id))))
   const record = await granted()
   const sent = await send()
   expect(sent.status).toBe(201)
@@ -121,7 +121,7 @@ it('AC2/4: invalid reasons, untrusted actors and malformed/foreign Skill targets
   expect((await grant(undefined, 'coach', fx.content.skillB.id, crypto.randomUUID())).status).toBe(404)
   // A real Skill that exists only in another Version is not a pinned target.
   const [versionOnly] = await db.execute<{ id: string }>(sql`insert into skills (learning_path_id) values (${fx.paths.path.id}) returning id`)
-  await db.insert(versionSkills).values({ learningPathVersionId: fx.versions.version2.id, skillId: versionOnly.id, title: 'New Version Skill', learningOutcome: 'Not in Enrollment Version' })
+  await amendPublished(db, (tx) => tx.insert(versionSkills).values({ learningPathVersionId: fx.versions.version2.id, skillId: versionOnly.id, title: 'New Version Skill', learningOutcome: 'Not in Enrollment Version' }))
   expect((await grant(undefined, 'coach', versionOnly.id)).status).toBe(404)
   expect(await state()).toEqual(before)
   const record = await granted(), active = await state()
@@ -135,9 +135,9 @@ it('AC4: exact grant cannot be revoked through a peer Enrollment, another Versio
   const peer = (await (await request(`/invitations/${fx.invitations.toPeer.id}/accept`, 'peer', 'POST')).json() as any).enrollment.id
   const [other] = await db.insert(enrollments).values({ accountId: fx.accounts.learner.id, learningPathVersionId: fx.versions.version2.id }).returning()
   const [foreignPath] = await db.execute<{ id: string }>(sql`insert into learning_paths (coach_workspace_id, title) values (${fx.workspaces.otherWorkspace.id}, 'Foreign Path') returning id`)
-  const [foreignVersion] = await db.execute<{ id: string }>(sql`insert into learning_path_versions (learning_path_id, version_number, published_at) values (${foreignPath.id}, 1, now()) returning id`)
+  const [foreignVersion] = await db.execute<{ id: string }>(sql`insert into learning_path_versions (learning_path_id, version_number, title, published_at) values (${foreignPath.id}, 1, 'Foreign Path', now()) returning id`)
   const [foreignSkill] = await db.execute<{ id: string }>(sql`insert into skills (learning_path_id) values (${foreignPath.id}) returning id`)
-  await db.insert(versionSkills).values({ learningPathVersionId: foreignVersion.id, skillId: foreignSkill.id, title: 'Foreign Skill', learningOutcome: 'Outside authority' })
+  await amendPublished(db, (tx) => tx.insert(versionSkills).values({ learningPathVersionId: foreignVersion.id, skillId: foreignSkill.id, title: 'Foreign Skill', learningOutcome: 'Outside authority' }))
   const [foreign] = await db.insert(enrollments).values({ accountId: fx.accounts.learner.id, learningPathVersionId: foreignVersion.id }).returning()
   const localBefore = await state(), peerBefore = await state('peer', peer), otherBefore = await state('learner', other.id), foreignBefore = await state('learner', foreign.id)
   for (const target of [peer, other.id]) expect((await revoke(record.id, undefined, 'coach', fx.content.skillB.id, target)).status).toBe(404)
@@ -188,7 +188,7 @@ it('AC2/3/4: uppercase UUID spelling revokes the same active grant without weake
 it('AC1/3: revocation reevaluates current ordinary rules instead of blindly locking', async () => {
   const record = await granted()
   // Ordinary prerequisites and threshold become satisfied through real requests.
-  await db.update(versionTasks).set({ xpReward: 20 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskA.id)))
+  await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward: 20 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskA.id))))
   const sent = await send(fx.content.taskA.id)
   expect(sent.status).toBe(201)
   const id = (await sent.json() as any).revision.id

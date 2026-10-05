@@ -1,8 +1,9 @@
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { defaultPosition, LIMITS, SNAPSHOT_FORMAT_VERSION, type DocumentInput, type TaskInput } from './authoring'
 import type { Database } from './db/client'
 import { coachWorkspaces, learningPaths, learningPathVersions, skills, tasks, versionPrerequisites, versionSkillCards, versionSkills, versionTasks } from './db/schema'
 import type { Tx } from './personal'
+import { checkRequiredRoute, type BlockedSkill } from './publication'
 
 /**
  * Coach Workspaces and Learning Path Drafts (ADR 0005, 0010, 0011). A Workspace has
@@ -11,7 +12,9 @@ import type { Tx } from './personal'
  * Path or Draft at all. A Draft is the Path's one unpublished Version; its document
  * has the same editor/application split as a personal Path (ADR 0016), and its
  * application payload also carries the Draft's rules: Required or Enrichment Tasks
- * with rewards, Optional Skills and XP Thresholds.
+ * with rewards, Optional Skills and XP Thresholds. Publishing a Draft whose required
+ * route can be completed (ADR 0008) freezes it as a Version; later changes go into a
+ * new Draft copied from the latest Version.
  */
 
 type Parsed<T> = { ok: true; value: T } | { ok: false; detail: string }
@@ -46,9 +49,13 @@ async function ownedWorkspace(tx: Pick<Database, 'select'>, workspaceId: string,
 export async function readCoachWorkspace(db: Database, workspaceId: string, accountId: string) {
   const workspace = await ownedWorkspace(db, workspaceId, accountId)
   if (!workspace) return null
-  const paths = await db.select({ id: learningPaths.id, title: learningPaths.title, goal: learningPaths.goal }).from(learningPaths)
+  const paths = await db.select({ id: learningPaths.id }).from(learningPaths)
     .where(eq(learningPaths.coachWorkspaceId, workspace.id)).orderBy(asc(learningPaths.createdAt), asc(learningPaths.id))
-  return { workspace: workspaceSummary(workspace), learningPaths: paths }
+  // Each Path is listed under its newest Version's title and goal: the open Draft's, or else the latest published one's.
+  const versions = paths.length === 0 ? [] : await db.select().from(learningPathVersions)
+    .where(inArray(learningPathVersions.learningPathId, paths.map((path) => path.id))).orderBy(asc(learningPathVersions.versionNumber))
+  const newest = new Map(versions.map((version) => [version.learningPathId, version]))
+  return { workspace: workspaceSummary(workspace), learningPaths: paths.map(({ id }) => ({ id, title: newest.get(id)!.title, goal: newest.get(id)!.goal })) }
 }
 
 /** Locks a coach-mode Path for the owner of its Workspace; for anyone else there is no Path. */
@@ -65,32 +72,49 @@ async function openDraft(tx: Pick<Database, 'select'>, learningPathId: string) {
   return draft ?? null
 }
 
-/** Reads the Path with its open Draft as one document. */
-async function readDocument(tx: Tx, path: typeof learningPaths.$inferSelect) {
-  const draft = await openDraft(tx, path.id)
-  const skillRows = draft ? await tx.select().from(versionSkills).where(eq(versionSkills.learningPathVersionId, draft.id)).orderBy(asc(versionSkills.ordinal), asc(versionSkills.skillId)) : []
-  const taskRows = draft ? await tx.select().from(versionTasks).where(eq(versionTasks.learningPathVersionId, draft.id)).orderBy(asc(versionTasks.ordinal), asc(versionTasks.taskId)) : []
-  const cards = new Map(draft ? (await tx.select().from(versionSkillCards).where(eq(versionSkillCards.learningPathVersionId, draft.id))).map((card) => [card.skillId, card]) : [])
-  const connections = draft ? await tx.select({ from_id: versionPrerequisites.prerequisiteSkillId, to_id: versionPrerequisites.skillId }).from(versionPrerequisites)
-    .where(eq(versionPrerequisites.learningPathVersionId, draft.id)).orderBy(asc(versionPrerequisites.prerequisiteSkillId), asc(versionPrerequisites.skillId)) : []
+type VersionRow = typeof learningPathVersions.$inferSelect
+
+/** One Version's learning content: its Skills with their Tasks, and its Prerequisites. */
+async function readContent(tx: Pick<Database, 'select'>, versionId: string) {
+  const skillRows = await tx.select().from(versionSkills).where(eq(versionSkills.learningPathVersionId, versionId)).orderBy(asc(versionSkills.ordinal), asc(versionSkills.skillId))
+  const taskRows = await tx.select().from(versionTasks).where(eq(versionTasks.learningPathVersionId, versionId)).orderBy(asc(versionTasks.ordinal), asc(versionTasks.taskId))
+  const edges = await tx.select().from(versionPrerequisites).where(eq(versionPrerequisites.learningPathVersionId, versionId))
+    .orderBy(asc(versionPrerequisites.prerequisiteSkillId), asc(versionPrerequisites.skillId))
+  const skills = skillRows.map((skill) => ({
+    id: skill.skillId, title: skill.title, outcome: skill.learningOutcome, optional: skill.optional, xpThreshold: skill.xpThreshold,
+    tasks: taskRows.filter((task) => task.skillId === skill.skillId)
+      .map((task) => ({ id: task.taskId, title: task.title, description: task.description, required: task.required, xpReward: task.xpReward })),
+  }))
+  return { skills, edges }
+}
+
+/**
+ * Reads the Path as one document showing one Version's content: `shown` if given,
+ * otherwise the open Draft, otherwise the latest published Version. `draft` is the
+ * open Draft (the only editable Version) and `versions` the published ones.
+ */
+async function readDocument(tx: Tx, path: typeof learningPaths.$inferSelect, shown?: VersionRow) {
+  const all = await tx.select().from(learningPathVersions).where(eq(learningPathVersions.learningPathId, path.id)).orderBy(asc(learningPathVersions.versionNumber))
+  const draft = all.find((version) => version.publishedAt === null) ?? null
+  const published = all.filter((version) => version.publishedAt !== null)
+  const source = shown ?? draft ?? published.at(-1) ?? null
+  const { skills: skillList, edges } = source ? await readContent(tx, source.id) : { skills: [], edges: [] }
+  const cards = new Map(source ? (await tx.select().from(versionSkillCards).where(eq(versionSkillCards.learningPathVersionId, source.id))).map((card) => [card.skillId, card]) : [])
   return {
-    learningPath: { id: path.id, coachWorkspaceId: path.coachWorkspaceId!, title: path.title, goal: path.goal, revision: path.revision },
+    // A coach-mode Path's title and goal are those of the Version shown.
+    learningPath: { id: path.id, coachWorkspaceId: path.coachWorkspaceId!, title: source!.title, goal: source!.goal, revision: path.revision },
     draft: draft ? { id: draft.id, versionNumber: draft.versionNumber } : null,
+    version: source ? { id: source.id, versionNumber: source.versionNumber, publishedAt: source.publishedAt } : null,
+    versions: published.map((version) => ({ id: version.id, versionNumber: version.versionNumber, publishedAt: version.publishedAt!, enrollmentClosed: version.enrollmentClosedAt !== null })),
     editor: {
       format_version: SNAPSHOT_FORMAT_VERSION,
-      cards: skillRows.map((skill, index) => {
-        const card = cards.get(skill.skillId)
-        return { id: skill.skillId, title: skill.title, position: card ? { x: card.x, y: card.y } : defaultPosition(index) }
+      cards: skillList.map((skill, index) => {
+        const card = cards.get(skill.id)
+        return { id: skill.id, title: skill.title, position: card ? { x: card.x, y: card.y } : defaultPosition(index) }
       }),
-      connections,
+      connections: edges.map((edge) => ({ from_id: edge.prerequisiteSkillId, to_id: edge.skillId })),
     },
-    application: {
-      skills: skillRows.map((skill) => ({
-        id: skill.skillId, title: skill.title, outcome: skill.learningOutcome, optional: skill.optional, xpThreshold: skill.xpThreshold,
-        tasks: taskRows.filter((task) => task.skillId === skill.skillId)
-          .map((task) => ({ id: task.taskId, title: task.title, description: task.description, required: task.required, xpReward: task.xpReward })),
-      })),
-    },
+    application: { skills: skillList },
   }
 }
 
@@ -102,7 +126,7 @@ export async function createCoachPath(db: Database, workspaceId: string, account
     const workspace = await ownedWorkspace(tx, workspaceId, accountId)
     if (!workspace) return null
     const [path] = await tx.insert(learningPaths).values({ coachWorkspaceId: workspace.id, title: input.title, goal: input.goal }).returning()
-    await tx.insert(learningPathVersions).values({ learningPathId: path.id, versionNumber: 1 })
+    await tx.insert(learningPathVersions).values({ learningPathId: path.id, versionNumber: 1, title: input.title, goal: input.goal })
     return readDocument(tx, path)
   })
 }
@@ -111,6 +135,16 @@ export async function readCoachPath(db: Database, learningPathId: string, accoun
   return db.transaction(async (tx) => {
     const path = await lockOwnedCoachPath(tx, learningPathId, accountId)
     return path ? readDocument(tx, path) : null
+  })
+}
+
+/** A published Version of a Path in the Account's Workspace, read-only; for anyone else there is none. */
+export async function readCoachVersion(db: Database, versionId: string, accountId: string) {
+  return db.transaction(async (tx) => {
+    const [version] = await tx.select().from(learningPathVersions).where(eq(learningPathVersions.id, versionId))
+    if (!version?.publishedAt) return null
+    const path = await lockOwnedCoachPath(tx, version.learningPathId, accountId)
+    return path ? readDocument(tx, path, version) : null
   })
 }
 
@@ -141,10 +175,10 @@ export async function saveCoachDraft(db: Database, learningPathId: string, accou
       const draft = await openDraft(tx, path.id)
       if (!draft) return { ok: false, refusal: 'no_open_draft', detail: 'this Path has no open Draft' } as const
       const changed = await writeDraft(tx, path, draft.id, input)
-      if (!changed && input.title === path.title && input.goal === path.goal) return { ok: true, document: await readDocument(tx, path) } as const
-      const [saved] = await tx.update(learningPaths).set({ title: input.title, goal: input.goal, revision: sql`${learningPaths.revision} + 1` })
-        .where(eq(learningPaths.id, path.id)).returning()
-      return { ok: true, document: await readDocument(tx, saved) } as const
+      if (!changed && input.title === draft.title && input.goal === draft.goal) return { ok: true, document: await readDocument(tx, path) } as const
+      // The title and goal are the Draft's own; published Versions keep theirs.
+      await tx.update(learningPathVersions).set({ title: input.title, goal: input.goal }).where(eq(learningPathVersions.id, draft.id))
+      return { ok: true, document: await readDocument(tx, await advanceRevision(tx, path)) } as const
     })
   } catch (error) {
     if (error instanceof Refused) return { ok: false, refusal: error.refusal, detail: error.detail }
@@ -248,4 +282,75 @@ async function writeDraft(tx: Tx, path: typeof learningPaths.$inferSelect, draft
     await tx.insert(versionPrerequisites).values(addedEdges.map((edge) => ({ learningPathVersionId: draftId, prerequisiteSkillId: edge.from_id, skillId: edge.to_id })))
   }
   return changed
+}
+
+export type PublicationRefusal = 'learning_path_not_found' | 'stale_revision' | 'no_open_draft' | 'publication_blocked' | 'draft_already_open'
+type PublicationResult =
+  | { ok: true; document: CoachPathDocument }
+  | { ok: false; refusal: PublicationRefusal; detail: string; current?: CoachPathDocument; blockedSkills?: BlockedSkill[]; reachableXp?: number }
+
+/** Locks the owner's Path and checks the revision the request was based on. */
+async function lockForChange(tx: Tx, learningPathId: string, accountId: string, expectedRevision: number) {
+  const path = await lockOwnedCoachPath(tx, learningPathId, accountId)
+  if (!path) return { ok: false, refusal: 'learning_path_not_found', detail: 'no such Path' } as const
+  if (path.revision !== expectedRevision) {
+    return { ok: false, refusal: 'stale_revision', detail: `the request was based on revision ${expectedRevision}, but revision ${path.revision} is accepted`, current: await readDocument(tx, path) } as const
+  }
+  return { ok: true, path } as const
+}
+
+async function advanceRevision(tx: Tx, path: typeof learningPaths.$inferSelect) {
+  const [saved] = await tx.update(learningPaths).set({ revision: sql`${learningPaths.revision} + 1` }).where(eq(learningPaths.id, path.id)).returning()
+  return saved
+}
+
+/**
+ * Publishes the open Draft as it stands at `expectedRevision`, once its required route
+ * can be completed (ADR 0008); a blocked route publishes nothing and names the
+ * affected Skills and their unmet requirements. From then on the Version's learning
+ * content and rules are immutable (ADR 0005), and the Path has no open Draft.
+ */
+export async function publishDraft(db: Database, learningPathId: string, accountId: string, expectedRevision: number): Promise<PublicationResult> {
+  return db.transaction(async (tx) => {
+    const locked = await lockForChange(tx, learningPathId, accountId, expectedRevision)
+    if (!locked.ok) return locked
+    const draft = await openDraft(tx, locked.path.id)
+    if (!draft) return { ok: false, refusal: 'no_open_draft', detail: 'this Path has no open Draft to publish' } as const
+    // Content writes lock the Draft FOR SHARE (migration 0013): this waits for any in
+    // progress, and later ones wait for this publication, so the Draft validated here
+    // is exactly the content published.
+    await tx.select({ id: learningPathVersions.id }).from(learningPathVersions).where(eq(learningPathVersions.id, draft.id)).for('update')
+    const content = await readContent(tx, draft.id)
+    const route = checkRequiredRoute(content.skills, content.edges)
+    if (!route.publishable) return { ok: false, refusal: 'publication_blocked', detail: route.detail, blockedSkills: route.blockedSkills, reachableXp: route.reachableXp } as const
+    await tx.update(learningPathVersions).set({ publishedAt: sql`clock_timestamp()` }).where(eq(learningPathVersions.id, draft.id))
+    return { ok: true, document: await readDocument(tx, await advanceRevision(tx, locked.path)) } as const
+  })
+}
+
+/**
+ * Prepares the next Version as a Draft copied from the latest published one: the same
+ * logical Skill and Task IDs (ADR 0004) with their own, editable definitions, rules,
+ * Prerequisites and Canvas Layout. The published Version and its Enrollments are not
+ * touched. A Path has at most one open Draft.
+ */
+export async function prepareDraft(db: Database, learningPathId: string, accountId: string, expectedRevision: number): Promise<PublicationResult> {
+  return db.transaction(async (tx) => {
+    const locked = await lockForChange(tx, learningPathId, accountId, expectedRevision)
+    if (!locked.ok) return locked
+    if (await openDraft(tx, locked.path.id)) return { ok: false, refusal: 'draft_already_open', detail: 'this Path already has an open Draft' } as const
+    const [latest] = await tx.select().from(learningPathVersions).where(eq(learningPathVersions.learningPathId, locked.path.id))
+      .orderBy(desc(learningPathVersions.versionNumber)).limit(1)
+    const [draft] = await tx.insert(learningPathVersions).values({ learningPathId: locked.path.id, versionNumber: latest.versionNumber + 1, title: latest.title, goal: latest.goal }).returning()
+    const copy = <T extends { learningPathVersionId: string }>(rows: T[]) => rows.map((row) => ({ ...row, learningPathVersionId: draft.id }))
+    const skillRows = await tx.select().from(versionSkills).where(eq(versionSkills.learningPathVersionId, latest.id))
+    if (skillRows.length > 0) await tx.insert(versionSkills).values(copy(skillRows))
+    const taskRows = await tx.select().from(versionTasks).where(eq(versionTasks.learningPathVersionId, latest.id))
+    if (taskRows.length > 0) await tx.insert(versionTasks).values(copy(taskRows))
+    const edgeRows = await tx.select().from(versionPrerequisites).where(eq(versionPrerequisites.learningPathVersionId, latest.id))
+    if (edgeRows.length > 0) await tx.insert(versionPrerequisites).values(copy(edgeRows))
+    const cardRows = await tx.select().from(versionSkillCards).where(eq(versionSkillCards.learningPathVersionId, latest.id))
+    if (cardRows.length > 0) await tx.insert(versionSkillCards).values(copy(cardRows))
+    return { ok: true, document: await readDocument(tx, await advanceRevision(tx, locked.path)) } as const
+  })
 }

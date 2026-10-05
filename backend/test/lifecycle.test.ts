@@ -6,7 +6,7 @@ import { enrollments, versionPrerequisites, versionSkills, versionTasks } from '
 import { FIXTURE_IDENTITY_HEADER, fixtureIdentity } from '../src/identity'
 import { waitForBlockedBy } from './support/blocking'
 import { prepareTestDatabase, resetTestDatabase, TEST_DATABASE_URL } from './support/database'
-import { seedEnrollmentFixture, type EnrollmentFixture } from './support/fixtures'
+import { amendPublished, seedEnrollmentFixture, type EnrollmentFixture } from './support/fixtures'
 
 let db: Database, close: () => Promise<void>, fx: EnrollmentFixture, app: ReturnType<typeof createApp>, enrollmentId: string
 beforeAll(async () => { ({ db, close } = await prepareTestDatabase()) })
@@ -74,8 +74,8 @@ it('AC2: explicit Task starts persist once and inactivity blocks starts and prev
 })
 
 it('AC3/4: inactive assessment retains old Approval and privacy; eligible pending work still awards XP/Mastery', async () => {
-  await db.update(versionTasks).set({ xpReward: 20 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskA.id)))
-  await db.update(versionTasks).set({ xpReward: 7 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskB.id)))
+  await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward: 20 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskA.id))))
+  await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward: 7 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskB.id))))
   const old = (await (await send()).json() as any).revision.id
   expect((await review(old)).status).toBe(201)
   const superseded = (await (await send(fx.content.taskB.id)).json() as any).revision.id
@@ -109,8 +109,8 @@ it('AC3/4: inactive assessment retains old Approval and privacy; eligible pendin
 })
 
 it('AC2/5: overrides and invitation admission never reactivate; resumption reevaluates current gates', async () => {
-  await db.update(versionSkills).set({ xpThreshold: 20 }).where(and(eq(versionSkills.learningPathVersionId, fx.versions.version1.id), eq(versionSkills.skillId, fx.content.skillB.id)))
-  await db.insert(versionPrerequisites).values({ learningPathVersionId: fx.versions.version1.id, prerequisiteSkillId: fx.content.skillA.id, skillId: fx.content.skillB.id })
+  await amendPublished(db, (tx) => tx.update(versionSkills).set({ xpThreshold: 20 }).where(and(eq(versionSkills.learningPathVersionId, fx.versions.version1.id), eq(versionSkills.skillId, fx.content.skillB.id))))
+  await amendPublished(db, (tx) => tx.insert(versionPrerequisites).values({ learningPathVersionId: fx.versions.version1.id, prerequisiteSkillId: fx.content.skillA.id, skillId: fx.content.skillB.id }))
   expect((await start(fx.content.taskB.id)).status).toBe(403)
   const overridePath = `/enrollments/${enrollmentId}/skills/${fx.content.skillB.id}/access-overrides`
   const grant = (await (await request(overridePath, 'coach', 'POST', { reason: 'Prior knowledge.' })).json() as any).overrideRecord
@@ -198,9 +198,9 @@ it('AC3/5: Changes Requested stays reviewable while inactive; corrections await 
 })
 
 it('AC3/5: inactive Approval opens ordinary gates on reactivation without resetting progress', async () => {
-  await db.update(versionTasks).set({ xpReward: 20 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskA.id)))
-  await db.update(versionSkills).set({ xpThreshold: 20 }).where(and(eq(versionSkills.learningPathVersionId, fx.versions.version1.id), eq(versionSkills.skillId, fx.content.skillB.id)))
-  await db.insert(versionPrerequisites).values({ learningPathVersionId: fx.versions.version1.id, prerequisiteSkillId: fx.content.skillA.id, skillId: fx.content.skillB.id })
+  await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward: 20 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskA.id))))
+  await amendPublished(db, (tx) => tx.update(versionSkills).set({ xpThreshold: 20 }).where(and(eq(versionSkills.learningPathVersionId, fx.versions.version1.id), eq(versionSkills.skillId, fx.content.skillB.id))))
+  await amendPublished(db, (tx) => tx.insert(versionPrerequisites).values({ learningPathVersionId: fx.versions.version1.id, prerequisiteSkillId: fx.content.skillA.id, skillId: fx.content.skillB.id }))
   const sent = (await (await send()).json() as any).revision.id
   expect((await change()).status).toBe(200)
   expect((await review(sent)).status).toBe(201)
@@ -260,9 +260,9 @@ it('AC1/5/6: late lifecycle audit failure rolls back both transitions and all pe
 })
 
 it('AC2/3/4/5: override-eligible work stays reviewable inactive and explicit resumption retains achievements and active exception', async () => {
-  await db.update(versionSkills).set({ xpThreshold: 50 }).where(and(eq(versionSkills.learningPathVersionId, fx.versions.version1.id), eq(versionSkills.skillId, fx.content.skillB.id)))
-  await db.insert(versionPrerequisites).values({ learningPathVersionId: fx.versions.version1.id, prerequisiteSkillId: fx.content.skillA.id, skillId: fx.content.skillB.id })
-  await db.update(versionTasks).set({ xpReward: 7 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskB.id)))
+  await amendPublished(db, (tx) => tx.update(versionSkills).set({ xpThreshold: 50 }).where(and(eq(versionSkills.learningPathVersionId, fx.versions.version1.id), eq(versionSkills.skillId, fx.content.skillB.id))))
+  await amendPublished(db, (tx) => tx.insert(versionPrerequisites).values({ learningPathVersionId: fx.versions.version1.id, prerequisiteSkillId: fx.content.skillA.id, skillId: fx.content.skillB.id }))
+  await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward: 7 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskB.id))))
   const grant = (await (await request(`/enrollments/${enrollmentId}/skills/${fx.content.skillB.id}/access-overrides`, 'coach', 'POST', { reason: 'Recognize prior experience.' })).json() as any).overrideRecord
   expect((await start(fx.content.taskB.id)).status).toBe(201)
   expect((await request(`${taskPath(fx.content.taskB.id)}/draft`, 'learner', 'PUT', { text: 'Private retained B notes' })).status).toBe(200)
@@ -297,7 +297,7 @@ it('AC2/3/4/5: override-eligible work stays reviewable inactive and explicit res
 
 it('AC1/5/6: owning-Coach authority is bounded to the target Workspace', async () => {
   const [path] = await db.execute<{ id: string }>(sql`insert into learning_paths (coach_workspace_id, title) values (${fx.workspaces.otherWorkspace.id}, 'Foreign Path') returning id`)
-  const [version] = await db.execute<{ id: string }>(sql`insert into learning_path_versions (learning_path_id, version_number, published_at) values (${path.id}, 1, now()) returning id`)
+  const [version] = await db.execute<{ id: string }>(sql`insert into learning_path_versions (learning_path_id, version_number, title, published_at) values (${path.id}, 1, 'Foreign Path', now()) returning id`)
   const [foreign] = await db.insert(enrollments).values({ accountId: fx.accounts.learner.id, learningPathVersionId: version.id }).returning()
   const local = await state()
   for (const action of ['deactivate', 'reactivate']) expect((await change(action, 'coach', undefined, foreign.id)).status).toBe(404)

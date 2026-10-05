@@ -6,7 +6,7 @@ import { versionTasks } from '../src/db/schema'
 import { FIXTURE_IDENTITY_HEADER, fixtureIdentity } from '../src/identity'
 import { waitForBlockedBy } from './support/blocking'
 import { prepareTestDatabase, resetTestDatabase, TEST_DATABASE_URL } from './support/database'
-import { seedEnrollmentFixture, seedPersonalFixture, type EnrollmentFixture, type PersonalFixture } from './support/fixtures'
+import { amendPublished, seedEnrollmentFixture, seedPersonalFixture, type EnrollmentFixture, type PersonalFixture } from './support/fixtures'
 
 let db: Database, close: () => Promise<void>, fx: EnrollmentFixture, px: PersonalFixture, app: ReturnType<typeof createApp>
 beforeAll(async () => { ({ db, close } = await prepareTestDatabase()) })
@@ -265,7 +265,7 @@ it('AC5: archiving a completed Task keeps its contribution, Mastery, history and
 
 it('AC6: personal progress and coach Enrollment progress stay separate in both directions', async () => {
   const enrollmentId = (await (await request(`/invitations/${fx.invitations.toLearner.id}/accept`, 'learner', 'POST')).json() as any).enrollment.id
-  await db.update(versionTasks).set({ xpReward: 20 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskA.id)))
+  await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward: 20 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskA.id))))
   const sent = await request(`/enrollments/${enrollmentId}/tasks/${fx.content.taskA.id}/submission/revisions`, 'learner', 'POST', { text: 'Coach-mode evidence' })
   const revision = (await sent.json() as any).revision.id
   expect((await request(`/enrollments/${enrollmentId}/tasks/${fx.content.taskA.id}/submission/revisions/${revision}/review`, 'coach', 'POST', { decision: 'approval' })).status).toBe(201)

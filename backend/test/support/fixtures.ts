@@ -1,4 +1,6 @@
+import { eq, sql } from 'drizzle-orm'
 import type { Database } from '../../src/db/client'
+import type { Tx } from '../../src/personal'
 import { accounts, coachWorkspaces, enrollmentInvitations, learningPaths, learningPathVersions, personalPrerequisites, personalSkills, personalTasks, personalWorkspaces, skills, tasks, versionSkills, versionTasks } from '../../src/db/schema'
 
 /**
@@ -29,11 +31,9 @@ export async function seedEnrollmentFixture(db: Database) {
     { coachWorkspaceId: workspace.id, title: 'Calculus' },
   ]).returning()
   const published = new Date('2026-10-02T00:00:00Z')
-  const [version1, version2, siblingVersion, closedVersion] = await db.insert(learningPathVersions).values([
-    { learningPathId: path.id, versionNumber: 1, publishedAt: published },
-    { learningPathId: path.id, versionNumber: 2, publishedAt: published },
-    { learningPathId: siblingPath.id, versionNumber: 1, publishedAt: published },
-    { learningPathId: siblingPath.id, versionNumber: 2, publishedAt: published, enrollmentClosedAt: published },
+  const [siblingVersion, closedVersion] = await db.insert(learningPathVersions).values([
+    { learningPathId: siblingPath.id, versionNumber: 1, title: 'Calculus', publishedAt: published },
+    { learningPathId: siblingPath.id, versionNumber: 2, title: 'Calculus', publishedAt: published, enrollmentClosedAt: published },
   ]).returning()
 
   const [skillA, skillB] = await db.insert(skills).values([{ learningPathId: path.id }, { learningPathId: path.id }]).returning()
@@ -49,11 +49,17 @@ export async function seedEnrollmentFixture(db: Database) {
       { learningPathVersionId: versionId, taskId: taskB.id, skillId: skillB.id, title: `Matrix exercises${revision}`, required: true },
     ],
   })
-  for (const [version, revision] of [[version1, ''], [version2, ' (revised)']] as const) {
-    const { skills: skillRows, tasks: taskRows } = content(version.id, revision)
+  // Each Version is written as a Draft and then published; published content is immutable (migration 0012).
+  const publishVersion = async (versionNumber: number, revision: string) => {
+    const [draft] = await db.insert(learningPathVersions).values({ learningPathId: path.id, versionNumber, title: 'Linear Algebra' }).returning()
+    const { skills: skillRows, tasks: taskRows } = content(draft.id, revision)
     await db.insert(versionSkills).values(skillRows)
     await db.insert(versionTasks).values(taskRows)
+    const [version] = await db.update(learningPathVersions).set({ publishedAt: published }).where(eq(learningPathVersions.id, draft.id)).returning()
+    return version
   }
+  const version1 = await publishVersion(1, '')
+  const version2 = await publishVersion(2, ' (revised)')
 
   const invite = (versionId: string, email: string) => ({ learningPathVersionId: versionId, email, invitedByAccountId: coach.id })
   const [toLearner, toLearnerAgain, toPeer, toUnverified, toOwner, toLearnerClosed] = await db.insert(enrollmentInvitations).values([
@@ -81,6 +87,28 @@ export async function seedEnrollmentFixture(db: Database) {
 }
 
 export type EnrollmentFixture = Awaited<ReturnType<typeof seedEnrollmentFixture>>
+
+const PUBLISHED_CONTENT_GUARDS = [
+  ['version_skills', 'version_skills_published_immutable'],
+  ['version_tasks', 'version_tasks_published_immutable'],
+  ['version_prerequisites', 'version_prerequisites_published_immutable'],
+] as const
+
+/**
+ * Test setup only: configures the content of an already published fixture Version
+ * (a reward, a threshold, an extra Prerequisite), which the database otherwise
+ * refuses (ADR 0005, migration 0012). As the schema owner, it disables the guards
+ * inside this one transaction and restores them before commit, so no other session
+ * ever runs without them. Application code has no such path.
+ */
+export async function amendPublished<T>(db: Database, write: (tx: Tx) => Promise<T>): Promise<T> {
+  return db.transaction(async (tx) => {
+    for (const [table, trigger] of PUBLISHED_CONTENT_GUARDS) await tx.execute(sql.raw(`alter table ${table} disable trigger ${trigger}`))
+    const result = await write(tx)
+    for (const [table, trigger] of PUBLISHED_CONTENT_GUARDS) await tx.execute(sql.raw(`alter table ${table} enable trigger ${trigger}`))
+    return result
+  })
+}
 
 /**
  * Owner-only personal fixture on top of {@link seedEnrollmentFixture}'s Accounts:

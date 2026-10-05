@@ -43,6 +43,10 @@ export const learningPaths = pgTable('learning_paths', {
   id: uuid('id').primaryKey().defaultRandom(),
   coachWorkspaceId: uuid('coach_workspace_id').references(() => coachWorkspaces.id),
   personalWorkspaceId: uuid('personal_workspace_id').references(() => personalWorkspaces.id),
+  /**
+   * A personal Path's title and goal. A coach-mode Path keeps here only the values
+   * it was created with; its title and goal belong to each Version ({@link learningPathVersions}).
+   */
   title: text('title').notNull(),
   /** The goal the Path's Skills work toward (CONTEXT.md: Learning Path). */
   goal: text('goal').notNull().default(''),
@@ -61,13 +65,20 @@ export const learningPaths = pgTable('learning_paths', {
 ])
 
 /**
- * A published, immutable edition of a Learning Path. `enrollmentClosedAt` is an
- * Enrollment Closure, independent of publication.
+ * A published, immutable edition of a Learning Path, or its one unpublished Draft.
+ * `enrollmentClosedAt` is an Enrollment Closure, independent of publication.
  */
 export const learningPathVersions = pgTable('learning_path_versions', {
   id: uuid('id').primaryKey().defaultRandom(),
   learningPathId: uuid('learning_path_id').notNull().references(() => learningPaths.id),
   versionNumber: integer('version_number').notNull(),
+  /**
+   * The Path's title and goal as this Version states them, frozen with the rest of
+   * its content once published (ADR 0005). A coach-mode Path is read through its
+   * Versions, never through `learning_paths.title`/`goal`.
+   */
+  title: text('title').notNull(),
+  goal: text('goal').notNull().default(''),
   publishedAt: timestamp('published_at', { withTimezone: true }),
   enrollmentClosedAt: timestamp('enrollment_closed_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

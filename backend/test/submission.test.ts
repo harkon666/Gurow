@@ -5,7 +5,7 @@ import { createDatabase, type Database } from '../src/db/client'
 import { enrollments, skills, submissionDrafts, submissionReviews, submissionRevisions, submissions, tasks, versionPrerequisites, versionSkills, versionTasks } from '../src/db/schema'
 import { FIXTURE_IDENTITY_HEADER, fixtureIdentity } from '../src/identity'
 import { prepareTestDatabase, resetTestDatabase, TEST_DATABASE_URL } from './support/database'
-import { seedEnrollmentFixture, type EnrollmentFixture } from './support/fixtures'
+import { amendPublished, seedEnrollmentFixture, type EnrollmentFixture } from './support/fixtures'
 
 // Request-level tests against real PostgreSQL (SPEC testing decisions 1, 9, 10 and 12).
 let db: Database
@@ -120,14 +120,14 @@ describe('AC1: draft privacy', () => {
 /** A Task defined only in Version 2, so it is not part of the learner's Version 1 Enrollment. */
 async function taskOutsideVersion1() {
   const [task] = await db.insert(tasks).values({ skillId: fx.content.skillA.id }).returning()
-  await db.insert(versionTasks).values({ learningPathVersionId: fx.versions.version2.id, taskId: task.id, skillId: fx.content.skillA.id, title: 'New in Version 2', required: false })
+  await amendPublished(db, (tx) => tx.insert(versionTasks).values({ learningPathVersionId: fx.versions.version2.id, taskId: task.id, skillId: fx.content.skillA.id, title: 'New in Version 2', required: false }))
   return task.id
 }
 
 describe('AC2/AC5: current Skill Access', () => {
   it('blocks an active learner sending to B requiring A mastery and 20 Enrollment XP', async () => {
-    await db.update(versionSkills).set({ xpThreshold: 20 }).where(and(eq(versionSkills.learningPathVersionId, fx.versions.version1.id), eq(versionSkills.skillId, fx.content.skillB.id)))
-    await db.insert(versionPrerequisites).values({ learningPathVersionId: fx.versions.version1.id, prerequisiteSkillId: fx.content.skillA.id, skillId: fx.content.skillB.id })
+    await amendPublished(db, (tx) => tx.update(versionSkills).set({ xpThreshold: 20 }).where(and(eq(versionSkills.learningPathVersionId, fx.versions.version1.id), eq(versionSkills.skillId, fx.content.skillB.id))))
+    await amendPublished(db, (tx) => tx.insert(versionPrerequisites).values({ learningPathVersionId: fx.versions.version1.id, prerequisiteSkillId: fx.content.skillA.id, skillId: fx.content.skillB.id }))
     const res = await send(fx.content.taskB.id, 'learner', { text: 'Locked work', urls: [] })
     expect(res.status).toBe(403)
     expect(await storedSubmissions()).toHaveLength(0)
@@ -148,7 +148,7 @@ describe('AC2/AC5: current Skill Access', () => {
     await approveTask(fx.content.taskA.id)
     expect((await send(fx.content.taskB.id, 'learner', evidence)).status).toBe(403)
     // A second distinct approved Task adds its own contribution.
-    await db.update(versionTasks).set({ xpReward: 20 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskAReading.id)))
+    await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward: 20 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskAReading.id))))
     await approveTask(fx.content.taskAReading.id)
     expect((await send(fx.content.taskB.id, 'learner', evidence)).status).toBe(201)
     expect((await send(fx.content.taskB.id, 'learner', evidence)).status).toBe(201) // XP is not spent.
@@ -157,7 +157,7 @@ describe('AC2/AC5: current Skill Access', () => {
   it('requires ALL prerequisite Skills and all their Required Tasks, not enrichment evidence', async () => {
     const c = await extraSkill(true)
     const [secondRequired] = await db.insert(tasks).values({ skillId: fx.content.skillA.id }).returning()
-    await db.insert(versionTasks).values({ learningPathVersionId: fx.versions.version1.id, taskId: secondRequired.id, skillId: fx.content.skillA.id, title: 'Second required evidence', required: true })
+    await amendPublished(db, (tx) => tx.insert(versionTasks).values({ learningPathVersionId: fx.versions.version1.id, taskId: secondRequired.id, skillId: fx.content.skillA.id, title: 'Second required evidence', required: true }))
     await gateB(0, [fx.content.skillA.id, c.skill.id])
     await approveTask(fx.content.taskA.id)
     await approveTask(fx.content.taskAReading.id)
@@ -170,7 +170,7 @@ describe('AC2/AC5: current Skill Access', () => {
 
   it('never masters a Skill with no Tasks', async () => {
     const [empty] = await db.insert(skills).values({ learningPathId: fx.paths.path.id }).returning()
-    await db.insert(versionSkills).values({ learningPathVersionId: fx.versions.version1.id, skillId: empty.id, title: 'No tasks', learningOutcome: 'No evidence' })
+    await amendPublished(db, (tx) => tx.insert(versionSkills).values({ learningPathVersionId: fx.versions.version1.id, skillId: empty.id, title: 'No tasks', learningOutcome: 'No evidence' }))
     await gateB(0, [empty.id])
     expect((await send(fx.content.taskB.id, 'learner', evidence)).status).toBe(403)
   })
@@ -223,7 +223,7 @@ describe('AC2/AC5: current Skill Access', () => {
     await rewardA(20)
     await approveTask(fx.content.taskA.id, 'peer', peerEnrollmentId)
     const [other] = await db.insert(enrollments).values({ accountId: fx.accounts.learner.id, learningPathVersionId: fx.versions.version2.id }).returning()
-    await db.update(versionTasks).set({ xpReward: 200 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version2.id), eq(versionTasks.taskId, fx.content.taskA.id)))
+    await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward: 200 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version2.id), eq(versionTasks.taskId, fx.content.taskA.id))))
     await approveTask(fx.content.taskA.id, 'learner', other.id)
     expect((await send(fx.content.taskB.id, 'learner', evidence)).status).toBe(403)
     await approveTask(fx.content.taskA.id)
@@ -233,9 +233,9 @@ describe('AC2/AC5: current Skill Access', () => {
   it('uses pinned prerequisites, thresholds and rewards rather than newer rules', async () => {
     await gateB(20)
     await rewardA(20)
-    await db.update(versionSkills).set({ xpThreshold: 200 }).where(and(eq(versionSkills.learningPathVersionId, fx.versions.version2.id), eq(versionSkills.skillId, fx.content.skillB.id)))
-    await db.update(versionTasks).set({ xpReward: 0, required: false }).where(eq(versionTasks.learningPathVersionId, fx.versions.version2.id))
-    await db.insert(versionPrerequisites).values({ learningPathVersionId: fx.versions.version2.id, prerequisiteSkillId: fx.content.skillB.id, skillId: fx.content.skillA.id })
+    await amendPublished(db, (tx) => tx.update(versionSkills).set({ xpThreshold: 200 }).where(and(eq(versionSkills.learningPathVersionId, fx.versions.version2.id), eq(versionSkills.skillId, fx.content.skillB.id))))
+    await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward: 0, required: false }).where(eq(versionTasks.learningPathVersionId, fx.versions.version2.id)))
+    await amendPublished(db, (tx) => tx.insert(versionPrerequisites).values({ learningPathVersionId: fx.versions.version2.id, prerequisiteSkillId: fx.content.skillB.id, skillId: fx.content.skillA.id }))
     await approveTask(fx.content.taskA.id)
     expect((await send(fx.content.taskB.id, 'learner', evidence)).status).toBe(201)
   })
@@ -302,11 +302,11 @@ describe('AC2/AC5: current Skill Access', () => {
 const evidence = { text: 'Submitted evidence', urls: [] }
 const versionTask = (taskId: string) => and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, taskId))
 async function rewardA(xpReward: number) {
-  await db.update(versionTasks).set({ xpReward }).where(versionTask(fx.content.taskA.id))
+  await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward }).where(versionTask(fx.content.taskA.id)))
 }
 async function gateB(xpThreshold: number, prerequisites = [fx.content.skillA.id]) {
-  await db.update(versionSkills).set({ xpThreshold }).where(and(eq(versionSkills.learningPathVersionId, fx.versions.version1.id), eq(versionSkills.skillId, fx.content.skillB.id)))
-  if (prerequisites.length) await db.insert(versionPrerequisites).values(prerequisites.map((prerequisiteSkillId) => ({ learningPathVersionId: fx.versions.version1.id, prerequisiteSkillId, skillId: fx.content.skillB.id })))
+  await amendPublished(db, (tx) => tx.update(versionSkills).set({ xpThreshold }).where(and(eq(versionSkills.learningPathVersionId, fx.versions.version1.id), eq(versionSkills.skillId, fx.content.skillB.id))))
+  if (prerequisites.length) await amendPublished(db, (tx) => tx.insert(versionPrerequisites).values(prerequisites.map((prerequisiteSkillId) => ({ learningPathVersionId: fx.versions.version1.id, prerequisiteSkillId, skillId: fx.content.skillB.id }))))
 }
 // Test-only Review/revocation fixtures: not end-to-end Coach Review or revocation API proof.
 async function reviewFixture(revisionId: string, decision: 'approval' | 'changes_requested', coachAccountId = fx.accounts.coach.id, enrollment = enrollmentId) {
@@ -330,9 +330,9 @@ async function revoke(revisionId: string) {
 }
 async function extraSkill(required: boolean) {
   const [skill] = await db.insert(skills).values({ learningPathId: fx.paths.path.id }).returning()
-  await db.insert(versionSkills).values({ learningPathVersionId: fx.versions.version1.id, skillId: skill.id, title: 'Additional prerequisite', learningOutcome: 'Additional evidence' })
+  await amendPublished(db, (tx) => tx.insert(versionSkills).values({ learningPathVersionId: fx.versions.version1.id, skillId: skill.id, title: 'Additional prerequisite', learningOutcome: 'Additional evidence' }))
   const [task] = await db.insert(tasks).values({ skillId: skill.id }).returning()
-  await db.insert(versionTasks).values({ learningPathVersionId: fx.versions.version1.id, taskId: task.id, skillId: skill.id, title: 'Additional Task', required })
+  await amendPublished(db, (tx) => tx.insert(versionTasks).values({ learningPathVersionId: fx.versions.version1.id, taskId: task.id, skillId: skill.id, title: 'Additional Task', required }))
   return { skill, task }
 }
 

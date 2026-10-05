@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { WebGpuEditor, type WebGpuEditorActions } from '../editor/WebGpuEditor'
 import { SkillDetailPanel, type PanelTask } from '../editor/SkillDetailPanel'
 import { SkillPrerequisiteList } from '../editor/SkillPrerequisiteList'
@@ -81,7 +81,13 @@ const editorInput = (document: EditablePathDocument) => ({
  * (completion, rewards, Mastery, thresholds, overrides) are separate backend actions
  * that never touch the document or its revision; a Draft has none.
  */
-export function PathEditor({ accountId, initial, mode = PERSONAL_MODE }: { accountId: string; initial: EditablePathDocument; mode?: PathMode }) {
+export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftControls }: {
+  accountId: string
+  initial: EditablePathDocument
+  mode?: PathMode
+  /** A Draft's own controls (publication), given whether the Draft is saved and at which revision. */
+  draftControls?: (save: { saved: boolean; revision: number }) => ReactNode
+}) {
   const personal = mode.kind === 'personal'
   const pathId = initial.learningPath.id
   const [loaded, setLoaded] = useState(() => editorInput(initial))
@@ -308,6 +314,7 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE }: { accou
             Draft · not published
           </span>
         )}
+        {!personal && draftControls?.({ saved: saveState.kind === 'saved', revision: saveState.revision })}
         <SaveStatus state={saveState} onRetry={() => autosaveRef.current?.retry()} onLoadAccepted={loadAccepted} />
       </div>
       {ruleProblem && (

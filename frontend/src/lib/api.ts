@@ -176,11 +176,24 @@ export function performLearningAction(pathId: string, action: LearningAction) {
 export interface CoachWorkspaceSummary { id: string; name: string; createdAt: string }
 export interface CoachWorkspace { workspace: CoachWorkspaceSummary; learningPaths: { id: string; title: string; goal: string }[] }
 
-/** A coach-mode Path with its open Draft, the Path's one unpublished Version. */
+/** A published Learning Path Version: immutable learning content and rules (ADR 0005). */
+export interface PublishedVersionSummary { id: string; versionNumber: number; publishedAt: string; enrollmentClosed: boolean }
+
+/**
+ * A coach-mode Path showing one Version's content (`version`): the open Draft, the
+ * Path's one editable Version, when there is one, otherwise the latest published
+ * Version. `versions` lists the published ones.
+ */
 export interface CoachPathDocument extends EditablePathDocument {
   learningPath: { id: string; coachWorkspaceId: string; title: string; goal: string; revision: number }
   draft: { id: string; versionNumber: number } | null
+  version: { id: string; versionNumber: number; publishedAt: string | null } | null
+  versions: PublishedVersionSummary[]
 }
+
+/** Why a required Skill cannot be completed on the required route (ADR 0008). */
+export interface UnmetRequirement { kind: 'required_task' | 'prerequisite' | 'xp_threshold'; message: string; skillId?: string; title?: string; xpThreshold?: number; reachableXp?: number }
+export interface BlockedSkill { skillId: string; title: string; unmet: UnmetRequirement[] }
 
 export const listCoachWorkspaces = () => call<{ workspaces: CoachWorkspaceSummary[] }>('/coach/workspaces')
 
@@ -196,3 +209,17 @@ export const readCoachPath = (pathId: string) => call<CoachPathDocument>(`/coach
 /** Saves the whole Draft; a stale save answers 409 with the accepted document in `body.current`. */
 export const saveCoachDraft = (pathId: string, save: PathSave) =>
   call<CoachPathDocument>(`/coach/learning-paths/${encodeURIComponent(pathId)}/draft`, { method: 'PUT', body: save })
+
+/**
+ * Publishes the open Draft as it stood at `expectedRevision`. A blocked required route
+ * answers 422 `publication_blocked` with `blockedSkills` and `reachableXp` in the body.
+ */
+export const publishCoachDraft = (pathId: string, expectedRevision: number) =>
+  call<CoachPathDocument>(`/coach/learning-paths/${encodeURIComponent(pathId)}/publication`, { method: 'POST', body: { expectedRevision } })
+
+/** Prepares the next Version as a Draft copied from the latest published one. */
+export const prepareCoachDraft = (pathId: string, expectedRevision: number) =>
+  call<CoachPathDocument>(`/coach/learning-paths/${encodeURIComponent(pathId)}/drafts`, { method: 'POST', body: { expectedRevision } })
+
+/** One published Version of a Path in the signed-in Coach's Workspace, read-only. */
+export const readCoachVersion = (versionId: string) => call<CoachPathDocument>(`/coach/learning-path-versions/${encodeURIComponent(versionId)}`)

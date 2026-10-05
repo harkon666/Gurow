@@ -6,7 +6,7 @@ import { enrollments, skills, tasks, submissionReviews, versionPrerequisites, ve
 import { FIXTURE_IDENTITY_HEADER, fixtureIdentity } from '../src/identity'
 import { waitForBlockedBy } from './support/blocking'
 import { prepareTestDatabase, resetTestDatabase, TEST_DATABASE_URL } from './support/database'
-import { seedEnrollmentFixture, type EnrollmentFixture } from './support/fixtures'
+import { amendPublished, seedEnrollmentFixture, type EnrollmentFixture } from './support/fixtures'
 
 let db: Database
 let close: () => Promise<void>
@@ -21,9 +21,9 @@ beforeEach(async () => {
   app = createApp({ db, identity: fixtureIdentity(fx.identities) })
   const accepted = await request(`/invitations/${fx.invitations.toLearner.id}/accept`, 'learner', 'POST')
   enrollmentId = (await accepted.json() as any).enrollment.id
-  await db.update(versionTasks).set({ xpReward: 20 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskA.id)))
-  await db.update(versionSkills).set({ xpThreshold: 20 }).where(and(eq(versionSkills.learningPathVersionId, fx.versions.version1.id), eq(versionSkills.skillId, fx.content.skillB.id)))
-  await db.insert(versionPrerequisites).values({ learningPathVersionId: fx.versions.version1.id, prerequisiteSkillId: fx.content.skillA.id, skillId: fx.content.skillB.id })
+  await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward: 20 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskA.id))))
+  await amendPublished(db, (tx) => tx.update(versionSkills).set({ xpThreshold: 20 }).where(and(eq(versionSkills.learningPathVersionId, fx.versions.version1.id), eq(versionSkills.skillId, fx.content.skillB.id))))
+  await amendPublished(db, (tx) => tx.insert(versionPrerequisites).values({ learningPathVersionId: fx.versions.version1.id, prerequisiteSkillId: fx.content.skillA.id, skillId: fx.content.skillB.id }))
 })
 type Actor = keyof EnrollmentFixture['identities'] | null
 async function request(path: string, actor: Actor = 'learner', method = 'GET', body?: unknown) {
@@ -57,7 +57,7 @@ it('AC1/AC7: only owning Coach decides; scoped reads and foreign/mismatched IDs 
   expect((await decide(id, { decision: 'approval' }, 'coach', fx.content.taskA.id, peerId)).status).toBe(404)
   expect((await decide(id, { decision: 'approval' }, 'coach', fx.content.taskAReading.id)).status).toBe(404)
   const [outside] = await db.insert(tasks).values({ skillId: fx.content.skillA.id }).returning()
-  await db.insert(versionTasks).values({ learningPathVersionId: fx.versions.version2.id, taskId: outside.id, skillId: fx.content.skillA.id, title: 'Other Version', required: true })
+  await amendPublished(db, (tx) => tx.insert(versionTasks).values({ learningPathVersionId: fx.versions.version2.id, taskId: outside.id, skillId: fx.content.skillA.id, title: 'Other Version', required: true }))
   expect((await decide(id, { decision: 'approval' }, 'coach', outside.id)).status).toBe(404)
   expect((await decide(crypto.randomUUID())).status).toBe(404)
   expect((await decide('invalid')).status).toBe(404)
@@ -111,10 +111,10 @@ it('AC3/AC6: repeated decisions reject; additional approved revisions contribute
 
 async function extraSkill(required: boolean | null) {
   const [s] = await db.insert(skills).values({ learningPathId: fx.paths.path.id }).returning()
-  await db.insert(versionSkills).values({ learningPathVersionId: fx.versions.version1.id, skillId: s.id, title: 'Extra', learningOutcome: 'Extra outcome' })
+  await amendPublished(db, (tx) => tx.insert(versionSkills).values({ learningPathVersionId: fx.versions.version1.id, skillId: s.id, title: 'Extra', learningOutcome: 'Extra outcome' }))
   if (required === null) return { skillId: s.id, taskId: null }
   const [t] = await db.insert(tasks).values({ skillId: s.id }).returning()
-  await db.insert(versionTasks).values({ learningPathVersionId: fx.versions.version1.id, taskId: t.id, skillId: s.id, title: 'Extra task', required, xpReward: 5 })
+  await amendPublished(db, (tx) => tx.insert(versionTasks).values({ learningPathVersionId: fx.versions.version1.id, taskId: t.id, skillId: s.id, title: 'Extra task', required, xpReward: 5 }))
   return { skillId: s.id, taskId: t.id }
 }
 
@@ -122,7 +122,7 @@ it('AC2: every Required Task qualifies, enrichment never blocks, empty/enrichmen
   const empty = await extraSkill(null)
   const enrichment = await extraSkill(false)
   const [second] = await db.insert(tasks).values({ skillId: fx.content.skillA.id }).returning()
-  await db.insert(versionTasks).values({ learningPathVersionId: fx.versions.version1.id, taskId: second.id, skillId: fx.content.skillA.id, title: 'Second required', required: true, xpReward: 7 })
+  await amendPublished(db, (tx) => tx.insert(versionTasks).values({ learningPathVersionId: fx.versions.version1.id, taskId: second.id, skillId: fx.content.skillA.id, title: 'Second required', required: true, xpReward: 7 }))
   expect((await decide(await revision())).status).toBe(201)
   expect(skill(await state(), fx.content.skillA.id).mastery).toBe(false)
   expect((await decide(await revision(enrichment.taskId!), { decision: 'approval' }, 'coach', enrichment.taskId!)).status).toBe(201)
@@ -137,7 +137,7 @@ it('AC2: every Required Task qualifies, enrichment never blocks, empty/enrichmen
 
 it('AC5: ALL multi-prerequisites and XP gates apply identically to progress and sends', async () => {
   const c = await extraSkill(true)
-  await db.insert(versionPrerequisites).values({ learningPathVersionId: fx.versions.version1.id, prerequisiteSkillId: c.skillId, skillId: fx.content.skillB.id })
+  await amendPublished(db, (tx) => tx.insert(versionPrerequisites).values({ learningPathVersionId: fx.versions.version1.id, prerequisiteSkillId: c.skillId, skillId: fx.content.skillB.id }))
   expect((await decide(await revision())).status).toBe(201)
   expect(skill(await state(), fx.content.skillB.id)).toMatchObject({ access: false, unmetPrerequisiteSkillIds: [c.skillId], xpShortfall: 0 })
   expect((await send(fx.content.taskB.id)).status).toBe(403)
@@ -147,9 +147,9 @@ it('AC5: ALL multi-prerequisites and XP gates apply identically to progress and 
 })
 
 it('AC5: XP-only threshold remains locked until distinct approved rewards reach it', async () => {
-  await db.delete(versionPrerequisites).where(eq(versionPrerequisites.learningPathVersionId, fx.versions.version1.id))
-  await db.update(versionSkills).set({ xpThreshold: 40 }).where(and(eq(versionSkills.learningPathVersionId, fx.versions.version1.id), eq(versionSkills.skillId, fx.content.skillB.id)))
-  await db.update(versionTasks).set({ xpReward: 20 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskAReading.id)))
+  await amendPublished(db, (tx) => tx.delete(versionPrerequisites).where(eq(versionPrerequisites.learningPathVersionId, fx.versions.version1.id)))
+  await amendPublished(db, (tx) => tx.update(versionSkills).set({ xpThreshold: 40 }).where(and(eq(versionSkills.learningPathVersionId, fx.versions.version1.id), eq(versionSkills.skillId, fx.content.skillB.id))))
+  await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward: 20 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskAReading.id))))
   expect((await decide(await revision())).status).toBe(201)
   expect((await decide(await revision())).status).toBe(201)
   expect(skill(await state(), fx.content.skillB.id)).toMatchObject({ access: false, unmetPrerequisiteSkillIds: [], xpShortfall: 20 })
@@ -164,7 +164,7 @@ it('AC5: XP-only threshold remains locked until distinct approved rewards reach 
 
 it('AC5: same Account other Version and peer XP never transfer; pinned rewards stay local', async () => {
   const [other] = await db.insert(enrollments).values({ accountId: fx.accounts.learner.id, learningPathVersionId: fx.versions.version2.id }).returning()
-  await db.update(versionTasks).set({ xpReward: 200 }).where(eq(versionTasks.learningPathVersionId, fx.versions.version2.id))
+  await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward: 200 }).where(eq(versionTasks.learningPathVersionId, fx.versions.version2.id)))
   const id = await revision(fx.content.taskA.id, other.id)
   expect((await decide(id, { decision: 'approval' }, 'coach', fx.content.taskA.id, other.id)).status).toBe(201)
   expect((await state('learner', other.id)).xp).toBe(200)
@@ -189,7 +189,7 @@ for (const loss of ['xp', 'mastery', 'inactive'] as const) it(`AC6: prior eligib
   expect((await decide(a)).status).toBe(201)
   const b = await revision(fx.content.taskB.id)
   // T10/T12 fault injection only; not a lifecycle/revocation API claim.
-  await db.transaction(async (tx) => {
+  await amendPublished(db, async (tx) => {
     await tx.select().from(enrollments).where(eq(enrollments.id, enrollmentId)).for('update')
     if (loss === 'inactive') await tx.update(enrollments).set({ status: 'inactive' }).where(eq(enrollments.id, enrollmentId))
     else {

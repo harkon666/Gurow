@@ -85,6 +85,20 @@
       "when": 1791148166892,
       "tag": "0011_coach_drafts",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791188097101,
+      "tag": "0012_published_versions_immutable",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1791189806257,
+      "tag": "0013_version_title_goal",
+      "breakpoints": true
     }
   ]
 }

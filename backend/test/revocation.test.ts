@@ -6,7 +6,7 @@ import { enrollments, masteryEvents, submissionReviews, tasks, xpEvents, version
 import { FIXTURE_IDENTITY_HEADER, fixtureIdentity } from '../src/identity'
 import { waitForBlockedBy } from './support/blocking'
 import { prepareTestDatabase, resetTestDatabase, TEST_DATABASE_URL } from './support/database'
-import { seedEnrollmentFixture, type EnrollmentFixture } from './support/fixtures'
+import { amendPublished, seedEnrollmentFixture, type EnrollmentFixture } from './support/fixtures'
 let db: Database, close: () => Promise<void>, fx: EnrollmentFixture, app: ReturnType<typeof createApp>, enrollmentId: string
 beforeAll(async () => { ({ db, close } = await prepareTestDatabase()) })
 afterAll(async () => { await close() })
@@ -15,9 +15,9 @@ beforeEach(async () => {
   fx = await seedEnrollmentFixture(db)
   app = createApp({ db, identity: fixtureIdentity(fx.identities) })
   enrollmentId = (await (await request(`/invitations/${fx.invitations.toLearner.id}/accept`, 'learner', 'POST')).json() as any).enrollment.id
-  await db.update(versionTasks).set({ xpReward: 20 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskA.id)))
-  await db.update(versionSkills).set({ xpThreshold: 20 }).where(and(eq(versionSkills.learningPathVersionId, fx.versions.version1.id), eq(versionSkills.skillId, fx.content.skillB.id)))
-  await db.insert(versionPrerequisites).values({ learningPathVersionId: fx.versions.version1.id, prerequisiteSkillId: fx.content.skillA.id, skillId: fx.content.skillB.id })
+  await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward: 20 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskA.id))))
+  await amendPublished(db, (tx) => tx.update(versionSkills).set({ xpThreshold: 20 }).where(and(eq(versionSkills.learningPathVersionId, fx.versions.version1.id), eq(versionSkills.skillId, fx.content.skillB.id))))
+  await amendPublished(db, (tx) => tx.insert(versionPrerequisites).values({ learningPathVersionId: fx.versions.version1.id, prerequisiteSkillId: fx.content.skillA.id, skillId: fx.content.skillB.id }))
 })
 type Actor = keyof EnrollmentFixture['identities'] | null
 async function request(path: string, actor: Actor = 'learner', method = 'GET', body?: unknown) {
@@ -132,7 +132,7 @@ it('AC1/5/6: authority, exact context, invalid reasons and non-Approvals reject 
 })
 
 it('AC3: zero-XP Required Task records real Mastery history without fabricated XP', async () => {
-  await db.update(versionTasks).set({ xpReward: 0 }).where(eq(versionTasks.taskId, fx.content.taskA.id))
+  await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward: 0 }).where(eq(versionTasks.taskId, fx.content.taskA.id)))
   const id = await send()
   expect((await approve(id)).status).toBe(201)
   expect(skill(await state(), fx.content.skillA.id).mastery).toBe(true)
@@ -146,7 +146,7 @@ it('AC3: zero-XP Required Task records real Mastery history without fabricated X
 it('AC2/3: Enrichment correction does not revoke independently supported Mastery', async () => {
   const a = await send()
   expect((await approve(a)).status).toBe(201)
-  await db.update(versionTasks).set({ xpReward: 7 }).where(eq(versionTasks.taskId, fx.content.taskAReading.id))
+  await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward: 7 }).where(eq(versionTasks.taskId, fx.content.taskAReading.id)))
   const reading = await send(fx.content.taskAReading.id)
   expect((await approve(reading, fx.content.taskAReading.id)).status).toBe(201)
   expect((await revoke(reading, undefined, 'coach', fx.content.taskAReading.id)).status).toBe(200)
@@ -340,10 +340,10 @@ it('migration: complete generated DDL and backfill upgrade pre-T10 tables atomic
 })
 
 it('migration: equal-time different-Task events retain their own causal Review through full DDL upgrade', async () => {
-  await db.delete(versionPrerequisites).where(eq(versionPrerequisites.learningPathVersionId, fx.versions.version1.id))
-  await db.update(versionSkills).set({ xpThreshold: 0 }).where(eq(versionSkills.learningPathVersionId, fx.versions.version1.id))
-  await db.update(versionTasks).set({ xpReward: 7 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskB.id)))
-  await db.update(versionTasks).set({ xpReward: 11 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskAReading.id)))
+  await amendPublished(db, (tx) => tx.delete(versionPrerequisites).where(eq(versionPrerequisites.learningPathVersionId, fx.versions.version1.id)))
+  await amendPublished(db, (tx) => tx.update(versionSkills).set({ xpThreshold: 0 }).where(eq(versionSkills.learningPathVersionId, fx.versions.version1.id)))
+  await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward: 7 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskB.id))))
+  await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward: 11 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskAReading.id))))
   const awardedAt = new Date('2026-10-01T01:00:00Z'), revokedAt = new Date('2026-10-01T02:00:00Z'), restoredAt = new Date('2026-10-01T03:00:00Z')
   const evidence: { taskId: string; skillId: string; reward: number; required: boolean; original: string; restored: string | null; reason: string }[] = []
   for (const [taskId, skillId, reward, required] of [
@@ -365,7 +365,7 @@ it('migration: equal-time different-Task events retain their own causal Review t
   }
   const peer = (await (await request(`/invitations/${fx.invitations.toPeer.id}/accept`, 'peer', 'POST')).json() as any).enrollment.id as string
   const [other] = await db.insert(enrollments).values({ accountId: fx.accounts.learner.id, learningPathVersionId: fx.versions.version2.id }).returning()
-  await db.update(versionTasks).set({ xpReward: 5 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version2.id), eq(versionTasks.taskId, fx.content.taskA.id)))
+  await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward: 5 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version2.id), eq(versionTasks.taskId, fx.content.taskA.id))))
   const isolated: { enrollment: string; version: string; revision: string; reward: number }[] = []
   for (const [enrollment, version, actor, reward] of [[peer, fx.versions.version1.id, 'peer', 20], [other.id, fx.versions.version2.id, 'learner', 5]] as const) {
     const revision = await send(fx.content.taskA.id, enrollment, actor)
@@ -414,8 +414,8 @@ it('migration: equal-time different-Task events retain their own causal Review t
 
 it('migration: multi-Required Mastery excludes simultaneous Enrichment and redundant Approval causes', async () => {
   const [extra] = await db.insert(tasks).values({ skillId: fx.content.skillA.id }).returning()
-  await db.insert(versionTasks).values({ learningPathVersionId: fx.versions.version1.id, taskId: extra.id, skillId: fx.content.skillA.id, title: 'Second Required evidence', required: true, xpReward: 0 })
-  await db.update(versionTasks).set({ xpReward: 11 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskAReading.id)))
+  await amendPublished(db, (tx) => tx.insert(versionTasks).values({ learningPathVersionId: fx.versions.version1.id, taskId: extra.id, skillId: fx.content.skillA.id, title: 'Second Required evidence', required: true, xpReward: 0 }))
+  await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward: 11 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskAReading.id))))
   const moments = [1, 2, 3, 4].map((hour) => new Date(`2026-10-01T0${hour}:00:00Z`))
   const initial = await send()
   expect((await approve(initial)).status).toBe(201)

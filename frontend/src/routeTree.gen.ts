@@ -16,6 +16,7 @@ import { Route as CoachIndexRouteImport } from './routes/coach.index'
 import { Route as PathsPathIdRouteImport } from './routes/paths.$pathId'
 import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces.$workspaceId'
 import { Route as CoachPathsPathIdRouteImport } from './routes/coach.paths.$pathId'
+import { Route as CoachVersionsVersionIdRouteImport } from './routes/coach.versions.$versionId'
 import { Route as CoachWorkspacesWorkspaceIdRouteImport } from './routes/coach.workspaces.$workspaceId'
 
 const IndexRoute = IndexRouteImport.update({
@@ -53,6 +54,11 @@ const CoachPathsPathIdRoute = CoachPathsPathIdRouteImport.update({
   path: '/coach/paths/$pathId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CoachVersionsVersionIdRoute = CoachVersionsVersionIdRouteImport.update({
+  id: '/coach/versions/$versionId',
+  path: '/coach/versions/$versionId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CoachWorkspacesWorkspaceIdRoute =
   CoachWorkspacesWorkspaceIdRouteImport.update({
     id: '/coach/workspaces/$workspaceId',
@@ -68,6 +74,7 @@ export interface FileRoutesByFullPath {
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/coach/': typeof CoachIndexRoute
   '/coach/paths/$pathId': typeof CoachPathsPathIdRoute
+  '/coach/versions/$versionId': typeof CoachVersionsVersionIdRoute
   '/coach/workspaces/$workspaceId': typeof CoachWorkspacesWorkspaceIdRoute
 }
 export interface FileRoutesByTo {
@@ -78,6 +85,7 @@ export interface FileRoutesByTo {
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/coach': typeof CoachIndexRoute
   '/coach/paths/$pathId': typeof CoachPathsPathIdRoute
+  '/coach/versions/$versionId': typeof CoachVersionsVersionIdRoute
   '/coach/workspaces/$workspaceId': typeof CoachWorkspacesWorkspaceIdRoute
 }
 export interface FileRoutesById {
@@ -89,6 +97,7 @@ export interface FileRoutesById {
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/coach/': typeof CoachIndexRoute
   '/coach/paths/$pathId': typeof CoachPathsPathIdRoute
+  '/coach/versions/$versionId': typeof CoachVersionsVersionIdRoute
   '/coach/workspaces/$workspaceId': typeof CoachWorkspacesWorkspaceIdRoute
 }
 export interface FileRouteTypes {
@@ -101,6 +110,7 @@ export interface FileRouteTypes {
     | '/workspaces/$workspaceId'
     | '/coach/'
     | '/coach/paths/$pathId'
+    | '/coach/versions/$versionId'
     | '/coach/workspaces/$workspaceId'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -111,6 +121,7 @@ export interface FileRouteTypes {
     | '/workspaces/$workspaceId'
     | '/coach'
     | '/coach/paths/$pathId'
+    | '/coach/versions/$versionId'
     | '/coach/workspaces/$workspaceId'
   id:
     | '__root__'
@@ -121,6 +132,7 @@ export interface FileRouteTypes {
     | '/workspaces/$workspaceId'
     | '/coach/'
     | '/coach/paths/$pathId'
+    | '/coach/versions/$versionId'
     | '/coach/workspaces/$workspaceId'
   fileRoutesById: FileRoutesById
 }
@@ -132,6 +144,7 @@ export interface RootRouteChildren {
   WorkspacesWorkspaceIdRoute: typeof WorkspacesWorkspaceIdRoute
   CoachIndexRoute: typeof CoachIndexRoute
   CoachPathsPathIdRoute: typeof CoachPathsPathIdRoute
+  CoachVersionsVersionIdRoute: typeof CoachVersionsVersionIdRoute
   CoachWorkspacesWorkspaceIdRoute: typeof CoachWorkspacesWorkspaceIdRoute
 }
 
@@ -186,6 +199,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CoachPathsPathIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/coach/versions/$versionId': {
+      id: '/coach/versions/$versionId'
+      path: '/coach/versions/$versionId'
+      fullPath: '/coach/versions/$versionId'
+      preLoaderRoute: typeof CoachVersionsVersionIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/coach/workspaces/$workspaceId': {
       id: '/coach/workspaces/$workspaceId'
       path: '/coach/workspaces/$workspaceId'
@@ -204,6 +224,7 @@ const rootRouteChildren: RootRouteChildren = {
   WorkspacesWorkspaceIdRoute: WorkspacesWorkspaceIdRoute,
   CoachIndexRoute: CoachIndexRoute,
   CoachPathsPathIdRoute: CoachPathsPathIdRoute,
+  CoachVersionsVersionIdRoute: CoachVersionsVersionIdRoute,
   CoachWorkspacesWorkspaceIdRoute: CoachWorkspacesWorkspaceIdRoute,
 }
 export const routeTree = rootRouteImport

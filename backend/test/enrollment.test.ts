@@ -67,7 +67,7 @@ describe('AC1: controlled fixture identity', () => {
 
   it('rejects a Task definition under a Skill that does not own the Task', async () => {
     const { skillA, skillB, taskA } = fx.content
-    const [draft] = await db.insert(learningPathVersions).values({ learningPathId: fx.paths.path.id, versionNumber: 3 }).returning()
+    const [draft] = await db.insert(learningPathVersions).values({ learningPathId: fx.paths.path.id, versionNumber: 3, title: 'Linear Algebra' }).returning()
     await db.insert(versionSkills).values([skillA, skillB].map((skill) => ({ learningPathVersionId: draft.id, skillId: skill.id, title: 'S', learningOutcome: 'O' })))
     const error = await db.insert(versionTasks)
       .values({ learningPathVersionId: draft.id, taskId: taskA.id, skillId: skillB.id, title: 'Wrong Skill', required: true })

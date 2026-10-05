@@ -6,7 +6,7 @@ import { versionPrerequisites, versionSkills, versionTasks } from '../src/db/sch
 import { FIXTURE_IDENTITY_HEADER, fixtureIdentity } from '../src/identity'
 import { waitForBlockedBy } from './support/blocking'
 import { prepareTestDatabase, resetTestDatabase, TEST_DATABASE_URL } from './support/database'
-import { seedEnrollmentFixture, seedPersonalFixture, type EnrollmentFixture } from './support/fixtures'
+import { amendPublished, seedEnrollmentFixture, seedPersonalFixture, type EnrollmentFixture } from './support/fixtures'
 
 /**
  * P2 gate (T14): competing learning requests across Enrollment, Submission,
@@ -22,10 +22,10 @@ beforeEach(async () => {
   fx = await seedEnrollmentFixture(db)
   app = createApp({ db, identity: fixtureIdentity(fx.identities) })
   const v1 = fx.versions.version1.id
-  await db.update(versionTasks).set({ xpReward: 20 }).where(and(eq(versionTasks.learningPathVersionId, v1), eq(versionTasks.taskId, fx.content.taskA.id)))
-  await db.update(versionTasks).set({ xpReward: 5 }).where(and(eq(versionTasks.learningPathVersionId, v1), eq(versionTasks.taskId, fx.content.taskB.id)))
-  await db.update(versionSkills).set({ xpThreshold: 20 }).where(and(eq(versionSkills.learningPathVersionId, v1), eq(versionSkills.skillId, fx.content.skillB.id)))
-  await db.insert(versionPrerequisites).values({ learningPathVersionId: v1, prerequisiteSkillId: fx.content.skillA.id, skillId: fx.content.skillB.id })
+  await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward: 20 }).where(and(eq(versionTasks.learningPathVersionId, v1), eq(versionTasks.taskId, fx.content.taskA.id))))
+  await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward: 5 }).where(and(eq(versionTasks.learningPathVersionId, v1), eq(versionTasks.taskId, fx.content.taskB.id))))
+  await amendPublished(db, (tx) => tx.update(versionSkills).set({ xpThreshold: 20 }).where(and(eq(versionSkills.learningPathVersionId, v1), eq(versionSkills.skillId, fx.content.skillB.id))))
+  await amendPublished(db, (tx) => tx.insert(versionPrerequisites).values({ learningPathVersionId: v1, prerequisiteSkillId: fx.content.skillA.id, skillId: fx.content.skillB.id }))
   enrollmentId = (await (await accept()).json() as any).enrollment.id
 })
 
@@ -211,7 +211,7 @@ it('AC2/3: unordered sends and duplicate Approvals of one revision settle on a s
     await resetTestDatabase(db)
     fx = await seedEnrollmentFixture(db)
     app = createApp({ db, identity: fixtureIdentity(fx.identities) })
-    await db.update(versionTasks).set({ xpReward: 20 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskA.id)))
+    await amendPublished(db, (tx) => tx.update(versionTasks).set({ xpReward: 20 }).where(and(eq(versionTasks.learningPathVersionId, fx.versions.version1.id), eq(versionTasks.taskId, fx.content.taskA.id))))
     enrollmentId = (await (await accept()).json() as any).enrollment.id
     const first = await sent()
     const responses = await Promise.all([approve(first), send(), approve(first), send()])

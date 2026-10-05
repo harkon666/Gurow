@@ -18,11 +18,12 @@ bun --bun run dev
 | `/paths/$pathId` | One personal Learning Path for its owner: the editor autosaves the document (T16), and the learning panels track Task completion, rewards, Mastery declarations, XP Thresholds and Access Overrides, showing only backend-confirmed records (T17) |
 | `/coach` | The owning-Coach context: the Coach Workspaces the Account owns and a form to create one (T18). The header's Personal/Coaching switch changes context; coach pages never read personal data |
 | `/coach/workspaces/$workspaceId` | One Coach Workspace and its Learning Paths, for its owner only |
-| `/coach/paths/$pathId` | A Path's Draft in the same editor, with Draft rules: Required/Enrichment Tasks, rewards, Optional Skills and XP Thresholds |
+| `/coach/paths/$pathId` | A Path's Draft in the same editor, with Draft rules: Required/Enrichment Tasks, rewards, Optional Skills and XP Thresholds. "Publish Version N" publishes a saved Draft or lists the blocked required Skills and their unmet requirements (T19). Without a Draft, the latest published Version is shown read-only with "Prepare Version N+1 as a Draft" |
+| `/coach/versions/$versionId` | One published Version, read-only, for the owning Coach (T19) |
 | `/editor` | The P1 local-fixture editor (localStorage only, no Account data) until T16 |
 | `/api/*` | Same-origin forwarder to the Hono backend at `GUROW_API_ORIGIN` (default `http://127.0.0.1:3001`) |
 
-For local sign-in, run the backend (`cd ../backend && bun run dev`, with `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL=http://localhost:3000` in `backend/.env`) next to `bun run dev`. Verification links are printed in the backend log. `bun run check:t15` builds the app and runs the browser sign-in check against a separate `gurow_browser_test` database. `bun run check:t17` does the same for the personal learning flow on `gurow_t17_browser_test`. `bun run check:t18` covers Coach Workspaces and Drafts on `gurow_t18_browser_test`.
+For local sign-in, run the backend (`cd ../backend && bun run dev`, with `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL=http://localhost:3000` in `backend/.env`) next to `bun run dev`. Verification links are printed in the backend log. `bun run check:t15` builds the app and runs the browser sign-in check against a separate `gurow_browser_test` database. `bun run check:t17` does the same for the personal learning flow on `gurow_t17_browser_test`. `bun run check:t18` covers Coach Workspaces and Drafts on `gurow_t18_browser_test`, and `bun run check:t19` publication and new Versions on `gurow_t19_browser_test`.
 
 # Building For Production
 

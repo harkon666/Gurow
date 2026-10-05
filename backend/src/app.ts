@@ -64,6 +64,14 @@ const DRAFT_REFUSAL_STATUS: Record<coaching.DraftRefusal, ContentfulStatusCode> 
   task_missing: 422,
 }
 
+const PUBLICATION_REFUSAL_STATUS: Record<coaching.PublicationRefusal, ContentfulStatusCode> = {
+  learning_path_not_found: 404,
+  stale_revision: 409,
+  no_open_draft: 409,
+  draft_already_open: 409,
+  publication_blocked: 422,
+}
+
 const MAX_TEXT_LENGTH = 50_000
 const MAX_URLS = 20
 const MAX_URL_LENGTH = 2_048
@@ -406,6 +414,33 @@ export function createApp({ db, identity, auth }: { db: Database; identity: Iden
     const result = await coaching.saveCoachDraft(db, pathId, c.get('accountId'), input.value)
     if (!result.ok) return c.json({ error: result.refusal, detail: result.detail, ...(result.current ? { current: result.current } : {}) }, DRAFT_REFUSAL_STATUS[result.refusal])
     return c.json(result.document)
+  })
+
+  // Publication (ADR 0005, 0008): both changes are based on the revision the Coach saw.
+  for (const [segment, change, created] of [['publication', coaching.publishDraft, 200], ['drafts', coaching.prepareDraft, 201]] as const) {
+    app.post(`${coachPath}/${segment}`, async (c) => {
+      const pathId = c.req.param('pathId')
+      if (!UUID.test(pathId)) return c.json({ error: 'learning_path_not_found' }, 404)
+      const body: unknown = await c.req.json().catch(() => null)
+      const expectedRevision = typeof body === 'object' && body !== null ? (body as Record<string, unknown>).expectedRevision : undefined
+      if (typeof expectedRevision !== 'number' || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+        if (!await coaching.readCoachPath(db, pathId, c.get('accountId'))) return c.json({ error: 'learning_path_not_found' }, 404)
+        return c.json({ error: 'invalid_request', detail: 'expectedRevision must be a non-negative integer' }, 422)
+      }
+      const result = await change(db, pathId, c.get('accountId'), expectedRevision)
+      if (!result.ok) {
+        const { ok: _, refusal, ...rest } = result
+        return c.json({ error: refusal, ...rest }, PUBLICATION_REFUSAL_STATUS[refusal])
+      }
+      return c.json(result.document, created)
+    })
+  }
+
+  app.get('/coach/learning-path-versions/:versionId', async (c) => {
+    const versionId = c.req.param('versionId')
+    const document = UUID.test(versionId) ? await coaching.readCoachVersion(db, versionId, c.get('accountId')) : null
+    if (!document) return c.json({ error: 'version_not_found' }, 404)
+    return c.json(document)
   })
 
   app.get('/enrollments/:enrollmentId/learning-state', async (c) => {
