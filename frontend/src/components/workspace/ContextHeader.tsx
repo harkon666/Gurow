@@ -32,6 +32,7 @@ export function ContextHeader({ account, onSignOut, context = { kind: 'personal'
             </span>
             <nav id="context-switch" aria-label="Learning context" className="ml-3 flex items-center gap-1 text-[11px]">
               <Link id="switch-to-personal" to="/" aria-current={context.kind === 'personal' ? 'page' : undefined} className={switchClass(context.kind === 'personal')}>Personal</Link>
+              <Link id="switch-to-learning" to="/learning" aria-current={context.kind === 'learner' ? 'page' : undefined} className={switchClass(context.kind === 'learner')}>Learning</Link>
               <Link id="switch-to-coach" to="/coach" aria-current={context.kind === 'coach' ? 'page' : undefined} className={switchClass(context.kind === 'coach')}>Coaching</Link>
             </nav>
           </>

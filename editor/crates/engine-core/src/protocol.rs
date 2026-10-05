@@ -81,6 +81,26 @@ pub enum EditorCommand {
         offset_y: f32,
         zoom: f32,
     },
+    /// A read-only canvas can be panned, zoomed and selected, but its document
+    /// (cards, positions, connections) cannot be edited.
+    SetReadOnly {
+        read_only: bool,
+    },
+}
+
+impl EditorCommand {
+    /// Whether the command changes the document or its edit history, which a
+    /// read-only canvas refuses. Loading a document replaces it rather than editing it.
+    pub fn edits_document(&self) -> bool {
+        matches!(
+            self,
+            EditorCommand::CreateCard { .. }
+                | EditorCommand::ConnectSkills { .. }
+                | EditorCommand::DisconnectSkills { .. }
+                | EditorCommand::Undo
+                | EditorCommand::Redo
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -134,6 +134,12 @@ export const SetCameraCommandSchema = z.object({
   zoom: z.number(),
 })
 
+/** A read-only canvas pans, zooms and selects, but refuses edits to its document. */
+export const SetReadOnlyCommandSchema = z.object({
+  type: z.literal('SetReadOnly'),
+  read_only: z.boolean(),
+})
+
 export const EditorCommandSchema = z.discriminatedUnion('type', [
   LoadDocumentCommandSchema,
   CreateCardCommandSchema,
@@ -150,6 +156,7 @@ export const EditorCommandSchema = z.discriminatedUnion('type', [
   DisconnectSkillsCommandSchema,
   ExportSnapshotCommandSchema,
   SetCameraCommandSchema,
+  SetReadOnlyCommandSchema,
 ])
 
 /** Events emitted by the editor engine after a command has been applied. */

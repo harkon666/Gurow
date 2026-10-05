@@ -437,6 +437,12 @@ describe('Editor Protocol Schemas (Matt Pocock SDD)', () => {
       })
     })
 
+    it('validates the SetReadOnly command and rejects a non-boolean flag', () => {
+      expect(EditorCommandSchema.parse({ type: 'SetReadOnly', read_only: true })).toEqual({ type: 'SetReadOnly', read_only: true })
+      expect(() => EditorCommandSchema.parse({ type: 'SetReadOnly', read_only: 'yes' })).toThrow()
+      expect(() => EditorCommandSchema.parse({ type: 'SetReadOnly' })).toThrow()
+    })
+
     it('validates SnapshotExported event', () => {
       const snapshotEvent = EditorEventSchema.parse({
         type: 'SnapshotExported',

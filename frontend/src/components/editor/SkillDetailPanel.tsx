@@ -24,6 +24,7 @@ interface SkillDetailPanelProps {
   onClearRejection?: () => void
   tasks?: PanelTask[]
   outcome?: string
+  /** Makes Tasks editable; without it they are shown read-only. */
   onUpdateTask?: (taskId: string, updates: Partial<PanelTask>) => void
   /** Makes the learning outcome editable. */
   onUpdateOutcome?: (outcome: string) => void
@@ -135,6 +136,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
   const incomingPrereqs = connections.filter((c) => c.to_id === selectedSkill.id)
   const outgoingDependents = connections.filter((c) => c.from_id === selectedSkill.id)
 
+  const tasksEditable = onUpdateTask !== undefined
   const otherSkills = allSkills.filter((s) => s.id !== selectedSkill.id)
   // Ensure validTargetId strictly belongs to otherSkills, preventing self-connection or stale targets
   const validTargetId =
@@ -354,6 +356,25 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
                   id={`task-container-${task.id}`}
                   className="rounded-xl bg-slate-800/40 p-3.5 border border-slate-700/50 space-y-2.5 transition-colors focus-within:border-blue-500/50"
                 >
+                  {!tasksEditable && (
+                    <div className="space-y-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <h5 id={`task-title-${task.id}`} className="text-xs font-semibold text-slate-100">{task.title}</h5>
+                        {task.required !== undefined && <span
+                          id={`task-badge-${task.id}`}
+                          className={`shrink-0 text-[10px] uppercase font-semibold px-1.5 py-0.5 rounded ${
+                            task.required
+                              ? 'text-amber-400 bg-amber-400/10 border border-amber-400/20'
+                              : 'text-slate-400 bg-slate-800 border border-slate-700'
+                          }`}
+                        >
+                          {task.required ? 'Required' : 'Enrichment'}
+                        </span>}
+                      </div>
+                      {task.description && <p id={`task-description-${task.id}`} className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap">{task.description}</p>}
+                    </div>
+                  )}
+                  {tasksEditable && <>
                   <div className="flex items-center justify-between gap-2">
                     <label
                       htmlFor={`task-edit-title-${task.id}`}
@@ -420,6 +441,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
                       <span>Is Required Task (Mandatory for Skill Mastery)</span>
                     </label>
                   </div>}
+                  </>}
                   {renderTaskExtra?.(task.id)}
                 </div>
               ))}

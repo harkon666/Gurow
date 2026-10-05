@@ -136,7 +136,7 @@ async function main() {
     check(ada.email === 'ada@gurow.test', `account shown as ${ada.email}`)
     check(ada.verification === 'Email not verified', `new Account shown as ${ada.verification}`)
     check(!/coach|learner/i.test(ada.header), `the header names an Account type: ${ada.header}`)
-    check(JSON.stringify(ada.contextSwitch) === JSON.stringify(['Personal:page', 'Coaching:']), `context switch: ${ada.contextSwitch}`)
+    check(JSON.stringify(ada.contextSwitch) === JSON.stringify(['Personal:page', 'Learning:', 'Coaching:']), `context switch: ${ada.contextSwitch}`)
     check(ada.paths.includes('No Learning Paths yet.'), `unexpected Workspace contents: ${ada.paths}`)
     pass('sign-up enters a Personal Workspace', `${ada.id}, context "${ada.context}", ${ada.email}, ${ada.verification}`)
 

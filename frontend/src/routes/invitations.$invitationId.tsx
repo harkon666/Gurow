@@ -178,6 +178,9 @@ function InvitationPage() {
               {outcome.enrollment.status === 'inactive' && (
                 <p id="enrollment-inactive" className="text-xs text-amber-200">This Enrollment is inactive. Accepting an Invitation does not reactivate it; only the Coach can.</p>
               )}
+              <Link id="open-enrollment" to="/enrollments/$enrollmentId" params={{ enrollmentId: outcome.enrollment.id }} className="self-start text-xs text-violet-300 hover:text-violet-200">
+                Open {outcome.offer.learningPathTitle}, Version {outcome.offer.versionNumber}
+              </Link>
             </div>
           )}
           {outcome?.kind === 'refused' && account && (

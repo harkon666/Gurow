@@ -273,3 +273,90 @@ export const deliverInvitation = (invitationId: string) => call<DeliveryOutcome>
 /** Closes the Version to new Enrollments, or reopens it; existing Enrollments are unaffected. */
 export const setEnrollmentClosure = (versionId: string, closed: boolean) =>
   call<{ enrollmentClosed: boolean; changed: boolean }>(`${versionRoute(versionId)}/enrollment-closure`, { method: closed ? 'PUT' : 'DELETE' })
+
+/** One of the signed-in Account's Enrollments as a learner, naming the one Version it joined. */
+export interface LearnerEnrollment {
+  id: string
+  status: 'active' | 'inactive'
+  learningPathVersionId: string
+  versionNumber: number
+  learningPathId: string
+  learningPathTitle: string
+  coachWorkspaceName: string
+  createdAt: string
+}
+
+export const listLearnerEnrollments = () => call<{ enrollments: LearnerEnrollment[] }>('/enrollments')
+
+/**
+ * The Version an Enrollment joined (ADR 0005), read-only, for its learner or the
+ * owning Coach (`viewer`): its own content and rules, and its shared Canvas Layout as
+ * the Coach last arranged it. Anyone else gets 404 `enrollment_not_found`.
+ */
+export interface EnrolledVersion {
+  enrollment: { id: string; status: 'active' | 'inactive'; learningPathVersionId: string; createdAt: string }
+  viewer: 'learner' | 'coach'
+  learningPath: { id: string; title: string; goal: string }
+  version: { id: string; versionNumber: number; publishedAt: string }
+  coachWorkspace: { id: string; name: string }
+  editor: PathDocument['editor']
+  application: { skills: PathSkill[] }
+}
+
+export const readEnrolledVersion = (enrollmentId: string) => call<EnrolledVersion>(`/enrollments/${encodeURIComponent(enrollmentId)}/version`)
+
+/** A Skill's current Access and Mastery within one Enrollment, as the backend derives them (ADR 0001, 0003). */
+export interface EnrollmentSkillState {
+  skillId: string
+  title: string
+  learningOutcome: string
+  optional: boolean
+  xpThreshold: number
+  mastery: boolean
+  access: boolean
+  accessOverride: { id: string; reason: string; occurredAt: string } | null
+  unmetPrerequisiteSkillIds: string[]
+  xpShortfall: number
+}
+
+/** A Task's contribution within one Enrollment: its reward counts once while a valid Approval exists (ADR 0007). */
+export interface EnrollmentTaskState {
+  taskId: string
+  skillId: string
+  title: string
+  required: boolean
+  xpReward: number
+  approved: boolean
+  xpContribution: number
+}
+
+/** An Enrollment's learning records: Enrollment-local XP, Access and Mastery per Skill, and their history. */
+export interface EnrollmentLearningState {
+  enrollmentId: string
+  learningPathVersionId: string
+  enrollmentStatus: 'active' | 'inactive'
+  xp: number
+  skills: EnrollmentSkillState[]
+  tasks: EnrollmentTaskState[]
+  xpHistory: { id: number; taskId: string; occurredAt: string; kind: 'award' | 'correction'; amount: number }[]
+  masteryHistory: { id: number; skillId: string; occurredAt: string; action: 'award' | 'revocation' }[]
+  taskStarts: { taskId: string; startedAt: string }[]
+}
+
+export const readEnrollmentLearningState = (enrollmentId: string) =>
+  call<{ learningState: EnrollmentLearningState }>(`/enrollments/${encodeURIComponent(enrollmentId)}/learning-state`)
+
+/** One sent, immutable Submission Revision and the Review of exactly that revision, if any (ADR 0002). */
+export interface SubmissionRevisionView {
+  id: string
+  revisionNumber: number
+  text: string
+  urls: string[]
+  sentAt: string
+  status: 'pending' | 'superseded' | 'approval' | 'approval_revoked' | 'changes_requested'
+  review?: { decision: 'approval' | 'changes_requested'; feedback: string | null; decidedAt: string; revokedAt: string | null; revocationReason: string | null }
+}
+
+/** A Task's Submission history in one Enrollment; a Task without one answers 404 `submission_not_found`. */
+export const readTaskSubmission = (enrollmentId: string, taskId: string) =>
+  call<{ submission: { id: string; revisions: SubmissionRevisionView[] } }>(`/enrollments/${encodeURIComponent(enrollmentId)}/tasks/${encodeURIComponent(taskId)}/submission`)

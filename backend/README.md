@@ -273,6 +273,20 @@ A Coach invites one email address to one published Version and opens or closes t
 
 `bun test test/invitation.test.ts test/mail.test.ts` runs these flows through the served backend with Better Auth sessions and a local Resend stand-in. `frontend/scripts/t20-invitation-check.ts` runs the browser flow; results are in [the T20 report](../docs/validation/t20-invitation-report.md).
 
+## Navigating an enrolled Version (T21)
+
+A learner reads the Version their Enrollment joined, beside the learning state under `/learning-state` ([ADR 0005](../docs/adr/0005-keep-learners-on-their-learning-path-version.md), [ADR 0013](../docs/adr/0013-limit-enrollment-data-visibility.md)).
+
+| Route | Effect |
+| --- | --- |
+| `GET /api/enrollments` | The caller's own Enrollments as a learner: `{ enrollments: [{ id, status, learningPathVersionId, versionNumber, learningPathId, learningPathTitle, coachWorkspaceName, createdAt }] }`. Other Accounts' Enrollments are never listed |
+| `GET /api/enrollments/:enrollmentId/version` | For the learner or the owning Coach (`viewer`): `{ enrollment, viewer, learningPath: { id, title, goal }, version: { id, versionNumber, publishedAt }, coachWorkspace, editor, application }`, with that Version's own content and its shared Canvas Layout as it stands now. Nothing about the Path's other Versions or Draft is included. Anyone else, or an unknown ID, gets 404 `enrollment_not_found` |
+
+- The view is read-only; there is no write method on it, and learners find no Coach route (404).
+- Later Versions never change it: the title, goal, Skills and Tasks are those the Enrollment joined.
+
+`bun test test/enrolled-version.test.ts` covers pinned content, the shared layout, lock state and history, learner writes and visibility. `frontend/scripts/t21-enrolled-navigation-check.ts` runs the browser flow; results are in [the T21 report](../docs/validation/t21-enrolled-navigation-report.md).
+
 ## P2 gate (T14)
 
 `bun test test/p2-gate.test.ts` runs competing requests across Enrollment, Submission, Review, revocation, override and lifecycle boundaries over the SPEC reference Path, plus the end-to-end reference flow, privacy matrix, lifecycle and personal 20→50 checks. Forced orders hold a row lock from a separate connection and observe `pg_blocking_pids` before starting the competing request. Unforced storms assert order-independent invariants in SQL at full timestamp precision. These invariants cover contiguous revision numbers, supersession at the successor's send, no Review on superseded work, no successor sent while a reviewed revision was pending, events at their causal time, one Submission per Task, and no revision sent while inactive. They also check that each Task's contribution moves only between zero and its reward. Results are recorded in [the P2 gate report](../docs/validation/t14-p2-gate-report.md).

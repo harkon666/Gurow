@@ -11,8 +11,10 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as EditorRouteImport } from './routes/editor'
+import { Route as LearningRouteImport } from './routes/learning'
 import { Route as ApiSplatRouteImport } from './routes/api/$'
 import { Route as CoachIndexRouteImport } from './routes/coach.index'
+import { Route as EnrollmentsEnrollmentIdRouteImport } from './routes/enrollments.$enrollmentId'
 import { Route as InvitationsInvitationIdRouteImport } from './routes/invitations.$invitationId'
 import { Route as PathsPathIdRouteImport } from './routes/paths.$pathId'
 import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces.$workspaceId'
@@ -30,6 +32,11 @@ const EditorRoute = EditorRouteImport.update({
   path: '/editor',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LearningRoute = LearningRouteImport.update({
+  id: '/learning',
+  path: '/learning',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiSplatRoute = ApiSplatRouteImport.update({
   id: '/api/$',
   path: '/api/$',
@@ -38,6 +45,11 @@ const ApiSplatRoute = ApiSplatRouteImport.update({
 const CoachIndexRoute = CoachIndexRouteImport.update({
   id: '/coach/',
   path: '/coach/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EnrollmentsEnrollmentIdRoute = EnrollmentsEnrollmentIdRouteImport.update({
+  id: '/enrollments/$enrollmentId',
+  path: '/enrollments/$enrollmentId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InvitationsInvitationIdRoute = InvitationsInvitationIdRouteImport.update({
@@ -75,7 +87,9 @@ const CoachWorkspacesWorkspaceIdRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/editor': typeof EditorRoute
+  '/learning': typeof LearningRoute
   '/api/$': typeof ApiSplatRoute
+  '/enrollments/$enrollmentId': typeof EnrollmentsEnrollmentIdRoute
   '/invitations/$invitationId': typeof InvitationsInvitationIdRoute
   '/paths/$pathId': typeof PathsPathIdRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
@@ -87,7 +101,9 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/editor': typeof EditorRoute
+  '/learning': typeof LearningRoute
   '/api/$': typeof ApiSplatRoute
+  '/enrollments/$enrollmentId': typeof EnrollmentsEnrollmentIdRoute
   '/invitations/$invitationId': typeof InvitationsInvitationIdRoute
   '/paths/$pathId': typeof PathsPathIdRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
@@ -100,7 +116,9 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/editor': typeof EditorRoute
+  '/learning': typeof LearningRoute
   '/api/$': typeof ApiSplatRoute
+  '/enrollments/$enrollmentId': typeof EnrollmentsEnrollmentIdRoute
   '/invitations/$invitationId': typeof InvitationsInvitationIdRoute
   '/paths/$pathId': typeof PathsPathIdRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
@@ -114,7 +132,9 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/editor'
+    | '/learning'
     | '/api/$'
+    | '/enrollments/$enrollmentId'
     | '/invitations/$invitationId'
     | '/paths/$pathId'
     | '/workspaces/$workspaceId'
@@ -126,7 +146,9 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/editor'
+    | '/learning'
     | '/api/$'
+    | '/enrollments/$enrollmentId'
     | '/invitations/$invitationId'
     | '/paths/$pathId'
     | '/workspaces/$workspaceId'
@@ -138,7 +160,9 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/editor'
+    | '/learning'
     | '/api/$'
+    | '/enrollments/$enrollmentId'
     | '/invitations/$invitationId'
     | '/paths/$pathId'
     | '/workspaces/$workspaceId'
@@ -151,7 +175,9 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   EditorRoute: typeof EditorRoute
+  LearningRoute: typeof LearningRoute
   ApiSplatRoute: typeof ApiSplatRoute
+  EnrollmentsEnrollmentIdRoute: typeof EnrollmentsEnrollmentIdRoute
   InvitationsInvitationIdRoute: typeof InvitationsInvitationIdRoute
   PathsPathIdRoute: typeof PathsPathIdRoute
   WorkspacesWorkspaceIdRoute: typeof WorkspacesWorkspaceIdRoute
@@ -177,6 +203,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EditorRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/learning': {
+      id: '/learning'
+      path: '/learning'
+      fullPath: '/learning'
+      preLoaderRoute: typeof LearningRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/$': {
       id: '/api/$'
       path: '/api/$'
@@ -189,6 +222,13 @@ declare module '@tanstack/react-router' {
       path: '/coach'
       fullPath: '/coach/'
       preLoaderRoute: typeof CoachIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/enrollments/$enrollmentId': {
+      id: '/enrollments/$enrollmentId'
+      path: '/enrollments/$enrollmentId'
+      fullPath: '/enrollments/$enrollmentId'
+      preLoaderRoute: typeof EnrollmentsEnrollmentIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/invitations/$invitationId': {
@@ -239,7 +279,9 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   EditorRoute: EditorRoute,
+  LearningRoute: LearningRoute,
   ApiSplatRoute: ApiSplatRoute,
+  EnrollmentsEnrollmentIdRoute: EnrollmentsEnrollmentIdRoute,
   InvitationsInvitationIdRoute: InvitationsInvitationIdRoute,
   PathsPathIdRoute: PathsPathIdRoute,
   WorkspacesWorkspaceIdRoute: WorkspacesWorkspaceIdRoute,

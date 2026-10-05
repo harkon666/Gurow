@@ -5,7 +5,7 @@ import { sessionIdentity, type Auth } from './auth'
 import * as authoring from './authoring'
 import * as coaching from './coaching'
 import type { Database } from './db/client'
-import { acceptInvitation, readEnrollment, readInvitation, type EnrollmentRefusal } from './enrollments'
+import { acceptInvitation, listLearnerEnrollments, readEnrolledVersion, readEnrollment, readInvitation, type EnrollmentRefusal } from './enrollments'
 import type { IdentityResolver } from './identity'
 import * as invitations from './invitations'
 import { changeAccessOverride } from './overrides'
@@ -141,6 +141,7 @@ export function createApp({ db, identity, auth, delivery }: { db: Database; iden
   })
 
   app.use('/invitations/*', authenticate)
+  app.use('/enrollments', authenticate)
   app.use('/enrollments/*', authenticate)
 
   // The addressee's view of an Invitation: what it offers, and any Enrollment they already hold in that Version.
@@ -158,6 +159,16 @@ export function createApp({ db, identity, auth, delivery }: { db: Database; iden
     const result = await acceptInvitation(db, invitationId, c.get('accountId'))
     if (!result.ok) return c.json({ error: result.refusal }, REFUSAL_STATUS[result.refusal])
     return c.json({ enrollment: result.enrollment, created: result.created, offer: result.offer }, result.created ? 201 : 200)
+  })
+
+  app.get('/enrollments', async (c) => c.json({ enrollments: await listLearnerEnrollments(db, c.get('accountId')) }))
+
+  // The pinned Version an Enrollment joined, read-only (ADR 0005); its learning records are under /learning-state.
+  app.get('/enrollments/:enrollmentId/version', async (c) => {
+    const enrollmentId = c.req.param('enrollmentId')
+    const enrolled = UUID.test(enrollmentId) ? await readEnrolledVersion(db, enrollmentId, c.get('accountId')) : null
+    if (!enrolled) return c.json({ error: 'enrollment_not_found' }, 404)
+    return c.json(enrolled)
   })
 
   app.get('/enrollments/:enrollmentId', async (c) => {

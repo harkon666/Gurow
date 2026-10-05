@@ -39,6 +39,8 @@ pub struct EditorState {
     pub interaction: InteractionState,
     pub undo_stack: Vec<HistoryAction>,
     pub redo_stack: Vec<HistoryAction>,
+    /// Navigation only: pressing a card selects it and drags pan the view.
+    pub read_only: bool,
 }
 
 impl Default for EditorState {
@@ -51,6 +53,7 @@ impl Default for EditorState {
             interaction: InteractionState::Idle,
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
+            read_only: false,
         }
     }
 }
@@ -190,6 +193,13 @@ impl EditorState {
         let mut events = Vec::new();
         let mut labels_changed = false;
 
+        if self.read_only && cmd.edits_document() {
+            events.push(EditorEvent::Error {
+                message: "This canvas is read-only: its cards, positions and connections cannot be changed here".into(),
+            });
+            return events;
+        }
+
         match cmd {
             EditorCommand::LoadDocument { document } => {
                 self.document = document;
@@ -258,7 +268,11 @@ impl EditorState {
                         });
                         labels_changed = true;
                     }
-                    if let Some(card) = self.document.find_card(card_id) {
+                    if self.read_only {
+                        self.interaction = InteractionState::Panning {
+                            last_screen_pos: screen_pt,
+                        };
+                    } else if let Some(card) = self.document.find_card(card_id) {
                         let world_pointer = self.camera.screen_to_world(screen_pt);
                         let grab_offset_world = Point::new(
                             world_pointer.x - card.position.x,
@@ -536,6 +550,13 @@ impl EditorState {
                     offset_y: self.camera.offset_y,
                     zoom: self.camera.zoom,
                 });
+            }
+            EditorCommand::SetReadOnly { read_only } => {
+                // A drag in progress would otherwise finish as a move after the switch.
+                if read_only && self.cancel_active_interaction(&mut events) {
+                    labels_changed = true;
+                }
+                self.read_only = read_only;
             }
         }
 

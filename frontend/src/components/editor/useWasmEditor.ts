@@ -53,6 +53,8 @@ interface UseWasmEditorOptions {
   initialCamera?: CameraState | null
   onOperationCompleted?: () => void
   onCameraChanged?: (camera: CameraState) => void
+  /** Navigation only (a learner's view of a published Version): pan, zoom and select, no edits. */
+  readOnly?: boolean
 }
 
 /**
@@ -71,6 +73,7 @@ export function useWasmEditor({
   initialCamera,
   onOperationCompleted,
   onCameraChanged,
+  readOnly = false,
 }: UseWasmEditorOptions) {
   const editorRef = useRef<WasmEditor | null>(null)
   const activeDeviceRef = useRef<any>(null)
@@ -381,8 +384,13 @@ export function useWasmEditor({
     }
   }, [dispatchInternal])
 
+  const readOnlyRef = useRef(readOnly)
+  readOnlyRef.current = readOnly
+
   const initializeEditor = useCallback((editor: WasmEditor) => {
     editorRef.current = editor
+    // Before any document or input reaches the engine, so no edit is ever possible in a read-only view.
+    if (readOnlyRef.current) dispatchInternal(editor, { type: 'SetReadOnly', read_only: true })
     // A new engine starts at its default camera; labels must not keep the old one.
     setLabelState(previous => ({ ...previous, labelCamera: ENGINE_INITIAL_CAMERA }))
     // Establish the viewport before restoring camera, in GPU and CPU paths.
@@ -658,7 +666,7 @@ export function useWasmEditor({
   // Keyboard shortcuts for Undo and Redo
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
+      if (readOnlyRef.current || ['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
         return
       }
 

@@ -963,3 +963,91 @@ fn test_export_snapshot_and_set_camera() {
 }
 
 
+
+#[test]
+fn test_read_only_canvas_navigates_and_selects_without_changing_the_document() {
+    let mut state = EditorState::new();
+    for (id, x) in [("card-a", 100.0), ("card-b", 400.0)] {
+        state.apply_command(EditorCommand::CreateCard {
+            id: id.into(),
+            title: id.into(),
+            position: Point::new(x, 100.0),
+            size: Some(Size::new(180.0, 80.0)),
+        });
+    }
+    state.apply_command(EditorCommand::ConnectSkills { from_id: "card-a".into(), to_id: "card-b".into() });
+    let events = state.apply_command(EditorCommand::SetReadOnly { read_only: true });
+    assert!(events.is_empty());
+    let document = state.document.clone();
+
+    // Pressing a card selects it; dragging from it pans the view instead of moving the card.
+    let down = state.apply_command(EditorCommand::PointerDown { screen_x: 120.0, screen_y: 120.0 });
+    assert!(down.iter().any(|e| matches!(e, EditorEvent::SelectionChanged { selected_id: Some(id), .. } if id == "card-a")));
+    let moved = state.apply_command(EditorCommand::PointerMove { screen_x: 220.0, screen_y: 170.0 });
+    let up = state.apply_command(EditorCommand::PointerUp { screen_x: 220.0, screen_y: 170.0 });
+    assert!(!moved.iter().chain(up.iter()).any(|e| matches!(e, EditorEvent::CardMoved { .. } | EditorEvent::HistoryChanged { .. })));
+    assert!(moved.iter().any(|e| matches!(e, EditorEvent::CameraChanged { offset_x, offset_y, .. } if *offset_x == 100.0 && *offset_y == 50.0)));
+    assert_eq!(state.document, document);
+    assert!(state.undo_stack.is_empty());
+    assert_eq!(state.selected_card_id.as_deref(), Some("card-a"));
+
+    // Empty canvas still pans and clears the selection; zoom and keyboard selection work.
+    state.apply_command(EditorCommand::PointerDown { screen_x: 790.0, screen_y: 590.0 });
+    state.apply_command(EditorCommand::PointerMove { screen_x: 780.0, screen_y: 580.0 });
+    state.apply_command(EditorCommand::PointerUp { screen_x: 780.0, screen_y: 580.0 });
+    assert_eq!(state.selected_card_id, None);
+    assert_eq!((state.camera.offset_x, state.camera.offset_y), (90.0, 40.0));
+    state.apply_command(EditorCommand::ZoomAt { screen_x: 400.0, screen_y: 300.0, factor: 1.5 });
+    assert_eq!(state.camera.zoom, 1.5);
+    let selected = state.apply_command(EditorCommand::SelectCard { id: Some("card-b".into()) });
+    assert!(selected.iter().any(|e| matches!(e, EditorEvent::SelectionChanged { selected_id: Some(id), .. } if id == "card-b")));
+
+    // Every document edit is refused with a reason and changes nothing.
+    let edits = [
+        EditorCommand::CreateCard { id: "card-c".into(), title: "C".into(), position: Point::new(0.0, 0.0), size: None },
+        EditorCommand::ConnectSkills { from_id: "card-b".into(), to_id: "card-a".into() },
+        EditorCommand::DisconnectSkills { from_id: "card-a".into(), to_id: "card-b".into() },
+        EditorCommand::Undo,
+        EditorCommand::Redo,
+    ];
+    for edit in edits {
+        let events = state.apply_command(edit.clone());
+        assert!(
+            events.iter().all(|e| matches!(e, EditorEvent::Error { message } if message.contains("read-only"))) && events.len() == 1,
+            "{:?} answered {:?}",
+            edit,
+            events
+        );
+    }
+    assert_eq!(state.document, document);
+
+    // Loading the shared layout still replaces the document; it is not an edit of it.
+    let mut layout = document.clone();
+    layout.cards[0].position = Point::new(-50.0, 300.0);
+    state.apply_command(EditorCommand::LoadDocument { document: layout.clone() });
+    assert_eq!(state.document, layout);
+
+    // Leaving read-only restores editing.
+    state.apply_command(EditorCommand::SetReadOnly { read_only: false });
+    let created = state.apply_command(EditorCommand::CreateCard { id: "card-c".into(), title: "C".into(), position: Point::new(0.0, 0.0), size: None });
+    assert!(created.iter().any(|e| matches!(e, EditorEvent::CardCreated { .. })));
+}
+
+#[test]
+fn test_entering_read_only_cancels_an_active_drag() {
+    let mut state = EditorState::new();
+    state.apply_command(EditorCommand::CreateCard {
+        id: "card-a".into(),
+        title: "A".into(),
+        position: Point::new(100.0, 100.0),
+        size: Some(Size::new(180.0, 80.0)),
+    });
+    state.apply_command(EditorCommand::PointerDown { screen_x: 120.0, screen_y: 120.0 });
+    state.apply_command(EditorCommand::PointerMove { screen_x: 220.0, screen_y: 220.0 });
+    let events = state.apply_command(EditorCommand::SetReadOnly { read_only: true });
+    assert!(events.iter().any(|e| matches!(e, EditorEvent::CardMoved { position, .. } if *position == Point::new(100.0, 100.0))));
+    assert_eq!(state.interaction, InteractionState::Idle);
+    state.apply_command(EditorCommand::PointerUp { screen_x: 220.0, screen_y: 220.0 });
+    assert_eq!(state.document.find_card("card-a").unwrap().position, Point::new(100.0, 100.0));
+    assert!(state.undo_stack.is_empty());
+}

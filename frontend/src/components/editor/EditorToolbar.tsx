@@ -14,6 +14,8 @@ interface EditorToolbarProps {
   onResetZoom?: () => void
   onCreateSkill?: () => void
   onSimulateFailure?: () => void
+  /** A navigation-only canvas: no history controls, and a note on who arranges the cards. */
+  readOnly?: boolean
 }
 
 export const EditorToolbar: React.FC<EditorToolbarProps> = ({
@@ -29,6 +31,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   onResetZoom,
   onCreateSkill,
   onSimulateFailure,
+  readOnly = false,
 }) => {
   return (
     <div className="@container h-12 shrink-0 border-b border-slate-800/80 bg-slate-900/60 px-4 flex items-center justify-between gap-3 backdrop-blur-sm z-20">
@@ -77,8 +80,18 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 
         <div className="h-4 w-px bg-slate-800 mx-1 shrink-0" />
 
+        {readOnly && (
+          <span
+            id="editor-read-only-badge"
+            title="You can pan, zoom and select. The Coach arranges the cards."
+            className="text-[11px] text-slate-300 bg-slate-800/60 border border-slate-700/60 px-2 py-0.5 rounded shrink-0 whitespace-nowrap"
+          >
+            View only · layout by the Coach
+          </span>
+        )}
+
         {/* History Controls */}
-        <div className="flex items-center gap-1 shrink-0">
+        {!readOnly && <div className="flex items-center gap-1 shrink-0">
           <button
             id="editor-undo-btn"
             onClick={onUndo}
@@ -111,7 +124,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             </svg>
             <span>Redo</span>
           </button>
-        </div>
+        </div>}
 
         <div className="h-4 w-px bg-slate-800 mx-1 shrink-0" />
 

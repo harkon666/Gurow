@@ -1,4 +1,5 @@
-import { and, eq, sql } from 'drizzle-orm'
+import { and, asc, eq, sql } from 'drizzle-orm'
+import { readVersionContent } from './coaching'
 import type { Database } from './db/client'
 import type { Tx } from './personal'
 import { accounts, coachWorkspaces, enrollmentInvitations, enrollments, learningPaths, learningPathVersions } from './db/schema'
@@ -144,4 +145,53 @@ export async function readEnrollment(db: Database, enrollmentId: string, account
     .where(eq(enrollments.id, enrollmentId))
   if (!row || (row.enrollment.accountId !== accountId && row.ownerId !== accountId)) return null
   return { ...row.enrollment, learningPathId: row.learningPathId, coachWorkspaceId: row.coachWorkspaceId }
+}
+
+/**
+ * The Account's own Enrollments as a learner, each naming the one Version it joined.
+ * Enrollments of other Accounts are never listed, whoever owns the Workspace.
+ */
+export async function listLearnerEnrollments(db: Database, accountId: string) {
+  return db
+    .select({
+      id: enrollments.id, status: enrollments.status, learningPathVersionId: enrollments.learningPathVersionId,
+      versionNumber: learningPathVersions.versionNumber, learningPathId: learningPaths.id, learningPathTitle: learningPathVersions.title,
+      coachWorkspaceName: coachWorkspaces.name, createdAt: enrollments.createdAt,
+    })
+    .from(enrollments)
+    .innerJoin(learningPathVersions, eq(learningPathVersions.id, enrollments.learningPathVersionId))
+    .innerJoin(learningPaths, eq(learningPaths.id, learningPathVersions.learningPathId))
+    .innerJoin(coachWorkspaces, eq(coachWorkspaces.id, learningPaths.coachWorkspaceId))
+    .where(eq(enrollments.accountId, accountId))
+    .orderBy(asc(enrollments.createdAt), asc(enrollments.id))
+}
+
+/**
+ * The Version an Enrollment joined, read-only, for its learner or the owning Coach
+ * (ADR 0005, 0013): that Version's own title, goal, Skills and Tasks, whatever was
+ * published later, with its shared Canvas Layout as the Coach last arranged it.
+ * Nothing about the Path's other Versions or Draft is included. Anyone else, and an
+ * unknown ID, gets null.
+ */
+export async function readEnrolledVersion(db: Database, enrollmentId: string, accountId: string) {
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .select({ enrollment: enrollments, version: learningPathVersions, learningPathId: learningPaths.id, workspace: coachWorkspaces })
+      .from(enrollments)
+      .innerJoin(learningPathVersions, eq(learningPathVersions.id, enrollments.learningPathVersionId))
+      .innerJoin(learningPaths, eq(learningPaths.id, learningPathVersions.learningPathId))
+      .innerJoin(coachWorkspaces, eq(coachWorkspaces.id, learningPaths.coachWorkspaceId))
+      .where(eq(enrollments.id, enrollmentId))
+    const viewer = row?.enrollment.accountId === accountId ? 'learner' as const : row?.workspace.ownerAccountId === accountId ? 'coach' as const : null
+    if (!row || !viewer) return null
+    const { enrollment, version, workspace } = row
+    return {
+      enrollment: { id: enrollment.id, status: enrollment.status, learningPathVersionId: enrollment.learningPathVersionId, createdAt: enrollment.createdAt },
+      viewer,
+      learningPath: { id: row.learningPathId, title: version.title, goal: version.goal },
+      version: { id: version.id, versionNumber: version.versionNumber, publishedAt: version.publishedAt },
+      coachWorkspace: { id: workspace.id, name: workspace.name },
+      ...await readVersionContent(tx, version.id),
+    }
+  })
 }

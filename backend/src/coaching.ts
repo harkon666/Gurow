@@ -98,14 +98,24 @@ async function readDocument(tx: Tx, path: typeof learningPaths.$inferSelect, sho
   const draft = all.find((version) => version.publishedAt === null) ?? null
   const published = all.filter((version) => version.publishedAt !== null)
   const source = shown ?? draft ?? published.at(-1) ?? null
-  const { skills: skillList, edges } = source ? await readContent(tx, source.id) : { skills: [], edges: [] }
-  const cards = new Map(source ? (await tx.select().from(versionSkillCards).where(eq(versionSkillCards.learningPathVersionId, source.id))).map((card) => [card.skillId, card]) : [])
   return {
     // A coach-mode Path's title and goal are those of the Version shown.
     learningPath: { id: path.id, coachWorkspaceId: path.coachWorkspaceId!, title: source!.title, goal: source!.goal, revision: path.revision },
     draft: draft ? { id: draft.id, versionNumber: draft.versionNumber } : null,
     version: source ? { id: source.id, versionNumber: source.versionNumber, publishedAt: source.publishedAt } : null,
     versions: published.map((version) => ({ id: version.id, versionNumber: version.versionNumber, publishedAt: version.publishedAt!, enrollmentClosed: version.enrollmentClosedAt !== null })),
+    ...(source ? await readVersionContent(tx, source.id) : { editor: { format_version: SNAPSHOT_FORMAT_VERSION, cards: [], connections: [] }, application: { skills: [] } }),
+  }
+}
+
+/**
+ * One Version as a document: its Canvas Layout as it stands now (the editor snapshot)
+ * beside its learning content and rules (the application payload).
+ */
+export async function readVersionContent(tx: Pick<Database, 'select'>, versionId: string) {
+  const { skills: skillList, edges } = await readContent(tx, versionId)
+  const cards = new Map((await tx.select().from(versionSkillCards).where(eq(versionSkillCards.learningPathVersionId, versionId))).map((card) => [card.skillId, card]))
+  return {
     editor: {
       format_version: SNAPSHOT_FORMAT_VERSION,
       cards: skillList.map((skill, index) => {
