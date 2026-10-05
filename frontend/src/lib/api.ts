@@ -79,9 +79,13 @@ async function changeSession(path: string, body: unknown) {
 
 export const signIn = (email: string, password: string) => changeSession('/auth/sign-in/email', { email, password })
 
-/** Creates the Account; the verification link sent to `email` returns the browser to the entry page. */
-export const signUp = (email: string, password: string) =>
-  changeSession('/auth/sign-up/email', { email, password, name: email.split('@')[0], callbackURL: '/' })
+/** Creates the Account; the verification link sent to `email` returns the browser to `returnTo`. */
+export const signUp = (email: string, password: string, returnTo = '/') =>
+  changeSession('/auth/sign-up/email', { email, password, name: email.split('@')[0], callbackURL: returnTo })
+
+/** Sends the signed-in Account a new verification link, which returns the browser to `returnTo`. */
+export const sendVerificationEmail = (email: string, returnTo: string) =>
+  call<{ status: boolean }>('/auth/send-verification-email', { method: 'POST', body: { email, callbackURL: returnTo } })
 
 export const signOut = () => changeSession('/auth/sign-out', {})
 
@@ -223,3 +227,49 @@ export const prepareCoachDraft = (pathId: string, expectedRevision: number) =>
 
 /** One published Version of a Path in the signed-in Coach's Workspace, read-only. */
 export const readCoachVersion = (versionId: string) => call<CoachPathDocument>(`/coach/learning-path-versions/${encodeURIComponent(versionId)}`)
+
+/** What an Enrollment Invitation offers: exactly one Version of one Path (CONTEXT.md). */
+export interface InvitationOffer { invitationId: string; learningPathVersionId: string; learningPathTitle: string; versionNumber: number; coachWorkspaceName: string }
+export interface EnrollmentSummary { id: string; status: 'active' | 'inactive' }
+
+/**
+ * The addressee's view of an Invitation. Anyone else is refused: 403
+ * `email_not_verified` or `email_mismatch`, or 404 `invitation_not_found`.
+ */
+export const readInvitation = (invitationId: string) =>
+  call<{ offer: InvitationOffer; enrollment: EnrollmentSummary | null }>(`/invitations/${encodeURIComponent(invitationId)}`)
+
+/**
+ * Accepts as the signed-in Account: 201 creates the Enrollment, 200 returns the one
+ * already held (its status unchanged). Refusals: `email_not_verified`, `email_mismatch`,
+ * `owner_cannot_enroll`, `enrollment_closed`, `version_not_published`, `invitation_not_found`.
+ */
+export const acceptInvitation = (invitationId: string) =>
+  call<{ enrollment: EnrollmentSummary & { learningPathVersionId: string }; created: boolean; offer: InvitationOffer }>(`/invitations/${encodeURIComponent(invitationId)}/accept`, { method: 'POST' })
+
+/**
+ * An Invitation as its Coach sees it, with what became of its last email: `sent` only
+ * when the provider accepted it, `logged` when no provider is configured on the server.
+ */
+export interface CoachInvitation {
+  id: string
+  email: string
+  createdAt: string
+  acceptedAt: string | null
+  delivery: { status: 'pending' | 'sent' | 'logged' | 'failed'; attempts: number; deliveredAt: string | null }
+}
+export interface DeliveryOutcome { invitation: CoachInvitation; delivered: boolean; deliveryError?: string }
+
+const versionRoute = (versionId: string) => `/coach/learning-path-versions/${encodeURIComponent(versionId)}`
+
+export const readAdmission = (versionId: string) => call<{ enrollmentClosed: boolean; invitations: CoachInvitation[] }>(`${versionRoute(versionId)}/invitations`)
+
+/** Stores an Invitation and delivers it; `delivered: false` (failed, or only logged) keeps it for another attempt. */
+export const inviteToVersion = (versionId: string, email: string) => call<DeliveryOutcome>(`${versionRoute(versionId)}/invitations`, { method: 'POST', body: { email } })
+
+/** Delivers a stored Invitation again; a failed attempt answers 502, a merely logged one 503, each with the Invitation. */
+export const deliverInvitation = (invitationId: string) => call<DeliveryOutcome>(`/coach/invitations/${encodeURIComponent(invitationId)}/delivery`, { method: 'POST' })
+
+/** Closes the Version to new Enrollments, or reopens it; existing Enrollments are unaffected. */
+export const setEnrollmentClosure = (versionId: string, closed: boolean) =>
+  call<{ enrollmentClosed: boolean; changed: boolean }>(`${versionRoute(versionId)}/enrollment-closure`, { method: closed ? 'PUT' : 'DELETE' })

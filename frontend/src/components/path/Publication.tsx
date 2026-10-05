@@ -1,5 +1,6 @@
 import { Link } from '@tanstack/react-router'
 import { useState, type ReactNode } from 'react'
+import { EnrollmentAdmission } from './Admission'
 import { prepareCoachDraft, publishCoachDraft, type BlockedSkill, type CoachPathDocument } from '../../lib/api'
 
 /**
@@ -128,51 +129,53 @@ export function VersionHistory({ versions, currentVersionId }: { versions: Coach
 /**
  * A published Version's learning content and rules, read-only: its own title and goal, Skills with outcomes,
  * Required or Optional designation, XP Thresholds and Prerequisites, and their Tasks
- * with Required or Enrichment designation and rewards.
+ * with Required or Enrichment designation and rewards. Below it, outside
+ * the read-only content, the Coach invites learners and controls admission.
  */
 export function PublishedVersionView({ document, actions }: { document: CoachPathDocument; actions?: ReactNode }) {
   const version = document.version!
   const titles = new Map(document.application.skills.map((skill) => [skill.id, skill.title]))
   const prerequisites = (id: string) => document.editor.connections.filter((edge) => edge.to_id === id).map((edge) => titles.get(edge.from_id) ?? edge.from_id)
-  const summary = document.versions.find((v) => v.id === version.id)
   return (
-    <section id="published-version" data-version-id={version.id} data-version-number={version.versionNumber} className="flex-1 min-h-0 overflow-y-auto p-6 flex flex-col gap-4 max-w-4xl">
-      <header className="flex flex-wrap items-center gap-3">
-        <h1 id="published-path-title" className="text-base font-semibold text-slate-100">{document.learningPath.title}</h1>
-        <span id="published-version-badge" className="text-xs px-2 py-1 rounded-lg border border-sky-800/60 text-sky-200 bg-slate-950/80">
-          Version {version.versionNumber} · published {version.publishedAt ? new Date(version.publishedAt).toLocaleString() : ''}
-        </span>
-        {summary?.enrollmentClosed && <span className="text-xs px-2 py-1 rounded-lg border border-slate-700 text-slate-300">Closed to new Enrollments</span>}
-        {actions}
-      </header>
-      {document.learningPath.goal && <p id="published-path-goal" className="text-xs text-slate-400">Goal: {document.learningPath.goal}</p>}
-      <p id="published-version-immutable" className="text-xs text-slate-400">
-        A published Version's learning content and rules cannot be edited, not even to correct a typo. Learners enrolled in it keep it as published; changes are prepared in a new Draft and published as a new Version.
-      </p>
-      <ol id="published-skills" className="flex flex-col gap-3">
-        {document.application.skills.map((skill) => (
-          <li key={skill.id} id={`published-skill-${skill.id}`} data-optional={skill.optional === true} className="border border-slate-800 rounded-xl p-3 bg-slate-900/50 flex flex-col gap-1.5">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 data-field="title" className="text-sm font-semibold text-slate-100">{skill.title}</h2>
-              <span className={`text-[10px] px-1.5 rounded border ${skill.optional ? 'text-sky-300 border-sky-900/70' : 'text-slate-300 border-slate-700'}`}>{skill.optional ? 'Optional' : 'Required'}</span>
-              {(skill.xpThreshold ?? 0) > 0 && <span data-field="threshold" className="text-[10px] px-1.5 rounded border text-amber-300 border-amber-900/70">needs {skill.xpThreshold} XP</span>}
-            </div>
-            <p data-field="outcome" className="text-xs text-slate-300">{skill.outcome}</p>
-            {prerequisites(skill.id).length > 0 && <p data-field="prerequisites" className="text-xs text-slate-400">Requires Mastery of: {prerequisites(skill.id).join(', ')}</p>}
-            {skill.tasks.length === 0 ? <p className="text-xs text-slate-500">No Tasks</p> : (
-              <ul className="flex flex-col gap-1">
-                {skill.tasks.map((task) => (
-                  <li key={task.id} id={`published-task-${task.id}`} data-required={task.required === true} className="text-xs text-slate-300 border-l-2 border-slate-700 pl-2">
-                    <span data-field="title" className="text-slate-100">{task.title}</span>
-                    <span className="text-slate-500"> · {task.required ? 'Required' : 'Enrichment'} · {task.xpReward ?? 0} XP</span>
-                    {task.description && <p className="text-slate-400">{task.description}</p>}
-                  </li>
-                ))}
-              </ul>
-            )}
-          </li>
-        ))}
-      </ol>
-    </section>
+    <div className="flex-1 min-h-0 overflow-y-auto p-6 flex flex-col gap-4 max-w-4xl">
+      <section id="published-version" data-version-id={version.id} data-version-number={version.versionNumber} className="flex flex-col gap-4">
+        <header className="flex flex-wrap items-center gap-3">
+          <h1 id="published-path-title" className="text-base font-semibold text-slate-100">{document.learningPath.title}</h1>
+          <span id="published-version-badge" className="text-xs px-2 py-1 rounded-lg border border-sky-800/60 text-sky-200 bg-slate-950/80">
+            Version {version.versionNumber} · published {version.publishedAt ? new Date(version.publishedAt).toLocaleString() : ''}
+          </span>
+          {actions}
+        </header>
+        {document.learningPath.goal && <p id="published-path-goal" className="text-xs text-slate-400">Goal: {document.learningPath.goal}</p>}
+        <p id="published-version-immutable" className="text-xs text-slate-400">
+          A published Version's learning content and rules cannot be edited, not even to correct a typo. Learners enrolled in it keep it as published; changes are prepared in a new Draft and published as a new Version.
+        </p>
+        <ol id="published-skills" className="flex flex-col gap-3">
+          {document.application.skills.map((skill) => (
+            <li key={skill.id} id={`published-skill-${skill.id}`} data-optional={skill.optional === true} className="border border-slate-800 rounded-xl p-3 bg-slate-900/50 flex flex-col gap-1.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 data-field="title" className="text-sm font-semibold text-slate-100">{skill.title}</h2>
+                <span className={`text-[10px] px-1.5 rounded border ${skill.optional ? 'text-sky-300 border-sky-900/70' : 'text-slate-300 border-slate-700'}`}>{skill.optional ? 'Optional' : 'Required'}</span>
+                {(skill.xpThreshold ?? 0) > 0 && <span data-field="threshold" className="text-[10px] px-1.5 rounded border text-amber-300 border-amber-900/70">needs {skill.xpThreshold} XP</span>}
+              </div>
+              <p data-field="outcome" className="text-xs text-slate-300">{skill.outcome}</p>
+              {prerequisites(skill.id).length > 0 && <p data-field="prerequisites" className="text-xs text-slate-400">Requires Mastery of: {prerequisites(skill.id).join(', ')}</p>}
+              {skill.tasks.length === 0 ? <p className="text-xs text-slate-500">No Tasks</p> : (
+                <ul className="flex flex-col gap-1">
+                  {skill.tasks.map((task) => (
+                    <li key={task.id} id={`published-task-${task.id}`} data-required={task.required === true} className="text-xs text-slate-300 border-l-2 border-slate-700 pl-2">
+                      <span data-field="title" className="text-slate-100">{task.title}</span>
+                      <span className="text-slate-500"> · {task.required ? 'Required' : 'Enrichment'} · {task.xpReward ?? 0} XP</span>
+                      {task.description && <p className="text-slate-400">{task.description}</p>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </li>
+          ))}
+        </ol>
+      </section>
+      <EnrollmentAdmission key={version.id} versionId={version.id} versionNumber={version.versionNumber} />
+    </div>
   )
 }

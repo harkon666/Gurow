@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as EditorRouteImport } from './routes/editor'
 import { Route as ApiSplatRouteImport } from './routes/api/$'
 import { Route as CoachIndexRouteImport } from './routes/coach.index'
+import { Route as InvitationsInvitationIdRouteImport } from './routes/invitations.$invitationId'
 import { Route as PathsPathIdRouteImport } from './routes/paths.$pathId'
 import { Route as WorkspacesWorkspaceIdRouteImport } from './routes/workspaces.$workspaceId'
 import { Route as CoachPathsPathIdRouteImport } from './routes/coach.paths.$pathId'
@@ -37,6 +38,11 @@ const ApiSplatRoute = ApiSplatRouteImport.update({
 const CoachIndexRoute = CoachIndexRouteImport.update({
   id: '/coach/',
   path: '/coach/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InvitationsInvitationIdRoute = InvitationsInvitationIdRouteImport.update({
+  id: '/invitations/$invitationId',
+  path: '/invitations/$invitationId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PathsPathIdRoute = PathsPathIdRouteImport.update({
@@ -70,6 +76,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/editor': typeof EditorRoute
   '/api/$': typeof ApiSplatRoute
+  '/invitations/$invitationId': typeof InvitationsInvitationIdRoute
   '/paths/$pathId': typeof PathsPathIdRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/coach/': typeof CoachIndexRoute
@@ -81,6 +88,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/editor': typeof EditorRoute
   '/api/$': typeof ApiSplatRoute
+  '/invitations/$invitationId': typeof InvitationsInvitationIdRoute
   '/paths/$pathId': typeof PathsPathIdRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/coach': typeof CoachIndexRoute
@@ -93,6 +101,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/editor': typeof EditorRoute
   '/api/$': typeof ApiSplatRoute
+  '/invitations/$invitationId': typeof InvitationsInvitationIdRoute
   '/paths/$pathId': typeof PathsPathIdRoute
   '/workspaces/$workspaceId': typeof WorkspacesWorkspaceIdRoute
   '/coach/': typeof CoachIndexRoute
@@ -106,6 +115,7 @@ export interface FileRouteTypes {
     | '/'
     | '/editor'
     | '/api/$'
+    | '/invitations/$invitationId'
     | '/paths/$pathId'
     | '/workspaces/$workspaceId'
     | '/coach/'
@@ -117,6 +127,7 @@ export interface FileRouteTypes {
     | '/'
     | '/editor'
     | '/api/$'
+    | '/invitations/$invitationId'
     | '/paths/$pathId'
     | '/workspaces/$workspaceId'
     | '/coach'
@@ -128,6 +139,7 @@ export interface FileRouteTypes {
     | '/'
     | '/editor'
     | '/api/$'
+    | '/invitations/$invitationId'
     | '/paths/$pathId'
     | '/workspaces/$workspaceId'
     | '/coach/'
@@ -140,6 +152,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   EditorRoute: typeof EditorRoute
   ApiSplatRoute: typeof ApiSplatRoute
+  InvitationsInvitationIdRoute: typeof InvitationsInvitationIdRoute
   PathsPathIdRoute: typeof PathsPathIdRoute
   WorkspacesWorkspaceIdRoute: typeof WorkspacesWorkspaceIdRoute
   CoachIndexRoute: typeof CoachIndexRoute
@@ -176,6 +189,13 @@ declare module '@tanstack/react-router' {
       path: '/coach'
       fullPath: '/coach/'
       preLoaderRoute: typeof CoachIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/invitations/$invitationId': {
+      id: '/invitations/$invitationId'
+      path: '/invitations/$invitationId'
+      fullPath: '/invitations/$invitationId'
+      preLoaderRoute: typeof InvitationsInvitationIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/paths/$pathId': {
@@ -220,6 +240,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   EditorRoute: EditorRoute,
   ApiSplatRoute: ApiSplatRoute,
+  InvitationsInvitationIdRoute: InvitationsInvitationIdRoute,
   PathsPathIdRoute: PathsPathIdRoute,
   WorkspacesWorkspaceIdRoute: WorkspacesWorkspaceIdRoute,
   CoachIndexRoute: CoachIndexRoute,

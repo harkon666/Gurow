@@ -77,7 +77,7 @@ describe('AC1: controlled fixture identity', () => {
 
   it('is not production authentication: the production resolver ignores the fixture header', async () => {
     const auth = createAuth({ db, baseURL: 'http://localhost:3000', secret: 'test-secret-with-at-least-32-characters!', sendVerificationEmail: async () => {} })
-    const production = createServer({ db, auth })
+    const production = createServer({ db, auth, delivery: { send: async () => 'logged' as const, link: (id) => `http://localhost:3000/invitations/${id}` } })
     const res = await production.request(`/api/invitations/${fx.invitations.toLearner.id}/accept`, { method: 'POST', headers: as('learner') })
     expect(res.status).toBe(401)
     expect(await storedEnrollments()).toHaveLength(0)

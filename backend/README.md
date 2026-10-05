@@ -6,7 +6,7 @@ Bun + Hono learning-domain service backed by PostgreSQL through Drizzle ([ADR 00
 
 ```sh
 docker compose up -d --wait   # from the repo root: PostgreSQL 18 on 127.0.0.1:5433
-cp .env.example .env          # database URLs, BETTER_AUTH_SECRET, BETTER_AUTH_URL, PORT
+cp .env.example .env          # database URLs, BETTER_AUTH_SECRET, BETTER_AUTH_URL, PORT, optional Resend
 bun install
 bun run db:migrate            # apply drizzle/ migrations to DATABASE_URL
 ```
@@ -41,7 +41,7 @@ Integration tests of P2 rules use `createApp` with `fixtureIdentity`, which maps
 
 - `email_verified` is not a sign-up or update input; Better Auth ignores client claims, and only the verification token sets it. Invitation acceptance (T07) reads the same column.
 - `personal_workspaces_owner_key` decides concurrent first entries: `INSERT … ON CONFLICT DO NOTHING` then a read, so racing entries all return the one Workspace.
-- No email provider is integrated: the served backend logs each verification link (`[gurow] email verification for …`). Password reset, email change, Account deletion and social sign-in are Account lifecycle policies outside T15.
+- Email leaves through Resend when `RESEND_API_KEY` and `MAIL_FROM` are set ([ADR 0023](../docs/adr/0023-deliver-email-through-resend.md)); otherwise the served backend logs each link (`[gurow] email verification for …`). Password reset, email change, Account deletion and social sign-in are Account lifecycle policies outside T15.
 
 `bun test test/sign-in.test.ts` covers sign-up/sign-in/sign-out, hashed credentials, refusal of anonymous, fixture-header, raw-ID, forged and signed-out sessions, one Workspace across sign-ins and 16 racing first entries, owner-only reads and writes across Account switching, client-claimed versus link-verified email with the invitation flow, sign-up over an existing address, and the absence of an Account type. `frontend/scripts/t15-sign-in-check.ts` runs the browser flow; results are in [the T15 report](../docs/validation/t15-sign-in-report.md).
 
@@ -253,6 +253,25 @@ A threshold is a progression rule rather than a learning record: it has no histo
 - Existing Enrollments keep their Version; nothing migrates them, and new Versions start with no Enrollment.
 
 `bun test test/publication.test.ts` covers per-Version titles and goals, forced-order races between direct writes and publication, the 60-versus-100 XP example with optional work offering the difference, self-funded thresholds, cascading blocked Prerequisites, empty and Enrichment-only Required Task sets, immutability through the API and directly in the database, a typo correction published as Version 2 while Version 1 stays readable, stable logical IDs with version-specific definitions, a fixture Enrollment that keeps its Version, progress and override, the non-owner matrix, and competing publications and preparations.
+
+## Invitations and Enrollment Closure (T20)
+
+A Coach invites one email address to one published Version and opens or closes that Version to new Enrollments; the addressee accepts through the emailed link ([ADR 0023](../docs/adr/0023-deliver-email-through-resend.md)). Coach routes answer 404 to every Account except the owner of the Version's Coach Workspace.
+
+| Route | Effect |
+| --- | --- |
+| `POST /api/coach/learning-path-versions/:versionId/invitations` `{ email }` | Stores the Invitation, then emails `${BETTER_AUTH_URL}/invitations/:id`. 201 `{ invitation, delivered, deliveryError? }`; `delivered` is true only when Resend accepted the email. A refused or unreachable provider keeps the Invitation as `delivery.status: "failed"`; without a configured provider it is `"logged"`, since the link was only written to the server log. 422 `invalid_invitation`, 409 `version_not_published` for a Draft |
+| `POST /api/coach/invitations/:invitationId/delivery` | Sends it again as a new attempt: 200 when delivered, 502 `invitation_delivery_failed` when the provider failed, 503 `email_not_configured` when no provider is configured; both with the Invitation |
+| `GET /api/coach/learning-path-versions/:versionId/invitations` | `{ enrollmentClosed, invitations: [{ id, email, createdAt, acceptedAt, delivery: { status, attempts, deliveredAt } }] }`, newest first |
+| `PUT` / `DELETE /api/coach/learning-path-versions/:versionId/enrollment-closure` | Closes or reopens the Version to new Enrollments: `{ enrollmentClosed, changed }`; repeating the current state changes nothing |
+| `GET /api/invitations/:invitationId` | For the verified addressee only: `{ offer: { learningPathTitle, versionNumber, coachWorkspaceName, … }, enrollment: { id, status } \| null }`; 403 `email_not_verified` or `email_mismatch` before anything is disclosed |
+| `POST /api/invitations/:invitationId/accept` | 201 creates the Enrollment in that Version only; 200 returns the one already held, status unchanged. 403 `owner_cannot_enroll`, 409 `enrollment_closed` |
+
+- Acceptance reads the Version `FOR SHARE` and closure updates it, so a closure committed first refuses the acceptance and an acceptance in progress finishes before the closure applies.
+- Closure only stops new Enrollments: existing ones, active or inactive, keep their status, and accepting again still answers with them. Invitations can be sent while closed, and admit once reopened. There is no expiry.
+- Delivery happens after the Invitation is stored and outside its transaction; each attempt sends Resend the `Idempotency-Key` `enrollment-invitation/<id>/<attempt>`. A server without `RESEND_API_KEY` never reports an email as sent.
+
+`bun test test/invitation.test.ts test/mail.test.ts` runs these flows through the served backend with Better Auth sessions and a local Resend stand-in. `frontend/scripts/t20-invitation-check.ts` runs the browser flow; results are in [the T20 report](../docs/validation/t20-invitation-report.md).
 
 ## P2 gate (T14)
 

@@ -1,5 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm'
 import type { Database } from './db/client'
+import type { Tx } from './personal'
 import { accounts, coachWorkspaces, enrollmentInvitations, enrollments, learningPaths, learningPathVersions } from './db/schema'
 
 export type EnrollmentRecord = typeof enrollments.$inferSelect
@@ -14,11 +15,60 @@ export type EnrollmentRefusal =
   | 'enrollment_closed'
   | 'enrollment_not_found'
 
+/** What an Invitation offers: exactly one Version of one Path, as that Version states it. */
+export interface InvitationOffer {
+  invitationId: string
+  learningPathVersionId: string
+  learningPathTitle: string
+  versionNumber: number
+  coachWorkspaceName: string
+}
+
 export type AcceptResult =
-  | { ok: true; enrollment: EnrollmentRecord; created: boolean }
+  | { ok: true; enrollment: EnrollmentRecord; created: boolean; offer: InvitationOffer }
   | { ok: false; refusal: EnrollmentRefusal }
 
 const sameEmail = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
+
+/**
+ * The Invitation as its addressee sees it: an unknown Invitation, an unverified
+ * Account and another address are refused in that order, before anything about the
+ * offer is disclosed. `lock` reads the Version FOR SHARE, so an Enrollment Closure
+ * either commits before this acceptance reads it or waits until the acceptance ends.
+ */
+async function addressedInvitation(tx: Tx, invitationId: string, accountId: string, lock: boolean) {
+  const query = tx
+    .select({
+      id: enrollmentInvitations.id,
+      email: enrollmentInvitations.email,
+      versionId: learningPathVersions.id,
+      versionNumber: learningPathVersions.versionNumber,
+      title: learningPathVersions.title,
+      publishedAt: learningPathVersions.publishedAt,
+      enrollmentClosedAt: learningPathVersions.enrollmentClosedAt,
+      workspaceName: coachWorkspaces.name,
+      workspaceOwnerId: coachWorkspaces.ownerAccountId,
+    })
+    .from(enrollmentInvitations)
+    .innerJoin(learningPathVersions, eq(learningPathVersions.id, enrollmentInvitations.learningPathVersionId))
+    .innerJoin(learningPaths, eq(learningPaths.id, learningPathVersions.learningPathId))
+    .innerJoin(coachWorkspaces, eq(coachWorkspaces.id, learningPaths.coachWorkspaceId))
+    .where(eq(enrollmentInvitations.id, invitationId))
+  const [invitation] = lock ? await query.for('share', { of: learningPathVersions }) : await query
+  if (!invitation) return { ok: false, refusal: 'invitation_not_found' } as const
+
+  const [account] = await tx.select().from(accounts).where(eq(accounts.id, accountId))
+  if (!account?.emailVerified) return { ok: false, refusal: 'email_not_verified' } as const
+  if (!sameEmail(account.email, invitation.email)) return { ok: false, refusal: 'email_mismatch' } as const
+  const offer: InvitationOffer = {
+    invitationId: invitation.id, learningPathVersionId: invitation.versionId, learningPathTitle: invitation.title,
+    versionNumber: invitation.versionNumber, coachWorkspaceName: invitation.workspaceName,
+  }
+  return { ok: true, invitation, offer } as const
+}
+
+const existingEnrollment = async (tx: Pick<Database, 'select'>, accountId: string, versionId: string) =>
+  (await tx.select().from(enrollments).where(and(eq(enrollments.accountId, accountId), eq(enrollments.learningPathVersionId, versionId))))[0] ?? null
 
 /**
  * Accepts an Enrollment Invitation for the acting Account (ADR 0005, 0011).
@@ -32,38 +82,20 @@ const sameEmail = (a: string, b: string) => a.trim().toLowerCase() === b.trim().
  */
 export async function acceptInvitation(db: Database, invitationId: string, accountId: string): Promise<AcceptResult> {
   return db.transaction(async (tx) => {
-    const [invitation] = await tx
-      .select({
-        id: enrollmentInvitations.id,
-        email: enrollmentInvitations.email,
-        versionId: learningPathVersions.id,
-        publishedAt: learningPathVersions.publishedAt,
-        enrollmentClosedAt: learningPathVersions.enrollmentClosedAt,
-        workspaceOwnerId: coachWorkspaces.ownerAccountId,
-      })
-      .from(enrollmentInvitations)
-      .innerJoin(learningPathVersions, eq(learningPathVersions.id, enrollmentInvitations.learningPathVersionId))
-      .innerJoin(learningPaths, eq(learningPaths.id, learningPathVersions.learningPathId))
-      .innerJoin(coachWorkspaces, eq(coachWorkspaces.id, learningPaths.coachWorkspaceId))
-      .where(eq(enrollmentInvitations.id, invitationId))
-    if (!invitation) return { ok: false, refusal: 'invitation_not_found' }
-
-    const [account] = await tx.select().from(accounts).where(eq(accounts.id, accountId))
-    if (!account?.emailVerified) return { ok: false, refusal: 'email_not_verified' }
-    if (!sameEmail(account.email, invitation.email)) return { ok: false, refusal: 'email_mismatch' }
+    const addressed = await addressedInvitation(tx, invitationId, accountId, true)
+    if (!addressed.ok) return addressed
+    const { invitation, offer } = addressed
     if (invitation.workspaceOwnerId === accountId) return { ok: false, refusal: 'owner_cannot_enroll' }
 
     const markAccepted = () => tx
       .update(enrollmentInvitations)
       .set({ acceptedAt: sql`coalesce(${enrollmentInvitations.acceptedAt}, now())` })
       .where(eq(enrollmentInvitations.id, invitationId))
-    const existing = () => tx.select().from(enrollments)
-      .where(and(eq(enrollments.accountId, accountId), eq(enrollments.learningPathVersionId, invitation.versionId)))
 
-    const [current] = await existing()
+    const current = await existingEnrollment(tx, accountId, invitation.versionId)
     if (current) {
       await markAccepted()
-      return { ok: true, enrollment: current, created: false }
+      return { ok: true, enrollment: current, created: false, offer }
     }
     if (!invitation.publishedAt) return { ok: false, refusal: 'version_not_published' }
     if (invitation.enrollmentClosedAt) return { ok: false, refusal: 'enrollment_closed' }
@@ -73,9 +105,23 @@ export async function acceptInvitation(db: Database, invitationId: string, accou
       .onConflictDoNothing({ target: [enrollments.accountId, enrollments.learningPathVersionId] })
       .returning()
     // A competing acceptance committed first: reuse its Enrollment.
-    const enrollment = inserted ?? (await existing())[0]
+    const enrollment = inserted ?? (await existingEnrollment(tx, accountId, invitation.versionId))!
     await markAccepted()
-    return { ok: true, enrollment, created: Boolean(inserted) }
+    return { ok: true, enrollment, created: Boolean(inserted), offer }
+  })
+}
+
+/**
+ * Reads an Invitation for its addressee only (a verified Account with its email):
+ * what it offers, and the Account's existing Enrollment in that Version, if any.
+ * Whether a new Enrollment would be admitted is decided only by accepting.
+ */
+export async function readInvitation(db: Database, invitationId: string, accountId: string) {
+  return db.transaction(async (tx) => {
+    const addressed = await addressedInvitation(tx, invitationId, accountId, false)
+    if (!addressed.ok) return addressed
+    const enrollment = await existingEnrollment(tx, accountId, addressed.invitation.versionId)
+    return { ok: true, offer: addressed.offer, enrollment: enrollment && { id: enrollment.id, status: enrollment.status } } as const
   })
 }
 

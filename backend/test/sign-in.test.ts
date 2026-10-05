@@ -6,6 +6,7 @@ import type { Database } from '../src/db/client'
 import { accounts, authCredentials, enrollmentInvitations, enrollments, personalWorkspaces } from '../src/db/schema'
 import { FIXTURE_IDENTITY_HEADER } from '../src/identity'
 import { prepareTestDatabase, resetTestDatabase } from './support/database'
+import { CookieBrowser } from './support/browser'
 import { seedEnrollmentFixture, seedPersonalFixture, type EnrollmentFixture } from './support/fixtures'
 
 /**
@@ -25,33 +26,12 @@ beforeEach(async () => {
   fx = await seedEnrollmentFixture(db)
   outbox = []
   const auth = createAuth({ db, baseURL: ORIGIN, secret: 'test-secret-with-at-least-32-characters!', sendVerificationEmail: async (message) => { outbox.push(message) } })
-  server = createServer({ db, auth })
+  server = createServer({ db, auth, delivery: { send: async () => 'logged' as const, link: (id) => `${ORIGIN}/invitations/${id}` } })
 })
 
-/** A browser: keeps the cookies the server sets and sends them back, like a same-origin fetch. */
-class Browser {
-  cookies = new Map<string, string>()
-  async request(path: string, { method = 'GET', body, headers = {} }: { method?: string; body?: unknown; headers?: Record<string, string> } = {}) {
-    const response = await server.request(new URL(path, ORIGIN).toString(), {
-      method,
-      redirect: 'manual',
-      headers: {
-        origin: ORIGIN,
-        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-        ...(this.cookies.size ? { cookie: [...this.cookies].map(([name, value]) => `${name}=${value}`).join('; ') } : {}),
-        ...headers,
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    })
-    for (const header of response.headers.getSetCookie()) {
-      const [pair, ...attributes] = header.split(';')
-      const [name, value] = [pair.slice(0, pair.indexOf('=')).trim(), pair.slice(pair.indexOf('=') + 1)]
-      const expired = attributes.some((a) => /^\s*max-age=0\s*$/i.test(a)) || value === ''
-      if (expired) this.cookies.delete(name)
-      else this.cookies.set(name, value)
-    }
-    return response
-  }
+/** A browser with the T15 sign-in actions. */
+class Browser extends CookieBrowser {
+  constructor() { super(() => server, ORIGIN) }
   signUp(email: string, extra: Record<string, unknown> = {}) {
     return this.request('/api/auth/sign-up/email', { method: 'POST', body: { email, password: PASSWORD, name: email.split('@')[0], ...extra } })
   }

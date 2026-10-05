@@ -3,11 +3,21 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { ContextHeader } from '../components/workspace/ContextHeader'
 import { enterPersonalWorkspace, readAccount, signIn, signUp } from '../lib/api'
 
-/** The product entry: sign in, then enter the Account's own Personal Workspace (ADR 0012, 0022). */
-export const Route = createFileRoute('/')({ component: EntryPage })
+/** Only a path within this application is followed after sign-in, never another origin. */
+const internalPath = (value: unknown) => typeof value === 'string' && value.startsWith('/') && !value.startsWith('//') && !value.includes('\\') ? value : undefined
+
+/**
+ * The product entry: sign in, then enter the Account's own Personal Workspace (ADR 0012,
+ * 0022), or return to `next`, such as an Invitation the browser came from.
+ */
+export const Route = createFileRoute('/')({
+  component: EntryPage,
+  validateSearch: (search: Record<string, unknown>): { next?: string } => ({ next: internalPath(search.next) }),
+})
 
 function EntryPage() {
   const navigate = useNavigate()
+  const { next } = Route.useSearch()
   const [phase, setPhase] = useState<'checking' | 'signed-out' | 'entering'>('checking')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -15,6 +25,7 @@ function EntryPage() {
 
   const enter = useCallback(async () => {
     setPhase('entering')
+    if (next) return navigate({ href: next, replace: true })
     const entered = await enterPersonalWorkspace()
     if (!entered.ok) {
       setPhase('signed-out')
@@ -22,7 +33,7 @@ function EntryPage() {
       return
     }
     await navigate({ to: '/workspaces/$workspaceId', params: { workspaceId: entered.value.workspace.id }, replace: true })
-  }, [navigate])
+  }, [navigate, next])
 
   useEffect(() => {
     void readAccount().then((result) => (result.ok ? enter() : setPhase('signed-out')))
@@ -31,7 +42,7 @@ function EntryPage() {
   const submit = (mode: 'sign-in' | 'sign-up') => async (event?: FormEvent) => {
     event?.preventDefault()
     setError(null)
-    const result = mode === 'sign-in' ? await signIn(email, password) : await signUp(email, password)
+    const result = mode === 'sign-in' ? await signIn(email, password) : await signUp(email, password, next)
     if (!result.ok) {
       setError(mode === 'sign-in' ? 'Sign-in failed: check your email and password.' : `Could not create the Account (${result.error}).`)
       return
@@ -77,7 +88,7 @@ function EntryPage() {
           </form>
         ) : (
           <p id="entry-status" className="text-sm text-slate-500">
-            {phase === 'checking' ? 'Checking sign-in…' : 'Opening your Personal Workspace…'}
+            {phase === 'checking' ? 'Checking sign-in…' : next ? 'Returning…' : 'Opening your Personal Workspace…'}
           </p>
         )}
       </section>

@@ -5,8 +5,9 @@ import { sessionIdentity, type Auth } from './auth'
 import * as authoring from './authoring'
 import * as coaching from './coaching'
 import type { Database } from './db/client'
-import { acceptInvitation, readEnrollment, type EnrollmentRefusal } from './enrollments'
+import { acceptInvitation, readEnrollment, readInvitation, type EnrollmentRefusal } from './enrollments'
 import type { IdentityResolver } from './identity'
+import * as invitations from './invitations'
 import { changeAccessOverride } from './overrides'
 import { changeEnrollmentStatus } from './lifecycle'
 import * as personal from './personal'
@@ -72,6 +73,21 @@ const PUBLICATION_REFUSAL_STATUS: Record<coaching.PublicationRefusal, Contentful
   publication_blocked: 422,
 }
 
+const INVITATION_REFUSAL_STATUS: Record<invitations.InvitationRefusal, ContentfulStatusCode> = {
+  version_not_found: 404,
+  invitation_not_found: 404,
+  version_not_published: 409,
+}
+
+/**
+ * How Enrollment Invitations reach their addressee (ADR 0023): the email sender and
+ * the acceptance link an Invitation ID becomes in the application.
+ */
+export interface InvitationDelivery {
+  send: invitations.InvitationSender
+  link: (invitationId: string) => string
+}
+
 const MAX_TEXT_LENGTH = 50_000
 const MAX_URLS = 20
 const MAX_URL_LENGTH = 2_048
@@ -99,9 +115,10 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /**
  * The backend request interface; identity comes only from the injected resolver.
- * With `auth`, it also serves Better Auth's sign-in endpoints under `/auth`.
+ * With `auth`, it also serves Better Auth's sign-in endpoints under `/auth`; with
+ * `delivery`, Coaches can send Enrollment Invitations.
  */
-export function createApp({ db, identity, auth }: { db: Database; identity: IdentityResolver; auth?: Auth }) {
+export function createApp({ db, identity, auth, delivery }: { db: Database; identity: IdentityResolver; auth?: Auth; delivery?: InvitationDelivery }) {
   type Env = { Variables: { accountId: string } }
   const app = new Hono<Env>()
 
@@ -126,12 +143,21 @@ export function createApp({ db, identity, auth }: { db: Database; identity: Iden
   app.use('/invitations/*', authenticate)
   app.use('/enrollments/*', authenticate)
 
+  // The addressee's view of an Invitation: what it offers, and any Enrollment they already hold in that Version.
+  app.get('/invitations/:invitationId', async (c) => {
+    const invitationId = c.req.param('invitationId')
+    if (!UUID.test(invitationId)) return c.json({ error: 'invitation_not_found' }, 404)
+    const result = await readInvitation(db, invitationId, c.get('accountId'))
+    if (!result.ok) return c.json({ error: result.refusal }, REFUSAL_STATUS[result.refusal])
+    return c.json({ offer: result.offer, enrollment: result.enrollment })
+  })
+
   app.post('/invitations/:invitationId/accept', async (c) => {
     const invitationId = c.req.param('invitationId')
     if (!UUID.test(invitationId)) return c.json({ error: 'invitation_not_found' }, 404)
     const result = await acceptInvitation(db, invitationId, c.get('accountId'))
     if (!result.ok) return c.json({ error: result.refusal }, REFUSAL_STATUS[result.refusal])
-    return c.json({ enrollment: result.enrollment, created: result.created }, result.created ? 201 : 200)
+    return c.json({ enrollment: result.enrollment, created: result.created, offer: result.offer }, result.created ? 201 : 200)
   })
 
   app.get('/enrollments/:enrollmentId', async (c) => {
@@ -443,6 +469,57 @@ export function createApp({ db, identity, auth }: { db: Database; identity: Iden
     return c.json(document)
   })
 
+  // Admission to one published Version (CONTEXT.md: Enrollment Invitation, Enrollment Closure).
+  const versionRoute = '/coach/learning-path-versions/:versionId'
+
+  app.get(`${versionRoute}/invitations`, async (c) => {
+    const versionId = c.req.param('versionId')
+    const admission = UUID.test(versionId) ? await invitations.listInvitations(db, versionId, c.get('accountId')) : null
+    if (!admission) return c.json({ error: 'version_not_found' }, 404)
+    return c.json(admission)
+  })
+
+  for (const [method, closed] of [['PUT', true], ['DELETE', false]] as const) {
+    app.on(method, `${versionRoute}/enrollment-closure`, async (c) => {
+      const versionId = c.req.param('versionId')
+      if (!UUID.test(versionId)) return c.json({ error: 'version_not_found' }, 404)
+      const result = await invitations.setEnrollmentClosure(db, versionId, c.get('accountId'), closed)
+      if (!result.ok) return c.json({ error: result.refusal }, INVITATION_REFUSAL_STATUS[result.refusal])
+      return c.json({ enrollmentClosed: result.enrollmentClosed, changed: result.changed })
+    })
+  }
+
+  // The Invitation is stored first and delivered after; a failed or merely logged delivery keeps it for a retry.
+  if (delivery) {
+    const deliver = async (c: Context<Env>, invitationId: string, created: boolean) => {
+      const outcome = await invitations.deliverInvitation(db, invitationId, delivery.send, delivery.link)
+      const body = { invitation: outcome.invitation, delivered: outcome.delivered, ...(outcome.error ? { deliveryError: outcome.error } : {}) }
+      if (created) return c.json(body, 201)
+      if (outcome.delivered) return c.json(body)
+      return outcome.notConfigured ? c.json({ error: 'email_not_configured', ...body }, 503) : c.json({ error: 'invitation_delivery_failed', ...body }, 502)
+    }
+
+    app.post(`${versionRoute}/invitations`, async (c) => {
+      const versionId = c.req.param('versionId')
+      if (!UUID.test(versionId)) return c.json({ error: 'version_not_found' }, 404)
+      const input = invitations.parseInvitationInput(await c.req.json().catch(() => null))
+      if (!input.ok) {
+        if (!await invitations.listInvitations(db, versionId, c.get('accountId'))) return c.json({ error: 'version_not_found' }, 404)
+        return c.json({ error: 'invalid_invitation', detail: input.detail }, 422)
+      }
+      const result = await invitations.createInvitation(db, versionId, c.get('accountId'), input.email)
+      if (!result.ok) return c.json({ error: result.refusal }, INVITATION_REFUSAL_STATUS[result.refusal])
+      return deliver(c, result.invitation.id, true)
+    })
+
+    app.post('/coach/invitations/:invitationId/delivery', async (c) => {
+      const invitationId = c.req.param('invitationId')
+      const owned = UUID.test(invitationId) ? await invitations.ownedInvitation(db, invitationId, c.get('accountId')) : null
+      if (!owned) return c.json({ error: 'invitation_not_found' }, 404)
+      return deliver(c, invitationId, false)
+    })
+  }
+
   app.get('/enrollments/:enrollmentId/learning-state', async (c) => {
     const enrollmentId = c.req.param('enrollmentId')
     const learningState = UUID.test(enrollmentId) ? await readLearningState(db, enrollmentId, c.get('accountId')) : null
@@ -458,6 +535,6 @@ export function createApp({ db, identity, auth }: { db: Database; identity: Iden
  * application, with identity taken only from Better Auth sessions (ADR 0022).
  * The P2 fixture identity is never accepted here.
  */
-export function createServer({ db, auth }: { db: Database; auth: Auth }) {
-  return new Hono().route('/api', createApp({ db, identity: sessionIdentity(auth), auth }))
+export function createServer({ db, auth, delivery }: { db: Database; auth: Auth; delivery: InvitationDelivery }) {
+  return new Hono().route('/api', createApp({ db, identity: sessionIdentity(auth), auth, delivery }))
 }

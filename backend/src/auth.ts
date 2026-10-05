@@ -5,8 +5,8 @@ import { accounts, authCredentials, authSessions, authVerifications } from './db
 import type { IdentityResolver } from './identity'
 
 /**
- * Delivers an email-verification link. Production delivery is not integrated yet
- * (ADR 0022): the served backend logs links, and tests capture them.
+ * Delivers an email-verification link: through Resend in the served backend when
+ * configured, otherwise only logged (ADR 0023); tests capture them.
  */
 export type VerificationMailer = (message: { to: string; url: string }) => Promise<void>
 

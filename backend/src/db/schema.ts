@@ -166,7 +166,18 @@ export const versionSkillCards = pgTable('version_skill_cards', {
   check('version_skill_cards_bounds', sql`abs(${t.x}) <= 1000000 AND abs(${t.y}) <= 1000000`),
 ])
 
-/** An offer to join exactly one published Version, addressed to one email. */
+/**
+ * What happened to the email carrying an Invitation on its last attempt (ADR 0023):
+ * `sent` only when the email provider accepted it; `logged` when no provider is
+ * configured and the link was only written to the server log, so nothing left.
+ */
+export const invitationDeliveryStatus = pgEnum('invitation_delivery_status', ['pending', 'sent', 'logged', 'failed'])
+
+/**
+ * An offer to join exactly one published Version, addressed to one email. It has
+ * no expiry: none was agreed (SPEC). Delivery state records only whether the email
+ * provider accepted the message; it never affects who may accept.
+ */
 export const enrollmentInvitations = pgTable('enrollment_invitations', {
   id: uuid('id').primaryKey().defaultRandom(),
   learningPathVersionId: uuid('learning_path_version_id').notNull().references(() => learningPathVersions.id),
@@ -174,8 +185,13 @@ export const enrollmentInvitations = pgTable('enrollment_invitations', {
   invitedByAccountId: uuid('invited_by_account_id').notNull().references(() => accounts.id),
   /** First successful acceptance; repeated acceptance keeps it. */
   acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+  deliveryStatus: invitationDeliveryStatus('delivery_status').notNull().default('pending'),
+  /** Delivery attempts started, each with its own provider idempotency key. */
+  deliveryAttempts: integer('delivery_attempts').notNull().default(0),
+  /** Last time the provider accepted the email. */
+  deliveredAt: timestamp('delivered_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-})
+}, (t) => [index('enrollment_invitations_version_idx').on(t.learningPathVersionId)])
 
 export const enrollmentStatus = pgEnum('enrollment_status', ['active', 'inactive'])
 
