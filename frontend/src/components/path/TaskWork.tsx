@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { readTaskDraft, readTaskSubmission, saveTaskDraft, sendTaskRevision, type ApiResult, type EnrollmentLearningState, type SubmissionContents } from '../../lib/api'
-import { contentsOf, contentsProblem, draftRecoveryKey, findSentRevision, isEmpty, isRefusal, loadRecoveredDraft, refusalMessage, rememberEdits, sameContents, sendBlockedReason } from './submissionWork'
+import { contentsOf, contentsProblem, draftRecoveryKey, findSentRevision, isEmpty, isRefusal, loadRecoveredDraft, refusalMessage, rememberEdits, sameContents, sendBlockedReason, startBlockedReason } from './submissionWork'
 
 /**
  * The learner's private working space for one Task (ADR 0002): a draft of text and
@@ -37,11 +37,13 @@ async function attempt<T>(request: () => Promise<ApiResult<T>>): Promise<ApiResu
   }
 }
 
-export function TaskWork({ accountId, enrollmentId, taskId, records, onSent, onRefused }: {
+export function TaskWork({ accountId, enrollmentId, taskId, records, sentRevisions, onSent, onRefused }: {
   accountId: string
   enrollmentId: string
   taskId: string
   records: EnrollmentLearningState | null
+  /** How many revisions were sent for this Task; null while the history is unread. */
+  sentRevisions: number | null
   /** The backend confirmed a new revision: read the history (and records) again. */
   onSent: () => void
   /** The backend refused for Access or Enrollment state: the records shown are out of date. */
@@ -144,7 +146,9 @@ export function TaskWork({ accountId, enrollmentId, taskId, records, onSent, onR
   }
 
   const busy = status.kind === 'saving' || status.kind === 'sending' || status.kind === 'checking'
-  const editable = load.state !== 'loading' && !busy
+  // Only a confirmed draft read tells there is no draft; until then nothing is refused here.
+  const startBlocked = load.state === 'ready' ? startBlockedReason(records, taskId, { hasDraft: saved !== null, sentRevisions }) : null
+  const editable = load.state !== 'loading' && !busy && !startBlocked
   const problem = contentsProblem(edits)
   const blocked = sendBlockedReason(records, taskId)
   const unsaved = !sameContents(edits, saved)
@@ -162,6 +166,7 @@ export function TaskWork({ accountId, enrollmentId, taskId, records, onSent, onR
       data-unsaved={unsaved}
       data-kept-locally={keptLocally}
       data-can-send={canSend}
+      data-start-blocked={Boolean(startBlocked)}
       data-sent-revision={status.kind === 'sent' ? status.revisionNumber : ''}
       data-checked={status.kind === 'unconfirmed' ? String(status.checkedAt !== null) : ''}
       data-confirmed-by={status.kind === 'sent' ? (status.fromHistory ? 'history' : 'answer') : ''}
@@ -215,7 +220,8 @@ export function TaskWork({ accountId, enrollmentId, taskId, records, onSent, onR
         </p>
       </fieldset>
       {problem && <p id={`task-work-problem-${taskId}`} className="text-amber-200">{problem}</p>}
-      {blocked && <p id={`task-work-blocked-${taskId}`} className="text-slate-400">{blocked}</p>}
+      {startBlocked && <p id={`task-work-start-blocked-${taskId}`} className="text-amber-200">{startBlocked}</p>}
+      {blocked && !startBlocked && <p id={`task-work-blocked-${taskId}`} className="text-slate-400">{blocked}</p>}
       <div className="flex flex-wrap items-center gap-2">
         <button id={`task-work-save-${taskId}`} onClick={() => void handleSave()} disabled={!editable || Boolean(problem) || !unsaved} className="px-2 py-1 rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-50 cursor-pointer">Save draft</button>
         <button id={`task-work-send-${taskId}`} onClick={() => void handleSend()} disabled={!canSend} className="px-2 py-1 rounded-lg border border-violet-700 bg-violet-700/40 hover:bg-violet-700/60 text-violet-100 disabled:opacity-50 cursor-pointer">Send for Review</button>

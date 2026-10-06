@@ -96,6 +96,18 @@ export function sendBlockedReason(records: EnrollmentLearningState | null, taskI
   return null
 }
 
+/**
+ * Why this Task cannot be started now; null when it can, or when it already is. An
+ * inactive Enrollment starts no new Task (ADR 0014), but a Task already started, with a
+ * saved draft or with work sent stays editable as private work. Unknown sent work (null,
+ * not read yet) does not block: the backend checks again when saving.
+ */
+export function startBlockedReason(records: EnrollmentLearningState | null, taskId: string, work: { hasDraft: boolean; sentRevisions: number | null }): string | null {
+  if (!records || records.enrollmentStatus === 'active') return null
+  if (work.hasDraft || work.sentRevisions !== 0 || records.taskStarts.some((start) => start.taskId === taskId)) return null
+  return 'This Enrollment is inactive: a new Task cannot be started, so there is nothing to draft here until your Coach reactivates it. Drafts you already have stay private and editable.'
+}
+
 /** What a refused save or send means for the learner's work. */
 export function refusalMessage(error: string): string {
   switch (error) {

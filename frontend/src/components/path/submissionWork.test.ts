@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import type { EnrollmentLearningState, SubmissionRevisionView } from '../../lib/api'
-import { contentsOf, contentsProblem, draftRecoveryKey, findSentRevision, isEmpty, isRefusal, loadRecoveredDraft, rememberEdits, revisionNote, sameContents, sendBlockedReason } from './submissionWork'
+import { contentsOf, contentsProblem, draftRecoveryKey, findSentRevision, isEmpty, isRefusal, loadRecoveredDraft, rememberEdits, revisionNote, sameContents, sendBlockedReason, startBlockedReason } from './submissionWork'
 
 class MemoryStorage implements Storage {
   private items = new Map<string, string>()
@@ -74,7 +74,7 @@ const records = (over: Partial<EnrollmentLearningState> = {}, access = true): En
   enrollmentId: 'e', learningPathVersionId: 'v', enrollmentStatus: 'active', xp: 0,
   skills: [{ skillId: 's', title: 'S', learningOutcome: '', optional: false, xpThreshold: 0, mastery: false, access, accessOverride: null, unmetPrerequisiteSkillIds: [], xpShortfall: 0 }],
   tasks: [{ taskId: 't', skillId: 's', title: 'T', required: true, xpReward: 10, approved: false, xpContribution: 0 }],
-  xpHistory: [], masteryHistory: [], taskStarts: [], awaitingReview: [], overrideHistory: [], ...over,
+  xpHistory: [], masteryHistory: [], taskStarts: [], awaitingReview: [], overrideHistory: [], lifecycleHistory: [], ...over,
 })
 
 describe('sending needs Access and an active Enrollment', () => {
@@ -84,6 +84,19 @@ describe('sending needs Access and an active Enrollment', () => {
     expect(sendBlockedReason(records({ enrollmentStatus: 'inactive' }), 't')).toContain('inactive')
     expect(sendBlockedReason(null, 't')).toContain('not loaded')
     expect(sendBlockedReason(records(), 'other')).not.toBeNull()
+  })
+
+  it('starts no new Task in an inactive Enrollment but keeps work already begun editable', () => {
+    const inactive = records({ enrollmentStatus: 'inactive' })
+    const untouched = { hasDraft: false, sentRevisions: 0 }
+    expect(startBlockedReason(records(), 't', untouched)).toBeNull()
+    expect(startBlockedReason(inactive, 't', untouched)).toContain('a new Task cannot be started')
+    expect(startBlockedReason(inactive, 't', { ...untouched, hasDraft: true })).toBeNull()
+    expect(startBlockedReason(inactive, 't', { ...untouched, sentRevisions: 1 })).toBeNull()
+    expect(startBlockedReason(records({ enrollmentStatus: 'inactive', taskStarts: [{ taskId: 't', startedAt: '' }] }), 't', untouched)).toBeNull()
+    // Sent work not read yet is not taken as none: the backend decides when saving.
+    expect(startBlockedReason(inactive, 't', { ...untouched, sentRevisions: null })).toBeNull()
+    expect(startBlockedReason(null, 't', untouched)).toBeNull()
   })
 })
 

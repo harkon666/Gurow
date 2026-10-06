@@ -14,6 +14,7 @@ import { ApprovalRevocation } from './ApprovalRevocation'
 import { masteryEventText, revocationEffect, xpEventText } from './revocationWork'
 import { AccessOverrideControl } from './AccessOverrideControl'
 import { enrollmentLockReasons, ordinaryRequirements, overrideRecordText, type OverrideNames } from './overrideWork'
+import { EnrollmentParticipation } from './EnrollmentParticipation'
 
 /**
  * The Version an Enrollment joined, as its learner navigates it (ADR 0005, 0017): the
@@ -30,6 +31,8 @@ import { enrollmentLockReasons, ordinaryRequirements, overrideRecordText, type O
  * The Coach can also revoke an Approval from the history, with a reason; both see what
  * the revocation changed, as the backend recorded it (ADR 0003). From a Skill's Access, the
  * Coach grants or revokes an Access Override with a reason; both read every Override Record.
+ * Below the header, the learner can stop participating and the Coach can deactivate or
+ * reactivate the Enrollment (ADR 0014); everything stays readable while it is inactive.
  */
 
 /** The learning records as last confirmed by the backend; a failed read keeps them and says so. */
@@ -171,11 +174,19 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
       <p id="version-pinned-note" className="shrink-0 px-4 py-1.5 text-[11px] text-slate-400 border-b border-slate-800/80 bg-slate-950">
         {document.learningPath.goal && <>Goal: {document.learningPath.goal} · </>}
         Your Enrollment stays on Version {document.version.versionNumber} exactly as it was published; later Versions do not change its Skills, Tasks or rules.
-        {status === 'inactive' && <span id="enrollment-inactive-note" className="text-amber-200"> This Enrollment is inactive: you can still read everything here, but only the Coach can reactivate it.</span>}
+        {status === 'inactive' && <span id="enrollment-inactive-note" className="text-amber-200"> This Enrollment is inactive: you can still read everything here, but only {coach ? 'you' : 'the Coach'} can reactivate it.</span>}
       </p>
+      <EnrollmentParticipation
+        enrollmentId={enrollmentId}
+        actor={coach ? 'coach' : 'learner'}
+        records={shown}
+        versionNumber={document.version.versionNumber}
+        names={overrideNames}
+        onChanged={loadRecords}
+      />
       <section className="w-full flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden relative">
         <div className="w-full md:w-64 lg:w-72 shrink-0 md:h-full flex flex-col border-b md:border-b-0 md:border-r border-slate-800/80 min-h-0">
-          {coach && <AwaitingReviewQueue awaiting={shown?.awaitingReview ?? null} skills={skills} onOpen={openReview} />}
+          {coach && <AwaitingReviewQueue awaiting={shown?.awaitingReview ?? null} inactive={status === 'inactive'} skills={skills} onOpen={openReview} />}
           <SkillPrerequisiteList
             skills={skills}
             connections={connections}
@@ -243,12 +254,17 @@ function EnrolledSkillChips({ skill, skillId, awaiting }: { skill: EnrollmentSki
  * Review focused, so no canvas is needed to reach it. Work stays listed after the Skill
  * locks or the Enrollment is deactivated: it was sent with valid Access (ADR 0007).
  */
-function AwaitingReviewQueue({ awaiting, skills, onOpen }: { awaiting: AwaitingRevision[] | null; skills: PathSkill[]; onOpen: (skill: PathSkill, taskId: string) => void }) {
+function AwaitingReviewQueue({ awaiting, inactive, skills, onOpen }: { awaiting: AwaitingRevision[] | null; inactive: boolean; skills: PathSkill[]; onOpen: (skill: PathSkill, taskId: string) => void }) {
   return (
     <section id="awaiting-review" data-count={awaiting?.length ?? ''} aria-labelledby="awaiting-review-heading" className="shrink-0 border-b border-slate-800/80 p-3 space-y-2">
       <h2 id="awaiting-review-heading" className="text-[10px] font-semibold uppercase tracking-wider text-sky-300">Awaiting your Review</h2>
       {awaiting === null && <p className="text-[11px] text-slate-500">Loading…</p>}
       {awaiting?.length === 0 && <p id="awaiting-review-empty" className="text-[11px] text-slate-500">Nothing sent is waiting for a decision.</p>}
+      {inactive && awaiting && awaiting.length > 0 && (
+        <p id="awaiting-review-inactive" className="text-[10px] text-amber-200">
+          This Enrollment is inactive. This work was sent while it was active, so you can still decide it: an Approval adds XP and Mastery as usual and does not reactivate the Enrollment.
+        </p>
+      )}
       {awaiting && awaiting.length > 0 && (
         <ul className="space-y-1">
           {awaiting.map((revision) => {
@@ -460,6 +476,7 @@ function EnrolledTaskLearning({ accountId, viewer, enrollmentId, taskId, records
           enrollmentId={enrollmentId}
           taskId={taskId}
           records={records}
+          sentRevisions={revisions?.length ?? null}
           onSent={() => { void load(); void onRecordsStale() }}
           onRefused={() => void onRecordsStale()}
         />

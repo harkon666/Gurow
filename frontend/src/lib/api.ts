@@ -362,6 +362,25 @@ export interface EnrollmentLearningState {
   awaitingReview: AwaitingRevision[]
   /** Every grant and revocation of an Access Override in this Enrollment, oldest first. */
   overrideHistory: OverrideRecord[]
+  /** Every deactivation and reactivation of this Enrollment, oldest first. */
+  lifecycleHistory: LifecycleRecord[]
+}
+
+/**
+ * One deactivation or reactivation of an Enrollment (ADR 0014). The action, Actor, learner
+ * and time are recorded by the backend; the reason is the Actor's, and is null only for
+ * a learner's own deactivation, which needs none.
+ */
+export interface LifecycleRecord {
+  id: string
+  sequence: number
+  enrollmentId: string
+  learningPathVersionId: string
+  actorAccountId: string
+  learnerAccountId: string
+  action: 'deactivate' | 'reactivate'
+  reason: string | null
+  occurredAt: string
 }
 
 /**
@@ -491,3 +510,14 @@ export const grantAccessOverride = (enrollmentId: string, skillId: string, reaso
  */
 export const revokeAccessOverride = (enrollmentId: string, skillId: string, grantRecordId: string, reason: string) =>
   call<{ overrideRecord: OverrideRecord }>(`${overrideRoute(enrollmentId, skillId)}/${encodeURIComponent(grantRecordId)}/revoke`, { method: 'POST', body: { reason } })
+
+/**
+ * Deactivates an Enrollment as its learner (no reason needed: pass null) or its owning Coach
+ * (a reason is required), or reactivates it as the owning Coach with a reason (ADR 0014).
+ * 200 is the backend's confirmation, with the record it made. Refusals:
+ * `enrollment_already_inactive`, `enrollment_already_active` (409), `coach_only` (403: a
+ * learner reactivating), `enrollment_not_found` (404: not this Account's Enrollment),
+ * `invalid_lifecycle_reason` (422).
+ */
+export const changeEnrollmentStatus = (enrollmentId: string, action: LifecycleRecord['action'], reason: string | null) =>
+  call<{ enrollment: EnrollmentSummary; lifecycleRecord: LifecycleRecord }>(`/enrollments/${encodeURIComponent(enrollmentId)}/${action}`, { method: 'POST', body: reason === null ? {} : { reason } })
