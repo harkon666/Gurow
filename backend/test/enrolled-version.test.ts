@@ -76,6 +76,8 @@ it('AC1: the learner opens the Version their Enrollment joined, with outcomes, T
     coachWorkspace: { id: fx.workspaces.workspace.id, name: 'Linear Algebra with Coach' },
   })
   expect(body.version.publishedAt).not.toBeNull()
+  // The Coach who acts in the records is named, without their email address.
+  expect(body.coach).toEqual({ id: fx.accounts.coach.id, name: expect.any(String) })
   // Version 1's own definitions: Version 2 is published, and its "(revised)" content never appears.
   expect(JSON.stringify(body)).not.toContain('revised')
   // Fixture rows share one ordinal, so the stored order is by ID: compare by ID.

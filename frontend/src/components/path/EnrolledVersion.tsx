@@ -12,6 +12,8 @@ import { revisionNote } from './submissionWork'
 import { coachRevisionNote, DECISION_TEXT } from './reviewWork'
 import { ApprovalRevocation } from './ApprovalRevocation'
 import { masteryEventText, revocationEffect, xpEventText } from './revocationWork'
+import { AccessOverrideControl } from './AccessOverrideControl'
+import { enrollmentLockReasons, ordinaryRequirements, overrideRecordText, type OverrideNames } from './overrideWork'
 
 /**
  * The Version an Enrollment joined, as its learner navigates it (ADR 0005, 0017): the
@@ -26,7 +28,8 @@ import { masteryEventText, revocationEffect, xpEventText } from './revocationWor
  * The owning Coach finds the revisions awaiting Review in a keyboard list, which opens
  * the Task beside its history, and decides there; the records are then read again.
  * The Coach can also revoke an Approval from the history, with a reason; both see what
- * the revocation changed, as the backend recorded it (ADR 0003).
+ * the revocation changed, as the backend recorded it (ADR 0003). From a Skill's Access, the
+ * Coach grants or revokes an Access Override with a reason; both read every Override Record.
  */
 
 /** The learning records as last confirmed by the backend; a failed read keeps them and says so. */
@@ -46,15 +49,6 @@ export const enrollmentCameraContext = (enrollmentId: string) => `enrollment:${e
 type AccessKind = 'open' | 'locked' | 'override'
 const accessKind = (skill: EnrollmentSkillState): AccessKind => !skill.access ? 'locked' : skill.accessOverride ? 'override' : 'open'
 const ACCESS_TEXT: Record<AccessKind, string> = { open: 'Open', locked: 'Locked', override: 'Open by Coach override' }
-
-/** Why a Skill is locked now; an inactive Enrollment locks every Skill whatever else holds. */
-export function enrollmentLockReasons(skill: EnrollmentSkillState, records: EnrollmentLearningState, skillTitles: Map<string, string>): string[] {
-  const reasons: string[] = []
-  if (records.enrollmentStatus === 'inactive') reasons.push('This Enrollment is inactive: no Skill can be worked on until the Coach reactivates it')
-  for (const id of skill.unmetPrerequisiteSkillIds) reasons.push(`Requires Mastery of “${skillTitles.get(id) ?? 'an unknown Skill'}”`)
-  if (skill.xpShortfall > 0) reasons.push(`Needs ${skill.xpShortfall} more XP: the threshold is ${skill.xpThreshold} XP and this Enrollment has ${records.xp} XP`)
-  return reasons
-}
 
 export function EnrolledVersionView({ accountId, document }: { accountId: string; document: EnrolledVersion }) {
   const enrollmentId = document.enrollment.id
@@ -141,6 +135,7 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
     }
     return counts
   }, [shown, skills])
+  const overrideNames = useMemo<OverrideNames>(() => ({ viewerAccountId: accountId, coach: document.coach, learner: document.learner, skillTitles }), [accountId, document.coach, document.learner, skillTitles])
   const openReview = useCallback((skill: PathSkill, taskId: string) => {
     handleSelectListSkill({ id: skill.id, title: skill.title })
     setFocusTaskId(taskId)
@@ -207,7 +202,7 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
           connections={connections}
           tasks={selected?.tasks}
           outcome={selected?.outcome ?? ''}
-          learning={selected && <EnrolledSkillLearning view={view} skillId={selected.id} skillTitles={skillTitles} taskTitles={taskTitles} />}
+          learning={selected && <EnrolledSkillLearning view={view} skillId={selected.id} skillTitles={skillTitles} taskTitles={taskTitles} coach={coach} enrollmentId={enrollmentId} names={overrideNames} onRecordsStale={loadRecords} />}
           renderTaskExtra={(taskId) => (
             <EnrolledTaskLearning
               key={taskId}
@@ -280,8 +275,22 @@ function AwaitingReviewQueue({ awaiting, skills, onOpen }: { awaiting: AwaitingR
   )
 }
 
-/** The selected Skill's Access (with its lock reasons) and Mastery, and the XP its Tasks contribute. */
-function EnrolledSkillLearning({ view, skillId, skillTitles, taskTitles }: { view: RecordsView; skillId: string; skillTitles: Map<string, string>; taskTitles: Map<string, string> }) {
+/**
+ * The selected Skill's Access (with its lock reasons, its Access Override and every
+ * Override Record) and Mastery, and the XP its Tasks contribute. The Coach grants or
+ * revokes the override here.
+ */
+function EnrolledSkillLearning({ view, skillId, skillTitles, taskTitles, coach, enrollmentId, names, onRecordsStale }: {
+  view: RecordsView
+  skillId: string
+  skillTitles: Map<string, string>
+  taskTitles: Map<string, string>
+  coach: boolean
+  enrollmentId: string
+  names: OverrideNames
+  /** Reads the records again; true once fresh records are on show. */
+  onRecordsStale: () => Promise<boolean>
+}) {
   if (!view.records) {
     return <div id="skill-learning" data-tracked="false" className="text-[11px] text-slate-500 italic bg-slate-800/30 rounded-xl p-3 border border-slate-700/30">{view.error ? 'Learning records are unavailable.' : 'Loading learning records…'}</div>
   }
@@ -292,6 +301,8 @@ function EnrolledSkillLearning({ view, skillId, skillTitles, taskTitles }: { vie
   const reasons = enrollmentLockReasons(skill, state, skillTitles)
   const skillXp = state.tasks.filter((task) => task.skillId === skillId).reduce((total, task) => total + task.xpContribution, 0)
   const masteryEvents = state.masteryHistory.filter((event) => event.skillId === skillId)
+  const overrideRecords = state.overrideHistory.filter((record) => record.skillId === skillId)
+  const waived = skill.accessOverride ? ordinaryRequirements(skill, state, skillTitles) : []
   return (
     <div id="skill-learning" data-tracked="true" className="space-y-3">
       <section id="skill-access" data-access={kind} aria-labelledby="skill-access-heading" className={`rounded-xl p-3 border ${kind === 'locked' ? 'bg-red-950/30 border-red-900/60' : 'bg-emerald-950/20 border-emerald-900/50'}`}>
@@ -304,8 +315,38 @@ function EnrolledSkillLearning({ view, skillId, skillTitles, taskTitles }: { vie
             {reasons.map((reason) => <li key={reason}>{reason}</li>)}
           </ul>
         )}
-        {kind === 'override' && <p className="mt-1 text-[10px] text-slate-400">Your Coach waived this Skill's Prerequisites and XP Threshold for you.</p>}
+        {skill.accessOverride && (
+          <div id="skill-override" data-override-id={skill.accessOverride.id} className="mt-2 space-y-1 text-[10px]">
+            <p className="text-sky-200">
+              {coach ? 'Your Access Override waives this Skill\'s Prerequisites and XP Threshold for this learner, in this Enrollment only' : 'Your Coach waived this Skill\'s Prerequisites and XP Threshold for you, in this Enrollment only'}: {skill.accessOverride.reason}
+            </p>
+            {waived.length > 0 && (
+              <ul id="override-waived" aria-label="Requirements the Access Override waives" className="text-slate-400 list-disc pl-4 space-y-0.5">
+                {waived.map((line) => <li key={line}>Waived: {line}</li>)}
+              </ul>
+            )}
+            <p className="text-slate-500">It changes no XP or Mastery.</p>
+            {state.enrollmentStatus === 'inactive' && (
+              <p id="skill-override-inactive" className="text-amber-200">
+                It does not reactivate this Enrollment: while the Enrollment is inactive, no Task can be started and no work sent here{coach ? ', override or not' : ''}. Only the Coach's reactivation resumes it.
+              </p>
+            )}
+          </div>
+        )}
         <p className="mt-1 text-[10px] text-slate-500">Access lets you start Tasks and send work. Reaching an XP Threshold spends no XP.</p>
+        {coach && <AccessOverrideControl key={skillId} enrollmentId={enrollmentId} skill={skill} records={state} names={names} onChanged={onRecordsStale} />}
+        {overrideRecords.length > 0 && (
+          <ol id="skill-override-history" data-records={overrideRecords.length} aria-label="Override Records of this Skill" className="mt-2 text-[10px] text-slate-400 space-y-1 border-t border-slate-700/50 pt-2">
+            {overrideRecords.map((record) => {
+              const text = overrideRecordText(record, names)
+              return (
+                <li key={record.id} id={`override-record-${record.id}`} data-action={record.action} data-sequence={record.sequence}>
+                  <span className="text-slate-300">{text.action}</span> {text.actor} · {text.target} · {new Date(record.occurredAt).toLocaleString()} · {text.reason}
+                </li>
+              )
+            })}
+          </ol>
+        )}
       </section>
       <section id="skill-mastery" data-mastery={skill.mastery ? 'mastered' : 'not-mastered'} aria-labelledby="skill-mastery-heading" className="rounded-xl p-3 border bg-slate-800/40 border-slate-700/40">
         <div className="flex items-center justify-between gap-2">

@@ -74,7 +74,7 @@ const records = (over: Partial<EnrollmentLearningState> = {}, access = true): En
   enrollmentId: 'e', learningPathVersionId: 'v', enrollmentStatus: 'active', xp: 0,
   skills: [{ skillId: 's', title: 'S', learningOutcome: '', optional: false, xpThreshold: 0, mastery: false, access, accessOverride: null, unmetPrerequisiteSkillIds: [], xpShortfall: 0 }],
   tasks: [{ taskId: 't', skillId: 's', title: 'T', required: true, xpReward: 10, approved: false, xpContribution: 0 }],
-  xpHistory: [], masteryHistory: [], taskStarts: [], awaitingReview: [], ...over,
+  xpHistory: [], masteryHistory: [], taskStarts: [], awaitingReview: [], overrideHistory: [], ...over,
 })
 
 describe('sending needs Access and an active Enrollment', () => {

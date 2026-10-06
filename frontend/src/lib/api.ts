@@ -313,6 +313,8 @@ export interface EnrolledVersion {
   learningPath: { id: string; title: string; goal: string }
   version: { id: string; versionNumber: number; publishedAt: string }
   coachWorkspace: { id: string; name: string }
+  /** The Workspace's Coach, by name only: who acts in this Enrollment's records. */
+  coach: { id: string; name: string }
   editor: PathDocument['editor']
   application: { skills: PathSkill[] }
 }
@@ -328,7 +330,8 @@ export interface EnrollmentSkillState {
   xpThreshold: number
   mastery: boolean
   access: boolean
-  accessOverride: { id: string; reason: string; occurredAt: string } | null
+  /** The grant of the Access Override in force for this Skill, if any. */
+  accessOverride: OverrideRecord | null
   unmetPrerequisiteSkillIds: string[]
   xpShortfall: number
 }
@@ -357,6 +360,27 @@ export interface EnrollmentLearningState {
   taskStarts: { taskId: string; startedAt: string }[]
   /** Revisions sent, not superseded and not yet decided: at most one per Task, oldest first. */
   awaitingReview: AwaitingRevision[]
+  /** Every grant and revocation of an Access Override in this Enrollment, oldest first. */
+  overrideHistory: OverrideRecord[]
+}
+
+/**
+ * One grant or revocation of an Access Override, recorded with its reason; the action,
+ * acting Coach, learner, Enrollment, Skill and time are recorded by the backend, never
+ * supplied by the client. A revocation names the grant it withdraws.
+ */
+export interface OverrideRecord {
+  id: string
+  sequence: number
+  enrollmentId: string
+  learningPathVersionId: string
+  skillId: string
+  coachAccountId: string
+  learnerAccountId: string
+  action: 'grant' | 'revoke'
+  grantRecordId: string | null
+  reason: string
+  occurredAt: string
 }
 
 /**
@@ -446,3 +470,24 @@ export const reviewRevision = (enrollmentId: string, taskId: string, revisionId:
 export const revokeRevisionApproval = (enrollmentId: string, taskId: string, revisionId: string, reason: string) =>
   call<{ review: { revisionId: string; decision: 'approval'; revokedAt: string; revocationReason: string } }>(
     `${taskRoute(enrollmentId, taskId)}/submission/revisions/${encodeURIComponent(revisionId)}/review/revoke`, { method: 'POST', body: { reason } })
+
+const overrideRoute = (enrollmentId: string, skillId: string) => `/enrollments/${encodeURIComponent(enrollmentId)}/skills/${encodeURIComponent(skillId)}/access-overrides`
+
+/**
+ * The owning Coach's grant of an Access Override for one Skill in one Enrollment, with a
+ * mandatory reason. 201 is the backend's confirmation. Refusals: `override_already_active`
+ * (409), `coach_only` (403, the learner themselves), `enrollment_not_found`,
+ * `skill_not_found`, `override_not_found` (404: not this Coach's Enrollment or not its
+ * Version's Skill), `invalid_override_reason` (422).
+ */
+export const grantAccessOverride = (enrollmentId: string, skillId: string, reason: string) =>
+  call<{ overrideRecord: OverrideRecord }>(overrideRoute(enrollmentId, skillId), { method: 'POST', body: { reason } })
+
+/**
+ * The owning Coach's revocation of exactly the grant in force, with a mandatory reason.
+ * 200 is the backend's confirmation. Refusals: `override_not_active` (409: already
+ * revoked), `coach_only` (403), `override_not_found`, `enrollment_not_found`,
+ * `skill_not_found` (404), `invalid_override_reason` (422).
+ */
+export const revokeAccessOverride = (enrollmentId: string, skillId: string, grantRecordId: string, reason: string) =>
+  call<{ overrideRecord: OverrideRecord }>(`${overrideRoute(enrollmentId, skillId)}/${encodeURIComponent(grantRecordId)}/revoke`, { method: 'POST', body: { reason } })

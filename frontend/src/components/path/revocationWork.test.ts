@@ -20,7 +20,7 @@ const records = (over: Partial<EnrollmentLearningState> = {}, required = true, x
   enrollmentId: 'e', learningPathVersionId: 'v', enrollmentStatus: 'active', xp: 0,
   skills: [skill('vectors'), skill('matrices')],
   tasks: [{ taskId: 'drills', skillId: 'vectors', title: 'Drills', required, xpReward, approved: false, xpContribution: 0 }],
-  xpHistory: [], masteryHistory: [], taskStarts: [], awaitingReview: [], ...over,
+  xpHistory: [], masteryHistory: [], taskStarts: [], awaitingReview: [], overrideHistory: [], ...over,
 })
 const xp = (id: number, revisionNumber: number, kind: 'award' | 'correction', amount: number) => ({ id, taskId: 'drills', revisionId: `r${revisionNumber}`, revisionNumber, occurredAt: at(id), kind, amount })
 const mastery = (id: number, revisionNumber: number, action: 'award' | 'revocation') => ({ id, skillId: 'vectors', taskId: 'drills', revisionId: `r${revisionNumber}`, revisionNumber, occurredAt: at(id), action })

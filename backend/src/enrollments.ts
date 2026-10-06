@@ -1,4 +1,5 @@
 import { and, asc, eq, sql } from 'drizzle-orm'
+import { alias } from 'drizzle-orm/pg-core'
 import { readVersionContent } from './coaching'
 import type { Database } from './db/client'
 import type { Tx } from './personal'
@@ -166,22 +167,26 @@ export async function listLearnerEnrollments(db: Database, accountId: string) {
     .orderBy(asc(enrollments.createdAt), asc(enrollments.id))
 }
 
+const coachAccounts = alias(accounts, 'coach_accounts')
+
 /**
  * The Version an Enrollment joined, read-only, for its learner or the owning Coach
  * (ADR 0005, 0013): that Version's own title, goal, Skills and Tasks, whatever was
  * published later, with its shared Canvas Layout as the Coach last arranged it.
  * Nothing about the Path's other Versions or Draft is included. The learner is named
- * as invited, so the Coach knows whose work it is. Anyone else, and an unknown ID, gets null.
+ * as invited, so the Coach knows whose work it is, and the Coach by name, so the learner
+ * knows who acted in the records. Anyone else, and an unknown ID, gets null.
  */
 export async function readEnrolledVersion(db: Database, enrollmentId: string, accountId: string) {
   return db.transaction(async (tx) => {
     const [row] = await tx
-      .select({ enrollment: enrollments, version: learningPathVersions, learningPathId: learningPaths.id, workspace: coachWorkspaces, learner: { name: accounts.name, email: accounts.email } })
+      .select({ enrollment: enrollments, version: learningPathVersions, learningPathId: learningPaths.id, workspace: coachWorkspaces, learner: { name: accounts.name, email: accounts.email }, coach: { id: coachAccounts.id, name: coachAccounts.name } })
       .from(enrollments)
       .innerJoin(accounts, eq(accounts.id, enrollments.accountId))
       .innerJoin(learningPathVersions, eq(learningPathVersions.id, enrollments.learningPathVersionId))
       .innerJoin(learningPaths, eq(learningPaths.id, learningPathVersions.learningPathId))
       .innerJoin(coachWorkspaces, eq(coachWorkspaces.id, learningPaths.coachWorkspaceId))
+      .innerJoin(coachAccounts, eq(coachAccounts.id, coachWorkspaces.ownerAccountId))
       .where(eq(enrollments.id, enrollmentId))
     const viewer = row?.enrollment.accountId === accountId ? 'learner' as const : row?.workspace.ownerAccountId === accountId ? 'coach' as const : null
     if (!row || !viewer) return null
@@ -193,6 +198,8 @@ export async function readEnrolledVersion(db: Database, enrollmentId: string, ac
       learningPath: { id: row.learningPathId, title: version.title, goal: version.goal },
       version: { id: version.id, versionNumber: version.versionNumber, publishedAt: version.publishedAt },
       coachWorkspace: { id: workspace.id, name: workspace.name },
+      // The Workspace's Coach by name only, so both viewers can read who acted in its records.
+      coach: row.coach,
       ...await readVersionContent(tx, version.id),
     }
   })

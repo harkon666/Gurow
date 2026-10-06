@@ -54,6 +54,9 @@
     "t23-coach-review": {"cwd": "frontend", "argv": ["bun", "run", "scripts/t23-review-work-check.ts"], "timeout": 900},
     "t24-revocation-rules": {"cwd": "frontend", "argv": ["bun", "test", "src/components/path/revocationWork.test.ts"], "timeout": 120},
     "t24-correct-approval": {"cwd": "frontend", "argv": ["bun", "run", "scripts/t24-correct-approval-check.ts"], "timeout": 900},
+    "t25-override-rules": {"cwd": "frontend", "argv": ["bun", "test", "src/components/path/overrideWork.test.ts"], "timeout": 120},
+    "t25-backend-enrolled-version": {"cwd": "backend", "argv": ["bun", "test", "test/enrolled-version.test.ts", "test/override.test.ts"], "timeout": 180},
+    "t25-access-override": {"cwd": "frontend", "argv": ["bun", "run", "scripts/t25-access-override-check.ts"], "timeout": 900},
     "t06-l3-06-gate-tests": {"cwd": "frontend", "argv": ["bun", "test", "scripts/benchmark/gate.test.ts", "scripts/benchmark/report.test.ts", "scripts/benchmark/fixture.test.ts", "scripts/benchmark/run.test.ts"], "timeout": 120}
   },
   "profiles": {
@@ -88,6 +91,7 @@
     "T22": ["db-up", "backend-types", "backend-tests", "t21-backend-enrolled-version", "t12-lifecycle", "t10-revocation", "t09-review", "frontend-types", "t22-submission-work", "t22-learner-work", "t21-enrolled-navigation", "t20-invitation", "t19-publication", "t18-coach-draft", "t17-personal-learning", "t16-path-authoring", "t15-sign-in", "t04-browser", "t05-browser", "editor-lifecycle", "t06-functional", "t44-label-scroll"],
     "T23": ["db-up", "backend-types", "backend-tests", "t23-backend-coach-review", "t09-review", "t10-revocation", "t12-lifecycle", "t21-backend-enrolled-version", "frontend-types", "t23-review-rules", "t23-coach-review", "t22-learner-work", "t21-enrolled-navigation", "t20-invitation", "t19-publication", "t18-coach-draft", "t17-personal-learning", "t16-path-authoring", "t15-sign-in", "t04-browser", "t05-browser", "editor-lifecycle", "t06-functional", "t44-label-scroll"],
     "T24": ["db-up", "backend-types", "backend-tests", "t23-backend-coach-review", "t09-review", "t10-revocation", "t12-lifecycle", "t21-backend-enrolled-version", "frontend-types", "t24-revocation-rules", "t24-correct-approval", "t23-review-rules", "t23-coach-review", "t22-learner-work", "t21-enrolled-navigation", "t20-invitation", "t19-publication", "t18-coach-draft", "t17-personal-learning", "t16-path-authoring", "t15-sign-in", "t04-browser", "t05-browser", "editor-lifecycle", "t06-functional", "t44-label-scroll"],
+    "T25": ["db-up", "backend-types", "backend-tests", "t25-backend-enrolled-version", "t11-override", "t12-lifecycle", "frontend-types", "t25-override-rules", "t25-access-override", "t24-revocation-rules", "t24-correct-approval", "t23-backend-coach-review", "t09-review", "t10-revocation", "t23-review-rules", "t23-coach-review", "t22-learner-work", "t21-enrolled-navigation", "t20-invitation", "t19-publication", "t18-coach-draft", "t17-personal-learning", "t16-path-authoring", "t15-sign-in", "t04-browser", "t05-browser", "editor-lifecycle", "t06-functional", "t44-label-scroll"],
     "T06-L3-06": ["t06-functional", "t06-l3-06-gate-tests", "t06-l3-08-fixture-check-v5", "frontend-types"]
   }
 }
