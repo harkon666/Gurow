@@ -74,7 +74,7 @@ const records = (over: Partial<EnrollmentLearningState> = {}, access = true): En
   enrollmentId: 'e', learningPathVersionId: 'v', enrollmentStatus: 'active', xp: 0,
   skills: [{ skillId: 's', title: 'S', learningOutcome: '', optional: false, xpThreshold: 0, mastery: false, access, accessOverride: null, unmetPrerequisiteSkillIds: [], xpShortfall: 0 }],
   tasks: [{ taskId: 't', skillId: 's', title: 'T', required: true, xpReward: 10, approved: false, xpContribution: 0 }],
-  xpHistory: [], masteryHistory: [], taskStarts: [], ...over,
+  xpHistory: [], masteryHistory: [], taskStarts: [], awaitingReview: [], ...over,
 })
 
 describe('sending needs Access and an active Enrollment', () => {
@@ -127,5 +127,14 @@ describe('a send whose answer was lost', () => {
     expect(findSentRevision(history, sent, '2026-10-05T10:04:00.000Z')).toBeNull()
     const arrived = [...history, at(3, 'answer', '2026-10-05T10:04:00.250Z')]
     expect(findSentRevision(arrived, sent, '2026-10-05T10:04:00.000Z')?.revisionNumber).toBe(3)
+  })
+})
+
+describe('a correction requested after an Approval', () => {
+  it('says the earlier Approval still counts', () => {
+    const history = [revision(1, 'approval'), revision(2, 'changes_requested')]
+    expect(revisionNote(history[1], history)).toBe('Your Coach asked for changes to this revision; the Approval of Revision 1 still counts.')
+    const revoked = [revision(1, 'approval_revoked'), revision(2, 'changes_requested')]
+    expect(revisionNote(revoked[1], revoked)).toBe('Your Coach asked for changes; send a correction as a new revision.')
   })
 })

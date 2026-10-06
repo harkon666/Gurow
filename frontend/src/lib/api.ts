@@ -274,6 +274,18 @@ export const deliverInvitation = (invitationId: string) => call<DeliveryOutcome>
 export const setEnrollmentClosure = (versionId: string, closed: boolean) =>
   call<{ enrollmentClosed: boolean; changed: boolean }>(`${versionRoute(versionId)}/enrollment-closure`, { method: closed ? 'PUT' : 'DELETE' })
 
+/** One Enrollment of a Version as its Coach sees it: the learner as invited and the work awaiting Review. */
+export interface CoachEnrollment {
+  id: string
+  status: 'active' | 'inactive'
+  createdAt: string
+  learner: { name: string; email: string }
+  awaitingReview: AwaitingRevision[]
+}
+
+/** The Version's Enrollments, for the owner of its Coach Workspace only; anyone else gets 404 `version_not_found`. */
+export const listVersionEnrollments = (versionId: string) => call<{ enrollments: CoachEnrollment[] }>(`${versionRoute(versionId)}/enrollments`)
+
 /** One of the signed-in Account's Enrollments as a learner, naming the one Version it joined. */
 export interface LearnerEnrollment {
   id: string
@@ -296,6 +308,8 @@ export const listLearnerEnrollments = () => call<{ enrollments: LearnerEnrollmen
 export interface EnrolledVersion {
   enrollment: { id: string; status: 'active' | 'inactive'; learningPathVersionId: string; createdAt: string }
   viewer: 'learner' | 'coach'
+  /** The Enrollment's learner, as invited. */
+  learner: { name: string; email: string }
   learningPath: { id: string; title: string; goal: string }
   version: { id: string; versionNumber: number; publishedAt: string }
   coachWorkspace: { id: string; name: string }
@@ -341,7 +355,12 @@ export interface EnrollmentLearningState {
   xpHistory: { id: number; taskId: string; occurredAt: string; kind: 'award' | 'correction'; amount: number }[]
   masteryHistory: { id: number; skillId: string; occurredAt: string; action: 'award' | 'revocation' }[]
   taskStarts: { taskId: string; startedAt: string }[]
+  /** Revisions sent, not superseded and not yet decided: at most one per Task, oldest first. */
+  awaitingReview: AwaitingRevision[]
 }
+
+/** A sent revision still waiting for the Coach's decision (ADR 0002). */
+export interface AwaitingRevision { taskId: string; revisionId: string; revisionNumber: number; sentAt: string }
 
 export const readEnrollmentLearningState = (enrollmentId: string) =>
   call<{ learningState: EnrollmentLearningState }>(`/enrollments/${encodeURIComponent(enrollmentId)}/learning-state`)
@@ -383,3 +402,16 @@ export const saveTaskDraft = (enrollmentId: string, taskId: string, contents: Su
  */
 export const sendTaskRevision = (enrollmentId: string, taskId: string, contents: SubmissionContents) =>
   call<{ submission: { id: string }; revision: { id: string; revisionNumber: number; sentAt: string }; createdSubmission: boolean }>(`${taskRoute(enrollmentId, taskId)}/submission/revisions`, { method: 'POST', body: contents })
+
+export type ReviewDecision = 'approval' | 'changes_requested'
+
+/**
+ * The owning Coach's decision on exactly one revision; 201 is the backend's confirmation,
+ * after which XP, Mastery and Access are derived again. Refusals: `revision_superseded`,
+ * `revision_already_reviewed` (409), `coach_only` (403, the learner themselves),
+ * `revision_not_found`, `enrollment_not_found` (404), `invalid_review` (422: Changes
+ * Requested without feedback).
+ */
+export const reviewRevision = (enrollmentId: string, taskId: string, revisionId: string, decision: ReviewDecision, feedback: string | null) =>
+  call<{ review: { revisionId: string; decision: ReviewDecision; feedback: string | null; decidedAt: string } }>(
+    `${taskRoute(enrollmentId, taskId)}/submission/revisions/${encodeURIComponent(revisionId)}/review`, { method: 'POST', body: { decision, feedback } })

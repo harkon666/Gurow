@@ -287,6 +287,18 @@ A learner reads the Version their Enrollment joined, beside the learning state u
 
 `bun test test/enrolled-version.test.ts` covers pinned content, the shared layout, lock state and history, learner writes and visibility. `frontend/scripts/t21-enrolled-navigation-check.ts` runs the browser flow; results are in [the T21 report](../docs/validation/t21-enrolled-navigation-report.md).
 
+## Finding work to review (T23)
+
+The owning Coach finds the revisions awaiting a decision and decides them through the T09 route above ([ADR 0002](../docs/adr/0002-review-immutable-submission-revisions.md), [ADR 0013](../docs/adr/0013-limit-enrollment-data-visibility.md)). A revision awaits Review while it is sent, not superseded and undecided, so a Submission has at most one; it stays listed after the Skill locks or the Enrollment is deactivated, because it was sent with valid Access ([ADR 0007](../docs/adr/0007-scope-coach-xp-to-enrollments.md)).
+
+| Route | Effect |
+| --- | --- |
+| `GET /api/coach/learning-path-versions/:versionId/enrollments` | For the owner of the Version's Coach Workspace: `{ enrollments: [{ id, status, createdAt, learner: { name, email }, awaitingReview: [{ taskId, revisionId, revisionNumber, sentAt }] }] }`, in enrollment order, each queue oldest first. Anyone else, an unknown ID and an unpublished Version get 404 `version_not_found` |
+| `GET /api/enrollments/:enrollmentId/learning-state` | Also returns `awaitingReview` for that Enrollment, in the same shape, to its learner and owning Coach |
+| `GET /api/enrollments/:enrollmentId/version` | Also names the Enrollment's `learner: { name, email }` |
+
+`bun test test/coach-review.test.ts` covers the listing, its visibility and what counts as awaiting. `frontend/scripts/t23-review-work-check.ts` runs the browser flow; results are in [the T23 report](../docs/validation/t23-coach-review-report.md).
+
 ## P2 gate (T14)
 
 `bun test test/p2-gate.test.ts` runs competing requests across Enrollment, Submission, Review, revocation, override and lifecycle boundaries over the SPEC reference Path, plus the end-to-end reference flow, privacy matrix, lifecycle and personal 20→50 checks. Forced orders hold a row lock from a separate connection and observe `pg_blocking_pids` before starting the competing request. Unforced storms assert order-independent invariants in SQL at full timestamp precision. These invariants cover contiguous revision numbers, supersession at the successor's send, no Review on superseded work, no successor sent while a reviewed revision was pending, events at their causal time, one Submission per Task, and no revision sent while inactive. They also check that each Task's contribution moves only between zero and its reward. Results are recorded in [the P2 gate report](../docs/validation/t14-p2-gate-report.md).

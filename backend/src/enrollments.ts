@@ -170,14 +170,15 @@ export async function listLearnerEnrollments(db: Database, accountId: string) {
  * The Version an Enrollment joined, read-only, for its learner or the owning Coach
  * (ADR 0005, 0013): that Version's own title, goal, Skills and Tasks, whatever was
  * published later, with its shared Canvas Layout as the Coach last arranged it.
- * Nothing about the Path's other Versions or Draft is included. Anyone else, and an
- * unknown ID, gets null.
+ * Nothing about the Path's other Versions or Draft is included. The learner is named
+ * as invited, so the Coach knows whose work it is. Anyone else, and an unknown ID, gets null.
  */
 export async function readEnrolledVersion(db: Database, enrollmentId: string, accountId: string) {
   return db.transaction(async (tx) => {
     const [row] = await tx
-      .select({ enrollment: enrollments, version: learningPathVersions, learningPathId: learningPaths.id, workspace: coachWorkspaces })
+      .select({ enrollment: enrollments, version: learningPathVersions, learningPathId: learningPaths.id, workspace: coachWorkspaces, learner: { name: accounts.name, email: accounts.email } })
       .from(enrollments)
+      .innerJoin(accounts, eq(accounts.id, enrollments.accountId))
       .innerJoin(learningPathVersions, eq(learningPathVersions.id, enrollments.learningPathVersionId))
       .innerJoin(learningPaths, eq(learningPaths.id, learningPathVersions.learningPathId))
       .innerJoin(coachWorkspaces, eq(coachWorkspaces.id, learningPaths.coachWorkspaceId))
@@ -188,6 +189,7 @@ export async function readEnrolledVersion(db: Database, enrollmentId: string, ac
     return {
       enrollment: { id: enrollment.id, status: enrollment.status, learningPathVersionId: enrollment.learningPathVersionId, createdAt: enrollment.createdAt },
       viewer,
+      learner: row.learner,
       learningPath: { id: row.learningPathId, title: version.title, goal: version.goal },
       version: { id: version.id, versionNumber: version.versionNumber, publishedAt: version.publishedAt },
       coachWorkspace: { id: workspace.id, name: workspace.name },

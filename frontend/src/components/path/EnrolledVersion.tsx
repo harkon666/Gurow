@@ -5,9 +5,11 @@ import { SkillPrerequisiteList } from '../editor/SkillPrerequisiteList'
 import { loadCameraState, saveCameraState } from '../editor/checkpoint'
 import type { CameraState } from '../editor/protocol'
 import type { GpuStatus, SelectedSkillInfo } from '../editor/types'
-import { readEnrollmentLearningState, readTaskSubmission, type EnrolledVersion, type EnrollmentLearningState, type EnrollmentSkillState, type SubmissionRevisionView } from '../../lib/api'
+import { readEnrollmentLearningState, readTaskSubmission, type AwaitingRevision, type EnrolledVersion, type EnrollmentLearningState, type EnrollmentSkillState, type PathSkill, type SubmissionRevisionView } from '../../lib/api'
 import { TaskWork } from './TaskWork'
+import { TaskReview } from './TaskReview'
 import { revisionNote } from './submissionWork'
+import { coachRevisionNote } from './reviewWork'
 
 /**
  * The Version an Enrollment joined, as its learner navigates it (ADR 0005, 0017): the
@@ -19,6 +21,8 @@ import { revisionNote } from './submissionWork'
  * they are read again whenever the page becomes visible or the learner asks.
  * Camera state is stored only locally, per Account and Enrollment. The learner (never
  * the Coach) prepares private work for each Task and sends it from the sidebar (ADR 0002).
+ * The owning Coach finds the revisions awaiting Review in a keyboard list, which opens
+ * the Task beside its history, and decides there; the records are then read again.
  */
 
 /** The learning records as last confirmed by the backend; a failed read keeps them and says so. */
@@ -58,25 +62,40 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
   const [gpuStatus, setGpuStatus] = useState<GpuStatus>('initializing')
   const [view, setView] = useState<RecordsView>({ records: null, readAt: null, generation: 0, reading: true, error: null })
   const actionsRef = useRef<WebGpuEditorActions | null>(null)
+  /** The Task whose Review the Coach opened from the queue; its panel takes focus once shown. */
+  const [focusTaskId, setFocusTaskId] = useState<string | null>(null)
+  const clearFocusTask = useCallback(() => setFocusTaskId(null), [])
   // Reads are numbered as issued; an answer older than the one shown is dropped.
   const reads = useRef({ issued: 0, shown: 0 })
+  const latestRead = useRef<Promise<boolean>>(Promise.resolve(false))
 
-  const loadRecords = useCallback(async () => {
-    const ticket = ++reads.current.issued
-    setView((current) => ({ ...current, reading: true }))
-    let outcome: { records: EnrollmentLearningState } | { error: string }
-    try {
-      const result = await readEnrollmentLearningState(enrollmentId)
-      outcome = result.ok ? { records: result.value.learningState } : { error: result.error }
-    } catch {
-      outcome = { error: 'the backend could not be reached' }
+  /**
+   * Reads the records again. Resolves true once records read after this call started are
+   * on show, false when the latest read failed and the records shown may be out of date.
+   */
+  const loadRecords = useCallback(() => {
+    const read = async (): Promise<boolean> => {
+      const ticket = ++reads.current.issued
+      setView((current) => ({ ...current, reading: true }))
+      let outcome: { records: EnrollmentLearningState } | { error: string }
+      try {
+        const result = await readEnrollmentLearningState(enrollmentId)
+        outcome = result.ok ? { records: result.value.learningState } : { error: result.error }
+      } catch {
+        outcome = { error: 'the backend could not be reached' }
+      }
+      // A later read decides what is on show.
+      if (ticket < reads.current.shown) return latestRead.current
+      reads.current.shown = ticket
+      const done = ticket === reads.current.issued
+      setView((current) => 'records' in outcome
+        ? { records: outcome.records, readAt: new Date(), generation: current.generation + 1, reading: !done, error: null }
+        : { ...current, reading: !done, error: outcome.error })
+      return done ? 'records' in outcome : latestRead.current
     }
-    if (ticket < reads.current.shown) return
-    reads.current.shown = ticket
-    const done = ticket === reads.current.issued
-    setView((current) => 'records' in outcome
-      ? { records: outcome.records, readAt: new Date(), generation: current.generation + 1, reading: !done, error: null }
-      : { ...current, reading: !done, error: outcome.error })
+    const promise = read()
+    latestRead.current = promise
+    return promise
   }, [enrollmentId])
   useEffect(() => { void loadRecords() }, [loadRecords])
 
@@ -108,6 +127,19 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
     : undefined, [shown])
   const selected = skills.find((skill) => skill.id === selectedSkill?.id)
   const status = shown?.enrollmentStatus ?? document.enrollment.status
+  const coach = document.viewer === 'coach'
+  const awaitingBySkill = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const revision of shown?.awaitingReview ?? []) {
+      const skill = skills.find((s) => s.tasks.some((task) => task.id === revision.taskId))
+      if (skill) counts.set(skill.id, (counts.get(skill.id) ?? 0) + 1)
+    }
+    return counts
+  }, [shown, skills])
+  const openReview = useCallback((skill: PathSkill, taskId: string) => {
+    handleSelectListSkill({ id: skill.id, title: skill.title })
+    setFocusTaskId(taskId)
+  }, [handleSelectListSkill])
 
   return (
     <div id="enrolled-version" data-enrollment-id={enrollmentId} data-version-id={document.version.id} data-gpu-status={gpuStatus} className="flex-1 min-h-0 flex flex-col">
@@ -117,6 +149,7 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
           Version {document.version.versionNumber}
         </span>
         <span id="enrolled-workspace" className="text-xs text-slate-400">with {document.coachWorkspace.name}</span>
+        {coach && <span id="enrolled-learner" className="text-xs text-slate-300">Learner: {document.learner.name || document.learner.email} ({document.learner.email})</span>}
         <span id="enrollment-status" data-status={status} className={`text-xs px-2 py-1 rounded-lg border ${status === 'active' ? 'text-emerald-300 border-emerald-800/60' : 'text-amber-200 border-amber-800/60'}`}>
           Enrollment {status}
         </span>
@@ -142,12 +175,13 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
       </p>
       <section className="w-full flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden relative">
         <div className="w-full md:w-64 lg:w-72 shrink-0 md:h-full flex flex-col border-b md:border-b-0 md:border-r border-slate-800/80 min-h-0">
+          {coach && <AwaitingReviewQueue awaiting={shown?.awaitingReview ?? null} skills={skills} onOpen={openReview} />}
           <SkillPrerequisiteList
             skills={skills}
             connections={connections}
             selectedSkillId={selectedSkill?.id ?? null}
             onSelectSkill={handleSelectListSkill}
-            renderStatus={(id) => <EnrolledSkillChips skill={stateOf(id)} skillId={id} />}
+            renderStatus={(id) => <EnrolledSkillChips skill={stateOf(id)} skillId={id} awaiting={coach ? awaitingBySkill.get(id) ?? 0 : 0} />}
             className="flex-1 min-h-0"
           />
         </div>
@@ -170,7 +204,18 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
           outcome={selected?.outcome ?? ''}
           learning={selected && <EnrolledSkillLearning view={view} skillId={selected.id} skillTitles={skillTitles} />}
           renderTaskExtra={(taskId) => (
-            <EnrolledTaskLearning key={taskId} accountId={accountId} viewer={document.viewer} enrollmentId={enrollmentId} taskId={taskId} records={shown} generation={view.generation} onRecordsStale={loadRecords} />
+            <EnrolledTaskLearning
+              key={taskId}
+              accountId={accountId}
+              viewer={document.viewer}
+              enrollmentId={enrollmentId}
+              taskId={taskId}
+              records={shown}
+              generation={view.generation}
+              onRecordsStale={loadRecords}
+              focusReview={focusTaskId === taskId}
+              onReviewFocused={clearFocusTask}
+            />
           )}
         />
       </section>
@@ -178,15 +223,54 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
   )
 }
 
-/** A Skill's Access and Mastery in the keyboard list, as two separate chips. */
-function EnrolledSkillChips({ skill, skillId }: { skill: EnrollmentSkillState | undefined; skillId: string }) {
+/** A Skill's Access and Mastery in the keyboard list, as two separate chips, and for the Coach the work awaiting Review. */
+function EnrolledSkillChips({ skill, skillId, awaiting }: { skill: EnrollmentSkillState | undefined; skillId: string; awaiting: number }) {
   if (!skill) return null
   const kind = accessKind(skill)
   return (
-    <span id={`skill-status-${skillId}`} data-access={kind} data-mastery={skill.mastery ? 'mastered' : 'not-mastered'} className="mt-1 flex gap-1 text-[9px] font-mono">
+    <span id={`skill-status-${skillId}`} data-access={kind} data-mastery={skill.mastery ? 'mastered' : 'not-mastered'} data-awaiting-review={awaiting} className="mt-1 flex flex-wrap gap-1 text-[9px] font-mono">
       <span className={`px-1 rounded border ${kind === 'locked' ? 'text-red-300 border-red-900/70' : 'text-emerald-300 border-emerald-900/70'}`}>{ACCESS_TEXT[kind]}</span>
       <span className={`px-1 rounded border ${skill.mastery ? 'text-violet-300 border-violet-900/70' : 'text-slate-400 border-slate-700'}`}>{skill.mastery ? 'Mastered' : 'Not mastered'}</span>
+      {awaiting > 0 && <span className="px-1 rounded border text-sky-300 border-sky-900/70">{awaiting} awaiting Review</span>}
     </span>
+  )
+}
+
+/**
+ * The Coach's queue of revisions awaiting a decision in this Enrollment, oldest first,
+ * as the backend last listed them. Each entry opens its Task in the sidebar with the
+ * Review focused, so no canvas is needed to reach it. Work stays listed after the Skill
+ * locks or the Enrollment is deactivated: it was sent with valid Access (ADR 0007).
+ */
+function AwaitingReviewQueue({ awaiting, skills, onOpen }: { awaiting: AwaitingRevision[] | null; skills: PathSkill[]; onOpen: (skill: PathSkill, taskId: string) => void }) {
+  return (
+    <section id="awaiting-review" data-count={awaiting?.length ?? ''} aria-labelledby="awaiting-review-heading" className="shrink-0 border-b border-slate-800/80 p-3 space-y-2">
+      <h2 id="awaiting-review-heading" className="text-[10px] font-semibold uppercase tracking-wider text-sky-300">Awaiting your Review</h2>
+      {awaiting === null && <p className="text-[11px] text-slate-500">Loading…</p>}
+      {awaiting?.length === 0 && <p id="awaiting-review-empty" className="text-[11px] text-slate-500">Nothing sent is waiting for a decision.</p>}
+      {awaiting && awaiting.length > 0 && (
+        <ul className="space-y-1">
+          {awaiting.map((revision) => {
+            const skill = skills.find((s) => s.tasks.some((task) => task.id === revision.taskId))
+            const task = skill?.tasks.find((t) => t.id === revision.taskId)
+            if (!skill || !task) return null
+            return (
+              <li key={revision.revisionId}>
+                <button
+                  id={`awaiting-review-${revision.taskId}`}
+                  data-revision-number={revision.revisionNumber}
+                  onClick={() => onOpen(skill, revision.taskId)}
+                  className="w-full text-left text-[11px] rounded-lg border border-sky-900/60 bg-slate-900/60 hover:bg-slate-800 px-2 py-1.5 text-slate-200 cursor-pointer focus:outline-none focus:ring-1 focus:ring-sky-500"
+                >
+                  <span className="block font-medium">{task.title}</span>
+                  <span className="block text-[10px] text-slate-400">{skill.title} · Revision {revision.revisionNumber} · sent {new Date(revision.sentAt).toLocaleString()}</span>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </section>
   )
 }
 
@@ -248,35 +332,49 @@ type History =
  * read again with each confirmed read of the records (`generation`) and after each
  * confirmed send; the history on show stays until the new one arrives.
  */
-function EnrolledTaskLearning({ accountId, viewer, enrollmentId, taskId, records, generation, onRecordsStale }: {
+function EnrolledTaskLearning({ accountId, viewer, enrollmentId, taskId, records, generation, onRecordsStale, focusReview, onReviewFocused }: {
   accountId: string
   viewer: EnrolledVersion['viewer']
   enrollmentId: string
   taskId: string
   records: EnrollmentLearningState | null
   generation: number
-  onRecordsStale: () => void
+  /** Reads the records again; true once fresh records are on show. */
+  onRecordsStale: () => Promise<boolean>
+  focusReview: boolean
+  onReviewFocused: () => void
 }) {
   const [history, setHistory] = useState<History>({ state: 'loading' })
   const latest = useRef(0)
-  const load = useCallback(async () => {
-    const ticket = ++latest.current
-    setHistory((current) => (current.state === 'failed' ? { state: 'loading' } : current))
-    let next: History
-    try {
-      const result = await readTaskSubmission(enrollmentId, taskId)
-      next = result.ok ? { state: 'ready', revisions: result.value.submission.revisions }
-        : result.error === 'submission_not_found' ? { state: 'none' } : { state: 'failed', error: result.error }
-    } catch {
-      next = { state: 'failed', error: 'the backend could not be reached' }
+  const latestLoad = useRef<Promise<boolean>>(Promise.resolve(false))
+  /** Reads the history again; true once a history read after this call started is on show. */
+  const load = useCallback(() => {
+    const read = async (): Promise<boolean> => {
+      const ticket = ++latest.current
+      setHistory((current) => (current.state === 'failed' ? { state: 'loading' } : current))
+      let next: History
+      try {
+        const result = await readTaskSubmission(enrollmentId, taskId)
+        next = result.ok ? { state: 'ready', revisions: result.value.submission.revisions }
+          : result.error === 'submission_not_found' ? { state: 'none' } : { state: 'failed', error: result.error }
+      } catch {
+        next = { state: 'failed', error: 'the backend could not be reached' }
+      }
+      // Only the latest read is shown; an earlier one answering late is dropped.
+      if (ticket !== latest.current) return latestLoad.current
+      setHistory(next)
+      return next.state !== 'failed'
     }
-    // Only the latest read is shown; an earlier one answering late is dropped.
-    if (ticket === latest.current) setHistory(next)
+    const promise = read()
+    latestLoad.current = promise
+    return promise
   }, [enrollmentId, taskId])
   useEffect(() => { void load() }, [load, generation])
 
   const task = records?.tasks.find((t) => t.taskId === taskId)
   const started = records?.taskStarts.some((start) => start.taskId === taskId) ?? false
+  const xpEvents = records?.xpHistory.filter((event) => event.taskId === taskId) ?? []
+  const revisions = history.state === 'ready' ? history.revisions : history.state === 'none' ? [] : null
   return (
     <div id={`task-learning-${taskId}`} data-approved={task?.approved ?? ''} data-xp-contribution={task?.xpContribution ?? ''} data-started={started} className="space-y-2 text-[11px]">
       {task && (
@@ -285,14 +383,21 @@ function EnrolledTaskLearning({ accountId, viewer, enrollmentId, taskId, records
           {started && ' · started'}
         </p>
       )}
+      {xpEvents.length > 0 && (
+        <ul id={`task-xp-history-${taskId}`} data-events={xpEvents.length} aria-label="XP history of this Task" className="text-[10px] text-slate-500 space-y-0.5">
+          {xpEvents.map((event) => (
+            <li key={event.id}>{event.kind === 'award' ? 'Awarded' : 'Corrected'} {event.amount > 0 ? '+' : ''}{event.amount} XP on {new Date(event.occurredAt).toLocaleString()}</li>
+          ))}
+        </ul>
+      )}
       {viewer === 'learner' && (
         <TaskWork
           accountId={accountId}
           enrollmentId={enrollmentId}
           taskId={taskId}
           records={records}
-          onSent={() => { void load(); onRecordsStale() }}
-          onRefused={onRecordsStale}
+          onSent={() => { void load(); void onRecordsStale() }}
+          onRefused={() => void onRecordsStale()}
         />
       )}
       <div id={`task-history-${taskId}`} data-state={history.state} data-revisions={history.state === 'ready' ? history.revisions.length : 0} className="border-t border-slate-700/50 pt-2">
@@ -315,16 +420,27 @@ function EnrolledTaskLearning({ accountId, viewer, enrollmentId, taskId, records
                   <span className="text-slate-400">{REVISION_STATUS[revision.status]}</span>
                 </div>
                 <p className="text-[10px] text-slate-500">Sent {new Date(revision.sentAt).toLocaleString()}</p>
-                {viewer === 'learner' && <p className="revision-note text-[10px] text-slate-400">{revisionNote(revision, history.revisions)}</p>}
+                <p className="revision-note text-[10px] text-slate-400">{viewer === 'learner' ? revisionNote(revision, history.revisions) : coachRevisionNote(revision, history.revisions)}</p>
                 {revision.text && <p className="text-slate-300 whitespace-pre-wrap">{revision.text}</p>}
                 {revision.urls.map((url) => <a key={url} href={url} target="_blank" rel="noreferrer noopener" className="block text-sky-300 hover:text-sky-200 truncate">{url}</a>)}
-                {revision.review?.feedback && <p className="text-slate-400">Feedback: {revision.review.feedback}</p>}
+                {revision.review && <p className="text-[10px] text-slate-500">Decided {new Date(revision.review.decidedAt).toLocaleString()}</p>}
+                {revision.review?.feedback && <p className="revision-feedback text-slate-300">Feedback: {revision.review.feedback}</p>}
                 {revision.review?.revocationReason && <p className="text-amber-200">Revoked: {revision.review.revocationReason}</p>}
               </li>
             ))}
           </ol>
         )}
       </div>
+      {viewer === 'coach' && (
+        <TaskReview
+          enrollmentId={enrollmentId}
+          taskId={taskId}
+          revisions={revisions}
+          focusRequested={focusReview}
+          onFocused={onReviewFocused}
+          onChanged={async () => (await Promise.all([load(), onRecordsStale()])).every(Boolean)}
+        />
+      )}
     </div>
   )
 }

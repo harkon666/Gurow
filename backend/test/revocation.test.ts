@@ -127,7 +127,9 @@ it('AC1/5/6: authority, exact context, invalid reasons and non-Approvals reject 
   expect((await revoke(pending)).status).toBe(404)
   await send()
   expect((await revoke(pending)).status).toBe(404)
-  expect(await state()).toEqual(before)
+  // The revisions sent above legitimately await Review now (T23); every progress record is unchanged.
+  const progress = ({ awaitingReview: _, ...records }: any) => records
+  expect(progress(await state())).toEqual(progress(before))
   expect((await (await request(path())).json() as any).submission.revisions[0]).toEqual((history as any).submission.revisions[0])
 })
 

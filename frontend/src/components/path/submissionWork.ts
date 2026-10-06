@@ -113,10 +113,13 @@ export function refusalMessage(error: string): string {
 /** How one sent revision stands, said so that no revision appears to inherit another's decision. */
 export function revisionNote(revision: SubmissionRevisionView, revisions: SubmissionRevisionView[]): string {
   const later = revisions.find((r) => r.revisionNumber > revision.revisionNumber)
+  const earlierApprovals = revisions.filter((r) => r.status === 'approval' && r.revisionNumber < revision.revisionNumber).map((r) => r.revisionNumber)
   switch (revision.status) {
     case 'approval': return 'Approved: this revision counts for the Task.'
     case 'approval_revoked': return 'Its Approval was revoked and no longer counts.'
-    case 'changes_requested': return 'Your Coach asked for changes; send a correction as a new revision.'
+    case 'changes_requested': return earlierApprovals.length
+      ? `Your Coach asked for changes to this revision; the Approval of Revision ${earlierApprovals.join(', ')} still counts.`
+      : 'Your Coach asked for changes; send a correction as a new revision.'
     case 'superseded': return `Replaced by Revision ${later?.revisionNumber ?? 'a later one'} before it was reviewed; it can no longer be reviewed.`
     case 'pending': {
       const approved = revisions.filter((r) => r.status === 'approval' && r.revisionNumber < revision.revisionNumber).map((r) => r.revisionNumber)

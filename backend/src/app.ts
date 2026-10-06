@@ -11,7 +11,7 @@ import * as invitations from './invitations'
 import { changeAccessOverride } from './overrides'
 import { changeEnrollmentStatus } from './lifecycle'
 import * as personal from './personal'
-import { readLearningState, recordReview, revokeApproval, type ReviewContents } from './reviews'
+import { listVersionEnrollments, readLearningState, recordReview, revokeApproval, type ReviewContents } from './reviews'
 import { readDraft, readSubmission, saveDraft, sendRevision, startTask, type SubmissionContents, type SubmissionRefusal } from './submissions'
 import { enterPersonalWorkspace, readAccount, readPersonalWorkspace } from './workspace'
 
@@ -488,6 +488,14 @@ export function createApp({ db, identity, auth, delivery }: { db: Database; iden
     const admission = UUID.test(versionId) ? await invitations.listInvitations(db, versionId, c.get('accountId')) : null
     if (!admission) return c.json({ error: 'version_not_found' }, 404)
     return c.json(admission)
+  })
+
+  // The Version's learners and the work awaiting the Coach's Review (T23).
+  app.get(`${versionRoute}/enrollments`, async (c) => {
+    const versionId = c.req.param('versionId')
+    const listed = UUID.test(versionId) ? await listVersionEnrollments(db, versionId, c.get('accountId')) : null
+    if (!listed) return c.json({ error: 'version_not_found' }, 404)
+    return c.json({ enrollments: listed })
   })
 
   for (const [method, closed] of [['PUT', true], ['DELETE', false]] as const) {

@@ -1,6 +1,7 @@
 import { Link } from '@tanstack/react-router'
 import { useState, type ReactNode } from 'react'
 import { EnrollmentAdmission } from './Admission'
+import { VersionEnrollments } from './VersionEnrollments'
 import { prepareCoachDraft, publishCoachDraft, type BlockedSkill, type CoachPathDocument } from '../../lib/api'
 
 /**
@@ -176,6 +177,7 @@ export function PublishedVersionView({ document, actions }: { document: CoachPat
         </ol>
       </section>
       <EnrollmentAdmission key={version.id} versionId={version.id} versionNumber={version.versionNumber} />
+      <VersionEnrollments key={`enrollments:${version.id}`} versionId={version.id} />
     </div>
   )
 }

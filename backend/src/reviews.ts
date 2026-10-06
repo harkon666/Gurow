@@ -1,7 +1,7 @@
-import { and, asc, eq } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, notExists } from 'drizzle-orm'
 import { deriveLearningState } from './access'
 import type { Database } from './db/client'
-import { coachWorkspaces, enrollmentLifecycleRecords, enrollments, learningPaths, learningPathVersions, submissionReviews, submissionRevisions, submissions, taskStarts } from './db/schema'
+import { accounts, coachWorkspaces, enrollmentLifecycleRecords, enrollments, learningPaths, learningPathVersions, submissionReviews, submissionRevisions, submissions, taskStarts } from './db/schema'
 import { taskContext } from './submissions'
 import { lockedTimestamp } from './db/clock'
 import { readHistory, recordTransitions } from './history'
@@ -62,6 +62,52 @@ export async function revokeApproval(db: Database, enrollmentId: string, taskId:
   })
 }
 
+type Reader = Pick<Database, 'select'>
+
+/**
+ * Revisions awaiting a decision in the given Enrollments: sent, not superseded and
+ * without a Review, so at most one per Submission. They stay reviewable after the
+ * Skill's Access or the Enrollment's activity is lost (ADR 0007, CONTEXT.md: Submission).
+ */
+async function awaitingReview(db: Reader, enrollmentIds: string[]) {
+  if (enrollmentIds.length === 0) return []
+  return db.select({
+    enrollmentId: submissions.enrollmentId, taskId: submissions.taskId, revisionId: submissionRevisions.id,
+    revisionNumber: submissionRevisions.revisionNumber, sentAt: submissionRevisions.sentAt,
+  }).from(submissionRevisions)
+    .innerJoin(submissions, eq(submissions.id, submissionRevisions.submissionId))
+    .where(and(
+      inArray(submissions.enrollmentId, enrollmentIds), isNull(submissionRevisions.supersededAt),
+      notExists(db.select().from(submissionReviews).where(eq(submissionReviews.revisionId, submissionRevisions.id))),
+    ))
+    .orderBy(asc(submissionRevisions.sentAt), asc(submissionRevisions.id))
+}
+
+/**
+ * The Enrollments of one published Version, for the owner of its Coach Workspace only
+ * (ADR 0013): each learner as invited, the Enrollment's status, and the revisions
+ * awaiting Review, oldest first. Anyone else, and an unpublished Version, gets null.
+ */
+export async function listVersionEnrollments(db: Database, versionId: string, accountId: string) {
+  return db.transaction(async (tx) => {
+    const [owned] = await tx.select({ publishedAt: learningPathVersions.publishedAt }).from(learningPathVersions)
+      .innerJoin(learningPaths, eq(learningPaths.id, learningPathVersions.learningPathId))
+      .innerJoin(coachWorkspaces, eq(coachWorkspaces.id, learningPaths.coachWorkspaceId))
+      .where(and(eq(learningPathVersions.id, versionId), eq(coachWorkspaces.ownerAccountId, accountId)))
+    if (!owned?.publishedAt) return null
+    const rows = await tx.select({ id: enrollments.id, status: enrollments.status, createdAt: enrollments.createdAt, learnerName: accounts.name, learnerEmail: accounts.email })
+      .from(enrollments).innerJoin(accounts, eq(accounts.id, enrollments.accountId))
+      .where(eq(enrollments.learningPathVersionId, versionId))
+      .orderBy(asc(enrollments.createdAt), asc(enrollments.id))
+    const pending = await awaitingReview(tx, rows.map((row) => row.id))
+    return rows.map(({ learnerName, learnerEmail, ...enrollment }) => ({
+      ...enrollment,
+      learner: { name: learnerName, email: learnerEmail },
+      awaitingReview: pending.filter((revision) => revision.enrollmentId === enrollment.id).map(({ enrollmentId: _, ...revision }) => revision),
+    }))
+  })
+}
+
 /** Only the learner and owning Coach can read progress, even while inactive.
  * The shared Enrollment lock prevents multiple evidence queries mixing states.
  */
@@ -75,6 +121,7 @@ export async function readLearningState(db: Database, enrollmentId: string, acco
     if (!context || (context.enrollment.accountId !== accountId && context.ownerId !== accountId)) return null
     const [enrollment] = await tx.select().from(enrollments).where(eq(enrollments.id, enrollmentId)).for('update')
     const lifecycleHistory = await tx.select().from(enrollmentLifecycleRecords).where(eq(enrollmentLifecycleRecords.enrollmentId, enrollmentId)).orderBy(asc(enrollmentLifecycleRecords.sequence))
-    return { ...await deriveLearningState(tx, enrollmentId, enrollment.learningPathVersionId, context.ownerId, enrollment.status === 'active'), ...await readHistory(tx, enrollmentId), lifecycleHistory, taskStarts: await tx.select().from(taskStarts).where(eq(taskStarts.enrollmentId, enrollmentId)).orderBy(asc(taskStarts.taskId)) }
+    const awaiting = (await awaitingReview(tx, [enrollmentId])).map(({ enrollmentId: _, ...revision }) => revision)
+    return { ...await deriveLearningState(tx, enrollmentId, enrollment.learningPathVersionId, context.ownerId, enrollment.status === 'active'), ...await readHistory(tx, enrollmentId), lifecycleHistory, taskStarts: await tx.select().from(taskStarts).where(eq(taskStarts.enrollmentId, enrollmentId)).orderBy(asc(taskStarts.taskId)), awaitingReview: awaiting }
   })
 }
