@@ -352,12 +352,22 @@ export interface EnrollmentLearningState {
   xp: number
   skills: EnrollmentSkillState[]
   tasks: EnrollmentTaskState[]
-  xpHistory: { id: number; taskId: string; occurredAt: string; kind: 'award' | 'correction'; amount: number }[]
-  masteryHistory: { id: number; skillId: string; occurredAt: string; action: 'award' | 'revocation' }[]
+  xpHistory: EnrollmentXpEvent[]
+  masteryHistory: EnrollmentMasteryEvent[]
   taskStarts: { taskId: string; startedAt: string }[]
   /** Revisions sent, not superseded and not yet decided: at most one per Task, oldest first. */
   awaitingReview: AwaitingRevision[]
 }
+
+/**
+ * A change of one Task's XP contribution, caused by the decision on (or revocation of
+ * the Approval of) one revision: an award, a correction removing it when the last
+ * valid Approval was revoked, or a correction restoring it with a later Approval.
+ */
+export interface EnrollmentXpEvent { id: number; taskId: string; revisionId: string; revisionNumber: number; occurredAt: string; kind: 'award' | 'correction'; amount: number }
+
+/** A Mastery award or revocation, caused by the decision on (or revocation of) one revision of `taskId`. */
+export interface EnrollmentMasteryEvent { id: number; skillId: string; taskId: string; revisionId: string; revisionNumber: number; occurredAt: string; action: 'award' | 'revocation' }
 
 /** A sent revision still waiting for the Coach's decision (ADR 0002). */
 export interface AwaitingRevision { taskId: string; revisionId: string; revisionNumber: number; sentAt: string }
@@ -374,7 +384,16 @@ export interface SubmissionRevisionView {
   sentAt: string
   status: 'pending' | 'superseded' | 'approval' | 'approval_revoked' | 'changes_requested'
   review?: { decision: 'approval' | 'changes_requested'; feedback: string | null; decidedAt: string; revokedAt: string | null; revocationReason: string | null }
+  /** Only on a revoked Approval: what its revocation changed, read with this history. */
+  revocation?: RevocationOutcome
 }
+
+/**
+ * What revoking one Approval changed, as the backend read it together with the history
+ * (ADR 0003): the Approvals still counting at that moment, the XP Correction it caused
+ * (negative, or null), and the Skills whose Mastery it revoked.
+ */
+export interface RevocationOutcome { stillCountingRevisionNumbers: number[]; xpCorrection: number | null; masteryRevokedSkillIds: string[] }
 
 /** A Task's Submission history in one Enrollment; a Task without one answers 404 `submission_not_found`. */
 export const readTaskSubmission = (enrollmentId: string, taskId: string) =>
@@ -415,3 +434,15 @@ export type ReviewDecision = 'approval' | 'changes_requested'
 export const reviewRevision = (enrollmentId: string, taskId: string, revisionId: string, decision: ReviewDecision, feedback: string | null) =>
   call<{ review: { revisionId: string; decision: ReviewDecision; feedback: string | null; decidedAt: string } }>(
     `${taskRoute(enrollmentId, taskId)}/submission/revisions/${encodeURIComponent(revisionId)}/review`, { method: 'POST', body: { decision, feedback } })
+
+/**
+ * The owning Coach's revocation of the Approval of exactly one revision, with a mandatory
+ * reason (ADR 0003); the original decision stays in the history. 200 is the backend's
+ * confirmation, after which XP, Mastery and Access are derived again. Refusals:
+ * `approval_already_revoked` (409), `coach_only` (403, the learner themselves),
+ * `approval_not_found`, `enrollment_not_found` (404: no such Approval, or not this Coach's),
+ * `invalid_revocation` (422: no reason).
+ */
+export const revokeRevisionApproval = (enrollmentId: string, taskId: string, revisionId: string, reason: string) =>
+  call<{ review: { revisionId: string; decision: 'approval'; revokedAt: string; revocationReason: string } }>(
+    `${taskRoute(enrollmentId, taskId)}/submission/revisions/${encodeURIComponent(revisionId)}/review/revoke`, { method: 'POST', body: { reason } })

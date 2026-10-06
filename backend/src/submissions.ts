@@ -1,8 +1,8 @@
-import { and, asc, eq, isNull, max, notExists, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNotNull, isNull, lt, max, notExists, sql } from 'drizzle-orm'
 import type { Database } from './db/client'
 import { hasSkillAccess } from './access'
 import { lockedTimestamp } from './db/clock'
-import { coachWorkspaces, enrollments, learningPaths, learningPathVersions, submissionDrafts, submissionReviews, submissionRevisions, submissions, taskStarts, versionTasks } from './db/schema'
+import { coachWorkspaces, enrollments, learningPaths, learningPathVersions, masteryEvents, submissionDrafts, submissionReviews, submissionRevisions, submissions, taskStarts, versionTasks, xpEvents } from './db/schema'
 
 /** Why a draft or Submission operation is refused; each maps to one HTTP status at the route. */
 export type SubmissionRefusal =
@@ -31,6 +31,24 @@ export interface RevisionView extends RevisionRecord {
   status: 'pending' | 'superseded' | 'approval' | 'approval_revoked' | 'changes_requested'
   /** Omitted for unreviewed revisions, preserving their existing payload. */
   review?: typeof submissionReviews.$inferSelect
+  /** Only on a revoked Approval: what its revocation changed. */
+  revocation?: RevocationOutcome
+}
+
+/**
+ * What revoking one Approval changed (ADR 0003), read in the same transaction as the
+ * history it explains, so the two never disagree. Approvals still counting are compared
+ * at the database's full timestamp precision, the order transitions are recorded in
+ * under the Enrollment lock; a revocation only removes, so its XP and Mastery events
+ * are its revision's negative corrections and Mastery revocations.
+ */
+export interface RevocationOutcome {
+  /** Revisions of the Task whose Approval still counted at the moment of revocation. */
+  stillCountingRevisionNumbers: number[]
+  /** The XP Correction it caused (negative), or null when it changed no XP. */
+  xpCorrection: number | null
+  /** The Skills whose Mastery it revoked. */
+  masteryRevokedSkillIds: string[]
 }
 
 export interface SubmissionView extends SubmissionRecord {
@@ -184,13 +202,47 @@ export async function readSubmission(db: Database, enrollmentId: string, taskId:
     const revisions = await tx.select({ revision: submissionRevisions, review: submissionReviews }).from(submissionRevisions)
       .leftJoin(submissionReviews, eq(submissionReviews.revisionId, submissionRevisions.id))
       .where(eq(submissionRevisions.submissionId, submission.id)).orderBy(asc(submissionRevisions.revisionNumber))
+    const outcomes = await revocationOutcomes(tx, submission.id, context.ownerId)
     return {
       ok: true,
       value: { ...submission, revisions: revisions.map(({ revision, review }): RevisionView => ({
         ...revision,
         status: review ? (review.revokedAt ? 'approval_revoked' : review.decision) : revision.supersededAt ? 'superseded' : 'pending',
         ...(review ? { review } : {}),
+        ...(review?.revokedAt ? { revocation: outcomes.get(revision.id)! } : {}),
       })) },
     }
   })
+}
+
+/** The outcome of each revoked Approval of one Submission; the caller holds the Enrollment lock. */
+async function revocationOutcomes(db: Pick<Database, 'select' | 'execute'>, submissionId: string, ownerId: string) {
+  const outcomes = new Map<string, RevocationOutcome>()
+  const revoked = await db.select({ revisionId: submissionReviews.revisionId }).from(submissionReviews)
+    .innerJoin(submissionRevisions, eq(submissionRevisions.id, submissionReviews.revisionId))
+    .where(and(eq(submissionRevisions.submissionId, submissionId), isNotNull(submissionReviews.revokedAt)))
+  if (revoked.length === 0) return outcomes
+  for (const { revisionId } of revoked) outcomes.set(revisionId, { stillCountingRevisionNumbers: [], xpCorrection: null, masteryRevokedSkillIds: [] })
+  const ids = revoked.map((r) => r.revisionId)
+  // The same validity rule as the derivation (access.ts), evaluated at the revocation's own time.
+  const counting = await db.execute<{ revision_id: string; revision_number: number }>(sql`
+    select revoked.revision_id, other_revision.revision_number
+    from ${submissionReviews} revoked
+    join ${submissionRevisions} revoked_revision on revoked_revision.id = revoked.revision_id
+    join ${submissionRevisions} other_revision on other_revision.submission_id = revoked_revision.submission_id
+      and other_revision.id <> revoked.revision_id and other_revision.superseded_at is null
+    join ${submissionReviews} other on other.revision_id = other_revision.id
+      and other.decision = 'approval' and other.coach_account_id = ${ownerId}
+      and other.decided_at < revoked.revoked_at and (other.revoked_at is null or other.revoked_at > revoked.revoked_at)
+    where revoked_revision.submission_id = ${submissionId} and revoked.revoked_at is not null
+    order by other_revision.revision_number`)
+  for (const row of counting) outcomes.get(row.revision_id)!.stillCountingRevisionNumbers.push(Number(row.revision_number))
+  for (const event of await db.select().from(xpEvents).where(and(inArray(xpEvents.revisionId, ids), lt(xpEvents.amount, 0)))) {
+    const outcome = outcomes.get(event.revisionId)!
+    outcome.xpCorrection = (outcome.xpCorrection ?? 0) + event.amount
+  }
+  for (const event of await db.select().from(masteryEvents).where(and(inArray(masteryEvents.revisionId, ids), eq(masteryEvents.action, 'revocation')))) {
+    outcomes.get(event.revisionId)!.masteryRevokedSkillIds.push(event.skillId)
+  }
+  return outcomes
 }

@@ -84,6 +84,47 @@ it('AC2/3/5: multiple Approvals retain contribution and Mastery; final removal a
   expect(restored.masteryHistory.map((e: any) => e.action)).toEqual(['award', 'revocation', 'award'])
 })
 
+it('T24: each XP and Mastery event names the revision and Task whose decision or revocation caused it, for learner and Coach', async () => {
+  const first = await send()
+  expect((await approve(first)).status).toBe(201)
+  expect((await revoke(first)).status).toBe(200)
+  await send()
+  const third = await send()
+  expect((await approve(third)).status).toBe(201)
+  const after = await state()
+  expect(after.xpHistory.map((e: any) => [e.kind, e.amount, e.revisionId, e.revisionNumber, e.taskId])).toEqual([
+    ['award', 20, first, 1, fx.content.taskA.id], ['correction', -20, first, 1, fx.content.taskA.id], ['correction', 20, third, 3, fx.content.taskA.id],
+  ])
+  expect(after.masteryHistory.map((e: any) => [e.action, e.skillId, e.revisionId, e.revisionNumber, e.taskId])).toEqual([
+    ['award', fx.content.skillA.id, first, 1, fx.content.taskA.id], ['revocation', fx.content.skillA.id, first, 1, fx.content.taskA.id], ['award', fx.content.skillA.id, third, 3, fx.content.taskA.id],
+  ])
+  expect(await state('coach')).toEqual(after)
+})
+
+it('T24: each revoked Approval explains its outcome with its history, comparing transitions within one millisecond exactly', async () => {
+  const first = await send()
+  expect((await approve(first)).status).toBe(201)
+  const second = await send()
+  expect((await approve(second)).status).toBe(201)
+  expect((await revoke(first, { reason: 'Wrong key' })).status).toBe(200)
+  expect((await revoke(second, { reason: 'Copied' })).status).toBe(200)
+  // Both revocations fall in the same millisecond: Revision 2 still counted when Revision 1 lost its Approval.
+  await db.execute(sql`update submission_reviews set decided_at = '2026-10-06 12:00:00.100000+00', revoked_at = '2026-10-06 12:00:00.123100+00' where revision_id = ${first}`)
+  await db.execute(sql`update submission_reviews set decided_at = '2026-10-06 12:00:00.110000+00', revoked_at = '2026-10-06 12:00:00.123900+00' where revision_id = ${second}`)
+  for (const actor of ['learner', 'coach'] as const) {
+    const revisions = (await (await request(path(), actor)).json() as any).submission.revisions
+    expect(revisions.map((r: any) => r.review.revokedAt)).toEqual(['2026-10-06T12:00:00.123Z', '2026-10-06T12:00:00.123Z'])
+    expect(revisions.map((r: any) => r.revocation)).toEqual([
+      { stillCountingRevisionNumbers: [2], xpCorrection: null, masteryRevokedSkillIds: [] },
+      { stillCountingRevisionNumbers: [], xpCorrection: -20, masteryRevokedSkillIds: [fx.content.skillA.id] },
+    ])
+  }
+  // Undecided, decided-but-unrevoked and Changes Requested revisions carry no outcome.
+  const pending = await send()
+  const history = (await (await request(path())).json() as any).submission.revisions
+  expect(history.find((r: any) => r.id === pending).revocation).toBeUndefined()
+})
+
 it('AC4: A loss relocks B without cascading Mastery or invalidating pending work/private draft', async () => {
   const a = await send()
   expect((await approve(a)).status).toBe(201)

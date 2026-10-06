@@ -1,6 +1,6 @@
 import { and, asc, eq, type SQL } from 'drizzle-orm'
 import type { Database } from './db/client'
-import { masteryEvents, xpEvents } from './db/schema'
+import { masteryEvents, submissionRevisions, submissions, xpEvents } from './db/schema'
 import { deriveLearningState } from './access'
 
 type State = Awaited<ReturnType<typeof deriveLearningState>>
@@ -26,9 +26,22 @@ export async function recordTransitions(db: Pick<Database, 'insert' | 'select'>,
     })
   }
 }
+/**
+ * Each event names the revision whose decision or revocation caused it, by number and
+ * (for Mastery) Task, so the history explains itself to the learner and the Coach.
+ */
 export async function readHistory(db: Pick<Database, 'select'>, enrollmentId: string) {
+  const cause = { revisionNumber: submissionRevisions.revisionNumber, causeTaskId: submissions.taskId }
+  const xpHistory = await db.select({ event: xpEvents, ...cause }).from(xpEvents)
+    .innerJoin(submissionRevisions, eq(submissionRevisions.id, xpEvents.revisionId))
+    .innerJoin(submissions, eq(submissions.id, submissionRevisions.submissionId))
+    .where(eq(xpEvents.enrollmentId, enrollmentId)).orderBy(asc(xpEvents.occurredAt), asc(xpEvents.id))
+  const masteryHistory = await db.select({ event: masteryEvents, ...cause }).from(masteryEvents)
+    .innerJoin(submissionRevisions, eq(submissionRevisions.id, masteryEvents.revisionId))
+    .innerJoin(submissions, eq(submissions.id, submissionRevisions.submissionId))
+    .where(eq(masteryEvents.enrollmentId, enrollmentId)).orderBy(asc(masteryEvents.occurredAt), asc(masteryEvents.id))
   return {
-    xpHistory: await db.select().from(xpEvents).where(eq(xpEvents.enrollmentId, enrollmentId)).orderBy(asc(xpEvents.occurredAt), asc(xpEvents.id)),
-    masteryHistory: await db.select().from(masteryEvents).where(eq(masteryEvents.enrollmentId, enrollmentId)).orderBy(asc(masteryEvents.occurredAt), asc(masteryEvents.id)),
+    xpHistory: xpHistory.map(({ event, revisionNumber }) => ({ ...event, revisionNumber })),
+    masteryHistory: masteryHistory.map(({ event, revisionNumber, causeTaskId }) => ({ ...event, revisionNumber, taskId: causeTaskId })),
   }
 }

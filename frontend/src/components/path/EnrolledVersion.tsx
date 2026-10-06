@@ -9,7 +9,9 @@ import { readEnrollmentLearningState, readTaskSubmission, type AwaitingRevision,
 import { TaskWork } from './TaskWork'
 import { TaskReview } from './TaskReview'
 import { revisionNote } from './submissionWork'
-import { coachRevisionNote } from './reviewWork'
+import { coachRevisionNote, DECISION_TEXT } from './reviewWork'
+import { ApprovalRevocation } from './ApprovalRevocation'
+import { masteryEventText, revocationEffect, xpEventText } from './revocationWork'
 
 /**
  * The Version an Enrollment joined, as its learner navigates it (ADR 0005, 0017): the
@@ -23,6 +25,8 @@ import { coachRevisionNote } from './reviewWork'
  * the Coach) prepares private work for each Task and sends it from the sidebar (ADR 0002).
  * The owning Coach finds the revisions awaiting Review in a keyboard list, which opens
  * the Task beside its history, and decides there; the records are then read again.
+ * The Coach can also revoke an Approval from the history, with a reason; both see what
+ * the revocation changed, as the backend recorded it (ADR 0003).
  */
 
 /** The learning records as last confirmed by the backend; a failed read keeps them and says so. */
@@ -121,6 +125,7 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
 
   const shown = view.records
   const skillTitles = useMemo(() => new Map(skills.map((skill) => [skill.id, skill.title])), [skills])
+  const taskTitles = useMemo(() => new Map(skills.flatMap((skill) => skill.tasks.map((task) => [task.id, task.title] as const))), [skills])
   const stateOf = (id: string) => shown?.skills.find((skill) => skill.skillId === id)
   const labelStatus = useMemo(() => shown
     ? Object.fromEntries(shown.skills.map((skill) => [skill.skillId, { locked: !skill.access, mastered: skill.mastery }]))
@@ -202,7 +207,7 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
           connections={connections}
           tasks={selected?.tasks}
           outcome={selected?.outcome ?? ''}
-          learning={selected && <EnrolledSkillLearning view={view} skillId={selected.id} skillTitles={skillTitles} />}
+          learning={selected && <EnrolledSkillLearning view={view} skillId={selected.id} skillTitles={skillTitles} taskTitles={taskTitles} />}
           renderTaskExtra={(taskId) => (
             <EnrolledTaskLearning
               key={taskId}
@@ -211,6 +216,7 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
               enrollmentId={enrollmentId}
               taskId={taskId}
               records={shown}
+              skillTitles={skillTitles}
               generation={view.generation}
               onRecordsStale={loadRecords}
               focusReview={focusTaskId === taskId}
@@ -275,7 +281,7 @@ function AwaitingReviewQueue({ awaiting, skills, onOpen }: { awaiting: AwaitingR
 }
 
 /** The selected Skill's Access (with its lock reasons) and Mastery, and the XP its Tasks contribute. */
-function EnrolledSkillLearning({ view, skillId, skillTitles }: { view: RecordsView; skillId: string; skillTitles: Map<string, string> }) {
+function EnrolledSkillLearning({ view, skillId, skillTitles, taskTitles }: { view: RecordsView; skillId: string; skillTitles: Map<string, string>; taskTitles: Map<string, string> }) {
   if (!view.records) {
     return <div id="skill-learning" data-tracked="false" className="text-[11px] text-slate-500 italic bg-slate-800/30 rounded-xl p-3 border border-slate-700/30">{view.error ? 'Learning records are unavailable.' : 'Loading learning records…'}</div>
   }
@@ -285,6 +291,7 @@ function EnrolledSkillLearning({ view, skillId, skillTitles }: { view: RecordsVi
   const kind = accessKind(skill)
   const reasons = enrollmentLockReasons(skill, state, skillTitles)
   const skillXp = state.tasks.filter((task) => task.skillId === skillId).reduce((total, task) => total + task.xpContribution, 0)
+  const masteryEvents = state.masteryHistory.filter((event) => event.skillId === skillId)
   return (
     <div id="skill-learning" data-tracked="true" className="space-y-3">
       <section id="skill-access" data-access={kind} aria-labelledby="skill-access-heading" className={`rounded-xl p-3 border ${kind === 'locked' ? 'bg-red-950/30 border-red-900/60' : 'bg-emerald-950/20 border-emerald-900/50'}`}>
@@ -305,7 +312,19 @@ function EnrolledSkillLearning({ view, skillId, skillTitles }: { view: RecordsVi
           <h4 id="skill-mastery-heading" className="text-xs font-semibold uppercase tracking-wider text-slate-400">Mastery</h4>
           <span id="skill-mastery-state" className={`text-xs font-semibold ${skill.mastery ? 'text-violet-300' : 'text-slate-400'}`}>{skill.mastery ? 'Mastered' : 'Not mastered yet'}</span>
         </div>
-        <p className="mt-1 text-[10px] text-slate-500">Awarded when every Required Task of this Skill has an Approval from your Coach.</p>
+        <p className="mt-1 text-[10px] text-slate-500">Awarded when every Required Task of this Skill has an Approval from your Coach, and revoked if one of them loses its last valid Approval.</p>
+        {skill.mastery && !skill.access && (
+          <p id="skill-mastery-kept" className="mt-1 text-[10px] text-violet-200">
+            This Skill is locked, but its Mastery stays: it rests on the Approvals of its own Required Tasks, which still count. Access and Mastery are separate.
+          </p>
+        )}
+        {masteryEvents.length > 0 && (
+          <ul id="skill-mastery-history" data-events={masteryEvents.length} aria-label="Mastery history of this Skill" className="mt-2 text-[10px] text-slate-400 space-y-0.5">
+            {masteryEvents.map((event) => (
+              <li key={event.id} data-action={event.action}>{masteryEventText(event, taskTitles.get(event.taskId) ?? 'a Task')} · {new Date(event.occurredAt).toLocaleString()}</li>
+            ))}
+          </ul>
+        )}
       </section>
       <p id="skill-xp" data-xp={skillXp} className="text-[11px] text-slate-400">This Skill's Tasks contribute {skillXp} of your {state.xp} Enrollment XP.</p>
     </div>
@@ -332,12 +351,13 @@ type History =
  * read again with each confirmed read of the records (`generation`) and after each
  * confirmed send; the history on show stays until the new one arrives.
  */
-function EnrolledTaskLearning({ accountId, viewer, enrollmentId, taskId, records, generation, onRecordsStale, focusReview, onReviewFocused }: {
+function EnrolledTaskLearning({ accountId, viewer, enrollmentId, taskId, records, skillTitles, generation, onRecordsStale, focusReview, onReviewFocused }: {
   accountId: string
   viewer: EnrolledVersion['viewer']
   enrollmentId: string
   taskId: string
   records: EnrollmentLearningState | null
+  skillTitles: Map<string, string>
   generation: number
   /** Reads the records again; true once fresh records are on show. */
   onRecordsStale: () => Promise<boolean>
@@ -375,6 +395,9 @@ function EnrolledTaskLearning({ accountId, viewer, enrollmentId, taskId, records
   const started = records?.taskStarts.some((start) => start.taskId === taskId) ?? false
   const xpEvents = records?.xpHistory.filter((event) => event.taskId === taskId) ?? []
   const revisions = history.state === 'ready' ? history.revisions : history.state === 'none' ? [] : null
+  /** The backend answered a Review or revocation: read the history and records again; true once both are on show. */
+  const reread = useCallback(async () => (await Promise.all([load(), onRecordsStale()])).every(Boolean), [load, onRecordsStale])
+  const revocationTask = task ? { xpReward: task.xpReward, required: task.required, skillTitle: skillTitles.get(task.skillId) ?? 'this Skill' } : null
   return (
     <div id={`task-learning-${taskId}`} data-approved={task?.approved ?? ''} data-xp-contribution={task?.xpContribution ?? ''} data-started={started} className="space-y-2 text-[11px]">
       {task && (
@@ -386,7 +409,7 @@ function EnrolledTaskLearning({ accountId, viewer, enrollmentId, taskId, records
       {xpEvents.length > 0 && (
         <ul id={`task-xp-history-${taskId}`} data-events={xpEvents.length} aria-label="XP history of this Task" className="text-[10px] text-slate-500 space-y-0.5">
           {xpEvents.map((event) => (
-            <li key={event.id}>{event.kind === 'award' ? 'Awarded' : 'Corrected'} {event.amount > 0 ? '+' : ''}{event.amount} XP on {new Date(event.occurredAt).toLocaleString()}</li>
+            <li key={event.id} data-kind={event.kind} data-amount={event.amount}>{xpEventText(event)} · {new Date(event.occurredAt).toLocaleString()}</li>
           ))}
         </ul>
       )}
@@ -423,9 +446,14 @@ function EnrolledTaskLearning({ accountId, viewer, enrollmentId, taskId, records
                 <p className="revision-note text-[10px] text-slate-400">{viewer === 'learner' ? revisionNote(revision, history.revisions) : coachRevisionNote(revision, history.revisions)}</p>
                 {revision.text && <p className="text-slate-300 whitespace-pre-wrap">{revision.text}</p>}
                 {revision.urls.map((url) => <a key={url} href={url} target="_blank" rel="noreferrer noopener" className="block text-sky-300 hover:text-sky-200 truncate">{url}</a>)}
-                {revision.review && <p className="text-[10px] text-slate-500">Decided {new Date(revision.review.decidedAt).toLocaleString()}</p>}
+                {revision.review && <p className="text-[10px] text-slate-500">{DECISION_TEXT[revision.review.decision]} decided {new Date(revision.review.decidedAt).toLocaleString()}</p>}
                 {revision.review?.feedback && <p className="revision-feedback text-slate-300">Feedback: {revision.review.feedback}</p>}
-                {revision.review?.revocationReason && <p className="text-amber-200">Revoked: {revision.review.revocationReason}</p>}
+                {revision.review?.revokedAt && (
+                  <RevocationRecord revision={revision} taskId={taskId} records={records} skillTitles={skillTitles} />
+                )}
+                {viewer === 'coach' && (
+                  <ApprovalRevocation enrollmentId={enrollmentId} taskId={taskId} revision={revision} revisions={history.revisions} task={revocationTask} onChanged={reread} />
+                )}
               </li>
             ))}
           </ol>
@@ -438,8 +466,32 @@ function EnrolledTaskLearning({ accountId, viewer, enrollmentId, taskId, records
           revisions={revisions}
           focusRequested={focusReview}
           onFocused={onReviewFocused}
-          onChanged={async () => (await Promise.all([load(), onRecordsStale()])).every(Boolean)}
+          onChanged={reread}
         />
+      )}
+    </div>
+  )
+}
+
+/**
+ * A revoked Approval as both the learner and the Coach read it: when and why, and what
+ * it changed as the backend read it with this history (kept by other Approvals, or corrected).
+ */
+function RevocationRecord({ revision, taskId, records, skillTitles }: {
+  revision: SubmissionRevisionView
+  taskId: string
+  records: EnrollmentLearningState | null
+  skillTitles: Map<string, string>
+}) {
+  const review = revision.review!
+  const effect = records && revocationEffect(revision, taskId, records, skillTitles)
+  return (
+    <div id={`revision-revocation-${revision.id}`} className="rounded border border-amber-900/50 bg-amber-950/10 p-1.5 space-y-0.5">
+      <p className="text-amber-200">Approval revoked {new Date(review.revokedAt!).toLocaleString()}: {review.revocationReason}</p>
+      {effect && (
+        <ul className="revocation-effect text-[10px] text-slate-300 space-y-0.5">
+          {effect.map((line) => <li key={line}>{line}</li>)}
+        </ul>
       )}
     </div>
   )

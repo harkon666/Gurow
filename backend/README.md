@@ -299,6 +299,17 @@ The owning Coach finds the revisions awaiting a decision and decides them throug
 
 `bun test test/coach-review.test.ts` covers the listing, its visibility and what counts as awaiting. `frontend/scripts/t23-review-work-check.ts` runs the browser flow; results are in [the T23 report](../docs/validation/t23-coach-review-report.md).
 
+## Correcting an Approval (T24)
+
+The owning Coach revokes an Approval from the UI through the T10 route `POST /api/enrollments/:enrollmentId/tasks/:taskId/submission/revisions/:revisionId/review/revoke` with `{ "reason" }`, unchanged ([ADR 0003](../docs/adr/0003-derive-coach-mastery-from-required-task-approvals.md)). To let the learner and the Coach see what a revocation changed, the learning state names the cause of each history event:
+
+| Field | Meaning |
+| --- | --- |
+| `xpHistory[].revisionNumber` | The number of the revision (`revisionId`) whose Approval awarded or restored the XP, or whose revoked Approval caused the correction |
+| `masteryHistory[].taskId`, `masteryHistory[].revisionNumber` | The Task and revision whose Approval or revoked Approval awarded or revoked the Mastery |
+
+`GET …/tasks/:taskId/submission` also gives each revoked Approval's revision a `revocation: { stillCountingRevisionNumbers, xpCorrection, masteryRevokedSkillIds }`, read in the same transaction as the history it explains, so the UI never pieces an outcome together from records read at another moment. The Approvals still counting are compared in PostgreSQL at full timestamp precision (the order transitions are recorded in under the Enrollment lock; JSON times keep only milliseconds), with the derivation's validity rule. An Approval decision only adds (award, restoring correction, Mastery award) and a revocation only removes (negative correction, Mastery revocation), so a revocation's XP and Mastery outcome is its revision's negative corrections and Mastery revocations. `bun test test/revocation.test.ts` covers the fields, including two revocations within one millisecond; `frontend/scripts/t24-correct-approval-check.ts` runs the browser flow; results are in [the T24 report](../docs/validation/t24-correct-approval-report.md).
+
 ## P2 gate (T14)
 
 `bun test test/p2-gate.test.ts` runs competing requests across Enrollment, Submission, Review, revocation, override and lifecycle boundaries over the SPEC reference Path, plus the end-to-end reference flow, privacy matrix, lifecycle and personal 20→50 checks. Forced orders hold a row lock from a separate connection and observe `pg_blocking_pids` before starting the competing request. Unforced storms assert order-independent invariants in SQL at full timestamp precision. These invariants cover contiguous revision numbers, supersession at the successor's send, no Review on superseded work, no successor sent while a reviewed revision was pending, events at their causal time, one Submission per Task, and no revision sent while inactive. They also check that each Task's contribution moves only between zero and its reward. Results are recorded in [the P2 gate report](../docs/validation/t14-p2-gate-report.md).
