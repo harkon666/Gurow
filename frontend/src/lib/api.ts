@@ -191,7 +191,8 @@ export interface PublishedVersionSummary { id: string; versionNumber: number; pu
 export interface CoachPathDocument extends EditablePathDocument {
   learningPath: { id: string; coachWorkspaceId: string; title: string; goal: string; revision: number }
   draft: { id: string; versionNumber: number } | null
-  version: { id: string; versionNumber: number; publishedAt: string | null } | null
+  /** `layoutRevision`: the expected revision of the Version's next layout save, apart from the Path's content `revision`. */
+  version: { id: string; versionNumber: number; publishedAt: string | null; layoutRevision: number } | null
   versions: PublishedVersionSummary[]
 }
 
@@ -227,6 +228,17 @@ export const prepareCoachDraft = (pathId: string, expectedRevision: number) =>
 
 /** One published Version of a Path in the signed-in Coach's Workspace, read-only. */
 export const readCoachVersion = (versionId: string) => call<CoachPathDocument>(`/coach/learning-path-versions/${encodeURIComponent(versionId)}`)
+
+/** A layout save: card positions only, based on the Version's `layoutRevision` (ADR 0016). */
+export interface LayoutSave { expectedRevision: number; cards: { id: string; position: { x: number; y: number } }[] }
+
+/**
+ * Saves new card positions of a published Version's shared Canvas Layout. Its learning
+ * content stays as published and no Version is created; a stale save answers 409 with
+ * the accepted document in `body.current`.
+ */
+export const saveVersionLayout = (versionId: string, save: LayoutSave) =>
+  call<CoachPathDocument>(`/coach/learning-path-versions/${encodeURIComponent(versionId)}/layout`, { method: 'PUT', body: save })
 
 /** What an Enrollment Invitation offers: exactly one Version of one Path (CONTEXT.md). */
 export interface InvitationOffer { invitationId: string; learningPathVersionId: string; learningPathTitle: string; versionNumber: number; coachWorkspaceName: string }

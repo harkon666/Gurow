@@ -1051,3 +1051,57 @@ fn test_entering_read_only_cancels_an_active_drag() {
     assert_eq!(state.document.find_card("card-a").unwrap().position, Point::new(100.0, 100.0));
     assert!(state.undo_stack.is_empty());
 }
+
+#[test]
+fn test_layout_only_canvas_moves_cards_and_undoes_moves_but_keeps_its_content() {
+    let mut state = EditorState::new();
+    for (id, x) in [("card-a", 100.0), ("card-b", 400.0)] {
+        state.apply_command(EditorCommand::CreateCard {
+            id: id.into(),
+            title: id.into(),
+            position: Point::new(x, 100.0),
+            size: Some(Size::new(180.0, 80.0)),
+        });
+    }
+    state.apply_command(EditorCommand::ConnectSkills { from_id: "card-a".into(), to_id: "card-b".into() });
+    let events = state.apply_command(EditorCommand::SetLayoutOnly { layout_only: true });
+    assert!(events.is_empty());
+    let connections = state.document.connections.clone();
+
+    // One drag moves the card and is one undo step.
+    state.apply_command(EditorCommand::PointerDown { screen_x: 120.0, screen_y: 120.0 });
+    state.apply_command(EditorCommand::PointerMove { screen_x: 220.0, screen_y: 170.0 });
+    let up = state.apply_command(EditorCommand::PointerUp { screen_x: 220.0, screen_y: 170.0 });
+    assert!(up.iter().any(|e| matches!(e, EditorEvent::HistoryChanged { can_undo: true, .. })));
+    assert_eq!(state.document.find_card("card-a").unwrap().position, Point::new(200.0, 150.0));
+
+    // Undo and redo the move: positions only.
+    let undone = state.apply_command(EditorCommand::Undo);
+    assert!(undone.iter().any(|e| matches!(e, EditorEvent::CardMoved { position, .. } if *position == Point::new(100.0, 100.0))));
+    state.apply_command(EditorCommand::Redo);
+    assert_eq!(state.document.find_card("card-a").unwrap().position, Point::new(200.0, 150.0));
+
+    // Adding a card or changing a connection is refused with a reason and changes nothing.
+    let cards = state.document.cards.len();
+    let edits = [
+        EditorCommand::CreateCard { id: "card-c".into(), title: "C".into(), position: Point::new(0.0, 0.0), size: None },
+        EditorCommand::ConnectSkills { from_id: "card-b".into(), to_id: "card-a".into() },
+        EditorCommand::DisconnectSkills { from_id: "card-a".into(), to_id: "card-b".into() },
+    ];
+    for edit in edits {
+        let events = state.apply_command(edit.clone());
+        assert!(
+            events.len() == 1 && matches!(&events[0], EditorEvent::Error { message } if message.contains("Only card positions")),
+            "{:?} answered {:?}",
+            edit,
+            events
+        );
+    }
+    assert_eq!(state.document.cards.len(), cards);
+    assert_eq!(state.document.connections, connections);
+
+    // Leaving layout-only restores content editing.
+    state.apply_command(EditorCommand::SetLayoutOnly { layout_only: false });
+    let created = state.apply_command(EditorCommand::CreateCard { id: "card-c".into(), title: "C".into(), position: Point::new(0.0, 0.0), size: None });
+    assert!(created.iter().any(|e| matches!(e, EditorEvent::CardCreated { .. })));
+}

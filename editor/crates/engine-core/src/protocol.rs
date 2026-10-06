@@ -86,19 +86,29 @@ pub enum EditorCommand {
     SetReadOnly {
         read_only: bool,
     },
+    /// A layout-only canvas also allows moving cards and undoing or redoing those
+    /// moves, but refuses adding cards and changing connections: the shared Canvas
+    /// Layout of a published Version, whose learning content is immutable.
+    SetLayoutOnly {
+        layout_only: bool,
+    },
 }
 
 impl EditorCommand {
     /// Whether the command changes the document or its edit history, which a
     /// read-only canvas refuses. Loading a document replaces it rather than editing it.
     pub fn edits_document(&self) -> bool {
+        self.edits_content() || matches!(self, EditorCommand::Undo | EditorCommand::Redo)
+    }
+
+    /// Whether the command changes which cards or connections the document has,
+    /// which a layout-only canvas refuses. Moves, and undoing them, only change positions.
+    pub fn edits_content(&self) -> bool {
         matches!(
             self,
             EditorCommand::CreateCard { .. }
                 | EditorCommand::ConnectSkills { .. }
                 | EditorCommand::DisconnectSkills { .. }
-                | EditorCommand::Undo
-                | EditorCommand::Redo
         )
     }
 }

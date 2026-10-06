@@ -1,0 +1,2 @@
+ALTER TABLE "learning_path_versions" ADD COLUMN "layout_revision" integer DEFAULT 0 NOT NULL;--> statement-breakpoint
+ALTER TABLE "learning_path_versions" ADD CONSTRAINT "learning_path_versions_layout_revision_nonnegative" CHECK ("learning_path_versions"."layout_revision" >= 0);

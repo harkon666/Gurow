@@ -73,6 +73,12 @@ const PUBLICATION_REFUSAL_STATUS: Record<coaching.PublicationRefusal, Contentful
   publication_blocked: 422,
 }
 
+const LAYOUT_REFUSAL_STATUS: Record<coaching.LayoutRefusal, ContentfulStatusCode> = {
+  version_not_found: 404,
+  stale_revision: 409,
+  skill_not_in_version: 422,
+}
+
 const INVITATION_REFUSAL_STATUS: Record<invitations.InvitationRefusal, ContentfulStatusCode> = {
   version_not_found: 404,
   invitation_not_found: 404,
@@ -482,6 +488,21 @@ export function createApp({ db, identity, auth, delivery }: { db: Database; iden
 
   // Admission to one published Version (CONTEXT.md: Enrollment Invitation, Enrollment Closure).
   const versionRoute = '/coach/learning-path-versions/:versionId'
+
+  // A published Version's shared Canvas Layout (ADR 0005, 0016): positions only, for the owning Coach.
+  app.put(`${versionRoute}/layout`, async (c) => {
+    const versionId = c.req.param('versionId')
+    if (!UUID.test(versionId)) return c.json({ error: 'version_not_found' }, 404)
+    const input = coaching.parseLayoutInput(await c.req.json().catch(() => null))
+    // Without ownership there is no Version, whatever the body.
+    if (!input.ok) {
+      if (!await coaching.readCoachVersion(db, versionId, c.get('accountId'))) return c.json({ error: 'version_not_found' }, 404)
+      return c.json({ error: 'invalid_layout', detail: input.detail }, 422)
+    }
+    const result = await coaching.saveVersionLayout(db, versionId, c.get('accountId'), input.value)
+    if (!result.ok) return c.json({ error: result.refusal, detail: result.detail, ...(result.current ? { current: result.current } : {}) }, LAYOUT_REFUSAL_STATUS[result.refusal])
+    return c.json(result.document)
+  })
 
   app.get(`${versionRoute}/invitations`, async (c) => {
     const versionId = c.req.param('versionId')

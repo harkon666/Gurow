@@ -81,9 +81,17 @@ export const learningPathVersions = pgTable('learning_path_versions', {
   goal: text('goal').notNull().default(''),
   publishedAt: timestamp('published_at', { withTimezone: true }),
   enrollmentClosedAt: timestamp('enrollment_closed_at', { withTimezone: true }),
+  /**
+   * Concurrency revision of a published Version's shared Canvas Layout, the expected
+   * revision of every layout save (ADR 0016). Layout saves change only card positions,
+   * so they neither create a Version nor touch the Path's content `revision`; a Draft's
+   * layout is saved with the Draft instead.
+   */
+  layoutRevision: integer('layout_revision').notNull().default(0),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   unique('learning_path_versions_path_number_key').on(t.learningPathId, t.versionNumber),
+  check('learning_path_versions_layout_revision_nonnegative', sql`${t.layoutRevision} >= 0`),
   // An unpublished Version is the Path's Learning Path Draft: at most one per Path.
   uniqueIndex('learning_path_versions_one_draft_key').on(t.learningPathId).where(sql`${t.publishedAt} IS NULL`),
 ])

@@ -41,6 +41,9 @@ pub struct EditorState {
     pub redo_stack: Vec<HistoryAction>,
     /// Navigation only: pressing a card selects it and drags pan the view.
     pub read_only: bool,
+    /// Positions only: cards can be dragged and the moves undone, but no card or
+    /// connection can be added or removed.
+    pub layout_only: bool,
 }
 
 impl Default for EditorState {
@@ -54,6 +57,7 @@ impl Default for EditorState {
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             read_only: false,
+            layout_only: false,
         }
     }
 }
@@ -196,6 +200,12 @@ impl EditorState {
         if self.read_only && cmd.edits_document() {
             events.push(EditorEvent::Error {
                 message: "This canvas is read-only: its cards, positions and connections cannot be changed here".into(),
+            });
+            return events;
+        }
+        if self.layout_only && cmd.edits_content() {
+            events.push(EditorEvent::Error {
+                message: "Only card positions can be changed here: Skills and their connections stay as published".into(),
             });
             return events;
         }
@@ -557,6 +567,9 @@ impl EditorState {
                     labels_changed = true;
                 }
                 self.read_only = read_only;
+            }
+            EditorCommand::SetLayoutOnly { layout_only } => {
+                self.layout_only = layout_only;
             }
         }
 

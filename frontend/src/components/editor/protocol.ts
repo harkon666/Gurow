@@ -140,6 +140,12 @@ export const SetReadOnlyCommandSchema = z.object({
   read_only: z.boolean(),
 })
 
+/** A layout-only canvas also moves cards (and undoes moves), but refuses new cards and connection changes. */
+export const SetLayoutOnlyCommandSchema = z.object({
+  type: z.literal('SetLayoutOnly'),
+  layout_only: z.boolean(),
+})
+
 export const EditorCommandSchema = z.discriminatedUnion('type', [
   LoadDocumentCommandSchema,
   CreateCardCommandSchema,
@@ -157,6 +163,7 @@ export const EditorCommandSchema = z.discriminatedUnion('type', [
   ExportSnapshotCommandSchema,
   SetCameraCommandSchema,
   SetReadOnlyCommandSchema,
+  SetLayoutOnlyCommandSchema,
 ])
 
 /** Events emitted by the editor engine after a command has been applied. */

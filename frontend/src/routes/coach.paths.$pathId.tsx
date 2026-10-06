@@ -47,6 +47,7 @@ function CoachPathPage() {
             />
           ) : document.version ? (
             <PublishedVersionView
+              accountId={view.account.id}
               document={document}
               actions={<PrepareDraftControl pathId={pathId} revision={document.learningPath.revision} nextVersion={document.version.versionNumber + 1} onPrepared={reload} />}
             />

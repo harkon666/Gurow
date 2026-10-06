@@ -16,6 +16,8 @@ interface EditorToolbarProps {
   onSimulateFailure?: () => void
   /** A navigation-only canvas: no history controls, and a note on who arranges the cards. */
   readOnly?: boolean
+  /** A positions-only canvas: history controls stay, with a note that content stays as published. */
+  layoutOnly?: boolean
 }
 
 export const EditorToolbar: React.FC<EditorToolbarProps> = ({
@@ -32,6 +34,7 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   onCreateSkill,
   onSimulateFailure,
   readOnly = false,
+  layoutOnly = false,
 }) => {
   return (
     <div className="@container h-12 shrink-0 border-b border-slate-800/80 bg-slate-900/60 px-4 flex items-center justify-between gap-3 backdrop-blur-sm z-20">
@@ -87,6 +90,16 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
             className="text-[11px] text-slate-300 bg-slate-800/60 border border-slate-700/60 px-2 py-0.5 rounded shrink-0 whitespace-nowrap"
           >
             View only · layout by the Coach
+          </span>
+        )}
+
+        {layoutOnly && (
+          <span
+            id="editor-layout-only-badge"
+            title="Drag cards to rearrange them. Skills, Tasks and Prerequisites stay as published."
+            className="text-[11px] text-sky-200 bg-sky-950/40 border border-sky-800/60 px-2 py-0.5 rounded shrink-0 whitespace-nowrap"
+          >
+            Layout only · content stays as published
           </span>
         )}
 

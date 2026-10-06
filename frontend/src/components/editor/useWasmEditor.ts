@@ -55,6 +55,8 @@ interface UseWasmEditorOptions {
   onCameraChanged?: (camera: CameraState) => void
   /** Navigation only (a learner's view of a published Version): pan, zoom and select, no edits. */
   readOnly?: boolean
+  /** Positions only (a Coach arranging a published Version): drag, undo and redo, no new cards or connection changes. */
+  layoutOnly?: boolean
 }
 
 /**
@@ -74,6 +76,7 @@ export function useWasmEditor({
   onOperationCompleted,
   onCameraChanged,
   readOnly = false,
+  layoutOnly = false,
 }: UseWasmEditorOptions) {
   const editorRef = useRef<WasmEditor | null>(null)
   const activeDeviceRef = useRef<any>(null)
@@ -377,8 +380,11 @@ export function useWasmEditor({
       if (events.some(event => event.type === 'Error')) return
       loadedDocumentRef.current = { editor, cards, connections }
     }
+    // The camera is the viewer's own navigation, not part of the document (ADR 0016): it is
+    // restored on a new engine or when the given camera changes, never because the cards were
+    // replaced (LoadDocument keeps the camera), which would undo the viewer's pan and zoom.
     const camera = initialCameraRef.current
-    if (camera && (changed || loadedCameraRef.current?.editor !== editor || loadedCameraRef.current.camera !== camera)) {
+    if (camera && (loadedCameraRef.current?.editor !== editor || loadedCameraRef.current.camera !== camera)) {
       const events = dispatchInternal(editor, { type: 'SetCamera', ...camera })
       if (!events.some(event => event.type === 'Error')) loadedCameraRef.current = { editor, camera }
     }
@@ -386,11 +392,14 @@ export function useWasmEditor({
 
   const readOnlyRef = useRef(readOnly)
   readOnlyRef.current = readOnly
+  const layoutOnlyRef = useRef(layoutOnly)
+  layoutOnlyRef.current = layoutOnly
 
   const initializeEditor = useCallback((editor: WasmEditor) => {
     editorRef.current = editor
     // Before any document or input reaches the engine, so no edit is ever possible in a read-only view.
     if (readOnlyRef.current) dispatchInternal(editor, { type: 'SetReadOnly', read_only: true })
+    if (layoutOnlyRef.current) dispatchInternal(editor, { type: 'SetLayoutOnly', layout_only: true })
     // A new engine starts at its default camera; labels must not keep the old one.
     setLabelState(previous => ({ ...previous, labelCamera: ENGINE_INITIAL_CAMERA }))
     // Establish the viewport before restoring camera, in GPU and CPU paths.

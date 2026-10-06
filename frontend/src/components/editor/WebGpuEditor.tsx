@@ -51,6 +51,11 @@ interface WebGpuEditorProps {
    * loaded (a learner's view of a Coach's shared layout).
    */
   readOnly?: boolean
+  /**
+   * Positions only: cards can be dragged and the moves undone, but no Skill or
+   * connection added or removed (a Coach arranging a published Version's shared layout).
+   */
+  layoutOnly?: boolean
 }
 
 export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
@@ -67,6 +72,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
   onGpuStatusChange,
   labelStatus,
   readOnly = false,
+  layoutOnly = false,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -124,6 +130,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
     onOperationCompleted,
     onCameraChanged,
     readOnly,
+    layoutOnly,
   })
 
   useEffect(() => {
@@ -175,9 +182,10 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
         onZoomIn={zoomIn}
         onZoomOut={zoomOut}
         onResetZoom={resetZoom}
-        onCreateSkill={readOnly ? undefined : onCreateSkill}
+        onCreateSkill={readOnly || layoutOnly ? undefined : onCreateSkill}
         onSimulateFailure={simulateDeviceLoss}
         readOnly={readOnly}
+        layoutOnly={layoutOnly}
       />
 
       {/* Engine Error Toast Banner */}
@@ -220,7 +228,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
                 id="canvas-availability-explanation"
                 className="text-[11px] text-amber-300 mt-4 bg-amber-500/10 p-2.5 rounded-xl border border-amber-500/20 text-left leading-relaxed"
               >
-                <strong>Canvas Availability:</strong> {readOnly
+                <strong>Canvas Availability:</strong> {readOnly || layoutOnly
                   ? 'The canvas needs WebGPU. You can continue navigating all Skills, their Prerequisites and Tasks via the keyboard-accessible list.'
                   : 'Card positioning remains a canvas operation requiring WebGPU. You can continue navigating all Skills and editing associated Tasks via the keyboard-accessible list.'}
               </div>
@@ -286,6 +294,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
         <canvas
           id="editor-canvas"
           data-read-only={readOnly}
+          data-layout-only={layoutOnly}
           ref={canvasRef}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}

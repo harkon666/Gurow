@@ -443,6 +443,12 @@ describe('Editor Protocol Schemas (Matt Pocock SDD)', () => {
       expect(() => EditorCommandSchema.parse({ type: 'SetReadOnly' })).toThrow()
     })
 
+    it('validates the SetLayoutOnly command and rejects a non-boolean flag', () => {
+      expect(EditorCommandSchema.parse({ type: 'SetLayoutOnly', layout_only: true })).toEqual({ type: 'SetLayoutOnly', layout_only: true })
+      expect(() => EditorCommandSchema.parse({ type: 'SetLayoutOnly', layout_only: 1 })).toThrow()
+      expect(() => EditorCommandSchema.parse({ type: 'SetLayoutOnly' })).toThrow()
+    })
+
     it('validates SnapshotExported event', () => {
       const snapshotEvent = EditorEventSchema.parse({
         type: 'SnapshotExported',

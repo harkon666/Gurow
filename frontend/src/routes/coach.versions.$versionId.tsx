@@ -25,7 +25,7 @@ function CoachVersionPage() {
   return (
     <main className="w-full h-full flex flex-col bg-slate-950" data-account-id={account?.id ?? ''}>
       <ContextHeader account={account} onSignOut={handleSignOut} context={{ kind: 'coach' }} />
-      {document && (
+      {document && view.state === 'ready' && (
         <>
           <nav className="shrink-0 px-4 py-1.5 text-xs border-b border-slate-800/80 bg-slate-950 flex items-center gap-4">
             <Link id="back-to-path" to="/coach/paths/$pathId" params={{ pathId: document.learningPath.id }} className="text-sky-300 hover:text-sky-200">
@@ -33,7 +33,7 @@ function CoachVersionPage() {
             </Link>
             <VersionHistory versions={document.versions} currentVersionId={document.version?.id} />
           </nav>
-          <PublishedVersionView document={document} />
+          <PublishedVersionView accountId={view.account.id} document={document} />
         </>
       )}
       {view.state === 'loading' && <p className="p-6 text-sm text-slate-500">Loading Learning Path Version…</p>}

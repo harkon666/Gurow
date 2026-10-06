@@ -102,7 +102,7 @@ async function readDocument(tx: Tx, path: typeof learningPaths.$inferSelect, sho
     // A coach-mode Path's title and goal are those of the Version shown.
     learningPath: { id: path.id, coachWorkspaceId: path.coachWorkspaceId!, title: source!.title, goal: source!.goal, revision: path.revision },
     draft: draft ? { id: draft.id, versionNumber: draft.versionNumber } : null,
-    version: source ? { id: source.id, versionNumber: source.versionNumber, publishedAt: source.publishedAt } : null,
+    version: source ? { id: source.id, versionNumber: source.versionNumber, publishedAt: source.publishedAt, layoutRevision: source.layoutRevision } : null,
     versions: published.map((version) => ({ id: version.id, versionNumber: version.versionNumber, publishedAt: version.publishedAt!, enrollmentClosed: version.enrollmentClosedAt !== null })),
     ...(source ? await readVersionContent(tx, source.id) : { editor: { format_version: SNAPSHOT_FORMAT_VERSION, cards: [], connections: [] }, application: { skills: [] } }),
   }
@@ -155,6 +155,87 @@ export async function readCoachVersion(db: Database, versionId: string, accountI
     if (!version?.publishedAt) return null
     const path = await lockOwnedCoachPath(tx, version.learningPathId, accountId)
     return path ? readDocument(tx, path, version) : null
+  })
+}
+
+/** A layout save: card positions only, based on the Version's `layoutRevision`. */
+export interface LayoutInput {
+  expectedRevision: number
+  cards: { id: string; position: { x: number; y: number } }[]
+}
+
+const LAYOUT_KEYS = new Set(['expectedRevision', 'cards'])
+const CARD_KEYS = new Set(['id', 'position'])
+
+/**
+ * Validates a layout save. It carries card positions and nothing else: a body that
+ * also names titles, Tasks, connections or anything other than positions is refused
+ * as a whole, so no request through this route can be read as a content change.
+ */
+export function parseLayoutInput(body: unknown): Parsed<LayoutInput> {
+  const fail = (detail: string) => ({ ok: false as const, detail })
+  if (typeof body !== 'object' || body === null || Array.isArray(body)) return fail('expected expectedRevision and cards')
+  const record = body as Record<string, unknown>
+  const extra = Object.keys(record).filter((key) => !LAYOUT_KEYS.has(key))
+  if (extra.length > 0) return fail(`a layout save carries only expectedRevision and card positions, not ${extra.join(', ')}`)
+  const { expectedRevision, cards } = record
+  if (typeof expectedRevision !== 'number' || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0) return fail('expectedRevision must be a non-negative integer')
+  if (!Array.isArray(cards) || cards.length > LIMITS.skills) return fail(`cards must be a list of at most ${LIMITS.skills} positions`)
+  const parsed: LayoutInput['cards'] = []
+  const seen = new Set<string>()
+  for (const card of cards) {
+    if (typeof card !== 'object' || card === null || Array.isArray(card)) return fail('every card needs an id and a position')
+    const { id, position } = card as Record<string, unknown>
+    const cardExtra = Object.keys(card).filter((key) => !CARD_KEYS.has(key))
+    if (cardExtra.length > 0) return fail(`a card in a layout save has only an id and a position, not ${cardExtra.join(', ')}`)
+    if (typeof id !== 'string' || typeof position !== 'object' || position === null) return fail('every card needs an id and a position')
+    const { x, y } = position as Record<string, unknown>
+    if (typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y) ||
+      Math.abs(x) > LIMITS.coordinate || Math.abs(y) > LIMITS.coordinate) return fail(`card ${id} is outside the canvas bounds`)
+    const key = id.toLowerCase()
+    if (seen.has(key)) return fail(`Skill ${id} has more than one card`)
+    seen.add(key)
+    parsed.push({ id: key, position: { x, y } })
+  }
+  return { ok: true, value: { expectedRevision, cards: parsed } }
+}
+
+export type LayoutRefusal = 'version_not_found' | 'stale_revision' | 'skill_not_in_version'
+type LayoutResult = { ok: true; document: CoachPathDocument } | { ok: false; refusal: LayoutRefusal; detail: string; current?: CoachPathDocument }
+
+/**
+ * Saves new card positions for a published Version's shared Canvas Layout, for the
+ * owning Coach only (ADR 0005, 0016), if the save was based on the Version's current
+ * `layoutRevision`. Only the moved cards are written and the layout revision advances;
+ * the Version's learning content, the Path's content revision, its other Versions and
+ * every Enrollment's records are untouched, and no Version is created. A stale save
+ * writes nothing and returns the accepted layout. A Draft is not a published Version:
+ * its layout is saved with the Draft.
+ */
+export async function saveVersionLayout(db: Database, versionId: string, accountId: string, input: LayoutInput): Promise<LayoutResult> {
+  return db.transaction(async (tx) => {
+    // Locking the Version row serializes layout saves of this Version.
+    const [owned] = await tx.select({ version: learningPathVersions, path: learningPaths }).from(learningPathVersions)
+      .innerJoin(learningPaths, eq(learningPaths.id, learningPathVersions.learningPathId))
+      .innerJoin(coachWorkspaces, eq(coachWorkspaces.id, learningPaths.coachWorkspaceId))
+      .where(and(eq(learningPathVersions.id, versionId), eq(coachWorkspaces.ownerAccountId, accountId)))
+      .for('update', { of: learningPathVersions })
+    if (!owned?.version.publishedAt) return { ok: false, refusal: 'version_not_found', detail: 'no such published Version' } as const
+    const { version, path } = owned
+    if (version.layoutRevision !== input.expectedRevision) {
+      return { ok: false, refusal: 'stale_revision', detail: `the save was based on layout revision ${input.expectedRevision}, but layout revision ${version.layoutRevision} is accepted`, current: await readDocument(tx, path, version) } as const
+    }
+    const skillIds = new Set((await tx.select({ id: versionSkills.skillId }).from(versionSkills).where(eq(versionSkills.learningPathVersionId, version.id))).map((row) => row.id))
+    const foreign = input.cards.find((card) => !skillIds.has(card.id))
+    if (foreign) return { ok: false, refusal: 'skill_not_in_version', detail: `Skill ${foreign.id} is not in Version ${version.versionNumber}` } as const
+    const stored = new Map((await tx.select().from(versionSkillCards).where(eq(versionSkillCards.learningPathVersionId, version.id))).map((card) => [card.skillId, card]))
+    const moved = input.cards.filter((card) => stored.get(card.id)?.x !== card.position.x || stored.get(card.id)?.y !== card.position.y)
+    if (moved.length === 0) return { ok: true, document: await readDocument(tx, path, version) } as const
+    await tx.insert(versionSkillCards).values(moved.map((card) => ({ learningPathVersionId: version.id, skillId: card.id, x: card.position.x, y: card.position.y })))
+      .onConflictDoUpdate({ target: [versionSkillCards.learningPathVersionId, versionSkillCards.skillId], set: { x: sql`excluded.x`, y: sql`excluded.y` } })
+    const [saved] = await tx.update(learningPathVersions).set({ layoutRevision: sql`${learningPathVersions.layoutRevision} + 1` })
+      .where(eq(learningPathVersions.id, version.id)).returning()
+    return { ok: true, document: await readDocument(tx, path, saved) } as const
   })
 }
 

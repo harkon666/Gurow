@@ -2,6 +2,7 @@ import { Link } from '@tanstack/react-router'
 import { useState, type ReactNode } from 'react'
 import { EnrollmentAdmission } from './Admission'
 import { VersionEnrollments } from './VersionEnrollments'
+import { VersionLayoutEditor } from './VersionLayout'
 import { prepareCoachDraft, publishCoachDraft, type BlockedSkill, type CoachPathDocument } from '../../lib/api'
 
 /**
@@ -130,10 +131,11 @@ export function VersionHistory({ versions, currentVersionId }: { versions: Coach
 /**
  * A published Version's learning content and rules, read-only: its own title and goal, Skills with outcomes,
  * Required or Optional designation, XP Thresholds and Prerequisites, and their Tasks
- * with Required or Enrichment designation and rewards. Below it, outside
- * the read-only content, the Coach invites learners and controls admission.
+ * with Required or Enrichment designation and rewards. Above it, the Coach arranges the
+ * Version's shared Canvas Layout, positions only; below it, outside the read-only
+ * content, the Coach invites learners and controls admission.
  */
-export function PublishedVersionView({ document, actions }: { document: CoachPathDocument; actions?: ReactNode }) {
+export function PublishedVersionView({ accountId, document, actions }: { accountId: string; document: CoachPathDocument; actions?: ReactNode }) {
   const version = document.version!
   const titles = new Map(document.application.skills.map((skill) => [skill.id, skill.title]))
   const prerequisites = (id: string) => document.editor.connections.filter((edge) => edge.to_id === id).map((edge) => titles.get(edge.from_id) ?? edge.from_id)
@@ -151,6 +153,7 @@ export function PublishedVersionView({ document, actions }: { document: CoachPat
         <p id="published-version-immutable" className="text-xs text-slate-400">
           A published Version's learning content and rules cannot be edited, not even to correct a typo. Learners enrolled in it keep it as published; changes are prepared in a new Draft and published as a new Version.
         </p>
+        <VersionLayoutEditor key={`${accountId}:${version.id}`} accountId={accountId} document={document} />
         <ol id="published-skills" className="flex flex-col gap-3">
           {document.application.skills.map((skill) => (
             <li key={skill.id} id={`published-skill-${skill.id}`} data-optional={skill.optional === true} className="border border-slate-800 rounded-xl p-3 bg-slate-900/50 flex flex-col gap-1.5">
