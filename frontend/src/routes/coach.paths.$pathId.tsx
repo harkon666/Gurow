@@ -43,6 +43,7 @@ function CoachPathPage() {
               accountId={view.account.id}
               initial={document}
               mode={COACH_MODE}
+              draftId={document.draft.id}
               draftControls={(save) => <PublishControl pathId={pathId} versionNumber={document.draft!.versionNumber} save={save} onPublished={reload} />}
             />
           ) : document.version ? (

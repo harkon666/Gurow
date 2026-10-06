@@ -6,14 +6,17 @@ import { loadCameraState, saveCameraState } from '../editor/checkpoint'
 import type { CameraState, PrerequisiteConnection } from '../editor/protocol'
 import type { GpuStatus, SelectedSkillInfo } from '../editor/types'
 import { performLearningAction, readCoachPath, readLearningPath, readLearningState, saveCoachDraft, saveLearningPath, type ApiResult, type EditablePathDocument, type LearningAction, type LearningState, type PathSave, type PathSkill, type PathTask } from '../../lib/api'
-import { Autosave, type SaveOutcome, type SaveState } from './autosave'
+import { Autosave, type SaveState } from './autosave'
+import { CANVAS_FORMAT_VERSION, nameSkills, pathChanges, pathWorkProblem, reapplyPath, samePathWork, type PathWork, type WorkContext } from './keptWork'
+import { KeptWorkList, SaveConflict } from './KeptWorkPanel'
+import { useKeptWork, type SaveAnswer } from './useKeptWork'
 import { LearningRecords, type LearningOutcome } from './learning'
 import { describeAction, LearningStatus, SkillLearning, SkillStatusChips, TaskLearning, type PersonalLearningView } from './LearningPanel'
 import { draftRuleProblem, optionalPrerequisiteProblem, optionalToggleProblem, SkillDraftRules, TaskDraftRules } from './DraftRules'
 
 const AUTOSAVE_DELAY_MS = 500
 
-type LocalDocument = Omit<PathSave, 'expectedRevision'>
+type LocalDocument = PathWork
 
 /** Where a new Skill's card is first placed; the owner then arranges it on the canvas. */
 const newCardPosition = (index: number) => ({ x: 80 + (index % 4) * 240, y: 100 + Math.floor(index / 4) * 160 })
@@ -72,6 +75,14 @@ const editorInput = (document: EditablePathDocument) => ({
   connections: document.editor.connections,
 })
 
+/** An accepted document in the form the editor saves. */
+const workOf = (document: EditablePathDocument): PathWork => ({
+  title: document.learningPath.title,
+  goal: document.learningPath.goal,
+  editor: { format_version: CANVAS_FORMAT_VERSION, cards: editorInput(document).cards, connections: document.editor.connections.map((c) => ({ from_id: c.from_id, to_id: c.to_id })) },
+  application: { skills: document.application.skills },
+})
+
 /**
  * Authors one Learning Path (ADR 0015, 0016): a personal Path, or a Coach's Draft.
  * Rust owns cards, positions, connections, selection, undo and camera; React owns
@@ -81,10 +92,12 @@ const editorInput = (document: EditablePathDocument) => ({
  * (completion, rewards, Mastery, thresholds, overrides) are separate backend actions
  * that never touch the document or its revision; a Draft has none.
  */
-export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftControls }: {
+export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId = null, draftControls }: {
   accountId: string
   initial: EditablePathDocument
   mode?: PathMode
+  /** The Draft's Learning Path Version id (coach mode): unsaved work is kept per Draft, not per Path. */
+  draftId?: string | null
   /** A Draft's own controls (publication), given whether the Draft is saved and at which revision. */
   draftControls?: (save: { saved: boolean; revision: number }) => ReactNode
 }) {
@@ -99,6 +112,8 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftCont
   const [connections, setConnections] = useState<PrerequisiteConnection[]>(initial.editor.connections)
   const [connectionRejection, setConnectionRejection] = useState<string | null>(null)
   const [saveState, setSaveState] = useState<SaveState>({ kind: 'saved', revision: initial.learningPath.revision })
+  /** Why loading the saved version after a conflict failed; the conflict and its choices stay meanwhile. */
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [newSkill, setNewSkill] = useState({ title: '', outcome: '' })
   // The engine loads asynchronously; until then there is no document to add a card to.
   const [gpuStatus, setGpuStatus] = useState<GpuStatus>('initializing')
@@ -124,38 +139,69 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftCont
     return () => records.close()
   }, [pathId, personal])
 
+  /** The local document as a save would carry it; null until the engine can be read. */
+  const build = useCallback((): LocalDocument | null => {
+    const snapshot = actionsRef.current?.exportSnapshot()
+    if (!snapshot) return null
+    return {
+      title: local.current.title,
+      goal: local.current.goal,
+      editor: { format_version: CANVAS_FORMAT_VERSION, cards: snapshot.cards.map((card) => ({ id: card.id, title: card.title, position: card.position })), connections: snapshot.connections },
+      application: { skills: local.current.skills },
+    }
+  }, [])
+
+  /** One save of a whole document against `expectedRevision`; only the backend says whether it is still current. */
+  const saveDocument = useCallback(async (document: LocalDocument, expectedRevision: number): Promise<SaveAnswer<EditablePathDocument>> => {
+    let result: ApiResult<EditablePathDocument>
+    try {
+      result = await mode.save(pathId, { expectedRevision, ...document })
+    } catch {
+      return { kind: 'failed', detail: 'the backend could not be reached' }
+    }
+    if (result.ok) return { kind: 'accepted', accepted: result.value }
+    const detail = nameSkills(typeof result.body?.detail === 'string' ? result.body.detail : result.error, document.application.skills)
+    if (result.error === 'stale_revision') {
+      const current = result.body?.current as EditablePathDocument | undefined
+      return { kind: 'stale', revision: current?.learningPath.revision ?? expectedRevision }
+    }
+    if (result.status === 422 || result.status === 409) return { kind: 'refused', detail }
+    if (result.status === 401 || result.status === 404) return { kind: 'refused', detail: 'this Path is not available to the signed-in Account' }
+    return { kind: 'failed', detail }
+  }, [mode, pathId])
+
+  const context = useMemo<WorkContext>(() => ({ accountId, kind: personal ? 'personal' : 'draft', pathId, versionId: personal ? null : draftId }), [accountId, personal, pathId, draftId])
+  // Work the backend has not accepted stays in this browser, so a reload or a crash does not lose it.
+  const { session: kept, view: keptView } = useKeptWork<PathWork, EditablePathDocument>({
+    context,
+    initial: { revision: initial.learningPath.revision, work: workOf(initial) },
+    problem: pathWorkProblem,
+    same: samePathWork,
+    merge: reapplyPath,
+    changes: pathChanges,
+    build,
+    read: async () => {
+      const result = await mode.read(pathId)
+      return result.ok ? { ok: true, revision: result.value.learningPath.revision, work: workOf(result.value), accepted: result.value } : { ok: false, detail: result.error }
+    },
+    save: saveDocument,
+    revisionOf: (document) => document.learningPath.revision,
+    show: (document) => showAccepted(document),
+    // Skills and Tasks a save added can now be tracked.
+    onAccepted: () => void learningRef.current?.refresh(),
+  })
+
   useEffect(() => {
-    const build = (): LocalDocument | null => {
-      const snapshot = actionsRef.current?.exportSnapshot()
-      if (!snapshot) return null
-      return {
-        title: local.current.title,
-        goal: local.current.goal,
-        editor: { format_version: 1, cards: snapshot.cards.map((card) => ({ id: card.id, title: card.title, position: card.position })), connections: snapshot.connections },
-        application: { skills: local.current.skills },
-      }
+    // Always sent: only the backend can say whether this tab is still on the accepted revision.
+    const send = (document: LocalDocument, expectedRevision: number) => kept.autosave(document, expectedRevision)
+    const onState = (state: SaveState) => {
+      setSaveState(state)
+      kept.saveStateChanged(state)
     }
-    const send = async (document: LocalDocument, expectedRevision: number): Promise<SaveOutcome> => {
-      // Always sent: only the backend can say whether this tab is still on the accepted revision.
-      const result = await mode.save(pathId, { expectedRevision, ...document })
-      if (result.ok) {
-        // Skills and Tasks the save added can now be tracked.
-        void learningRef.current?.refresh()
-        return { kind: 'accepted', revision: result.value.learningPath.revision }
-      }
-      const detail = typeof result.body?.detail === 'string' ? result.body.detail : result.error
-      if (result.error === 'stale_revision') {
-        const current = result.body?.current as EditablePathDocument | undefined
-        return { kind: 'stale', acceptedRevision: current?.learningPath.revision ?? expectedRevision }
-      }
-      if (result.status === 422 || result.status === 409) return { kind: 'rejected', detail }
-      if (result.status === 401 || result.status === 404) return { kind: 'rejected', detail: 'this Path is not available to the signed-in Account' }
-      return { kind: 'failed', detail }
-    }
-    const autosave = new Autosave<LocalDocument>({ revision: initial.learningPath.revision, delayMs: AUTOSAVE_DELAY_MS, build, send, onState: setSaveState })
+    const autosave = new Autosave<LocalDocument>({ revision: initial.learningPath.revision, delayMs: AUTOSAVE_DELAY_MS, build, send, onState })
     autosaveRef.current = autosave
     return () => autosave.close()
-  }, [pathId, initial.learningPath.revision, mode])
+  }, [initial.learningPath.revision, build, kept])
 
   // A layout cleanup runs before the engine is freed, so an edit still waiting for its delay can be built and sent.
   useLayoutEffect(() => () => autosaveRef.current?.close(), [])
@@ -169,7 +215,11 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftCont
     return () => window.removeEventListener('beforeunload', warn)
   }, [unsaved])
 
-  const edited = useCallback(() => autosaveRef.current?.edit(), [])
+  const edited = useCallback(() => {
+    autosaveRef.current?.edit()
+    // After a conflict the edit is not sent, but it is kept with the rest of the local work.
+    kept.remember()
+  }, [kept])
 
   const changeSkills = useCallback((change: (skills: PathSkill[]) => PathSkill[]) => {
     local.current.skills = change(local.current.skills)
@@ -239,14 +289,9 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftCont
     edited()
   }
 
-  /** Drops unsaved local work and shows the accepted document (rich conflict resolution follows in T28). */
-  const loadAccepted = async () => {
-    const result = await mode.read(pathId)
-    if (!result.ok) {
-      setSaveState({ kind: 'failed', revision: saveState.revision, detail: `could not load the saved version (${result.error})` })
-      return
-    }
-    const document = result.value
+  /** Shows an accepted document, replacing whatever the editor showed, and autosaves from its revision. */
+  const showAccepted = (document: EditablePathDocument) => {
+    setLoadError(null)
     local.current = { skills: document.application.skills, title: document.learningPath.title, goal: document.learningPath.goal }
     setSkills(local.current.skills)
     setTitle(local.current.title)
@@ -256,8 +301,19 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftCont
     setSelectedSkill(null)
     setConnectionRejection(null)
     setLoaded(editorInput(document))
+    kept.shown(document.learningPath.revision, workOf(document))
     autosaveRef.current?.reset(document.learningPath.revision)
     void learningRef.current?.refresh()
+  }
+
+  /**
+   * After a conflict: shows the accepted document, with this tab's local work either
+   * kept aside (offered for reapplying) or discarded. If the document cannot be read,
+   * nothing changes: the conflict and its choices stay.
+   */
+  const loadAccepted = async (keepMine: boolean) => {
+    const outcome = await kept.loadAccepted(keepMine)
+    if (outcome.kind === 'failed') setLoadError(`could not load the saved version (${outcome.detail}); your changes are still here, unsaved`)
   }
 
   const handleSelectListSkill = useCallback((skill: SelectedSkillInfo | null) => {
@@ -266,6 +322,8 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftCont
   }, [])
 
   const selected = skills.find((skill) => skill.id === selectedId)
+  // While kept work is reapplied or the saved version loads, the editor is not edited: the accepted result replaces what it shows.
+  const reapplying = keptView.busy
 
   const records = learning.records
   const skillTitles = useMemo(() => new Map(skills.map((skill) => [skill.id, skill.title])), [skills])
@@ -282,8 +340,8 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftCont
   const ruleProblem = useMemo(() => (personal ? null : draftRuleProblem(skills, connections)), [personal, skills, connections])
 
   return (
-    <div id="path-editor" data-path-id={pathId} data-gpu-status={gpuStatus} className="flex-1 min-h-0 flex flex-col">
-      <div className="shrink-0 border-b border-slate-800/80 bg-slate-900/60 px-4 py-2 flex flex-wrap items-center gap-3">
+    <div id="path-editor" data-path-id={pathId} data-gpu-status={gpuStatus} data-reapplying={reapplying} className="flex-1 min-h-0 flex flex-col">
+      <div inert={reapplying} className="shrink-0 border-b border-slate-800/80 bg-slate-900/60 px-4 py-2 flex flex-wrap items-center gap-3">
         <input
           id="path-title-input"
           aria-label="Learning Path title"
@@ -315,14 +373,41 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftCont
           </span>
         )}
         {!personal && draftControls?.({ saved: saveState.kind === 'saved', revision: saveState.revision })}
-        <SaveStatus state={saveState} onRetry={() => autosaveRef.current?.retry()} onLoadAccepted={loadAccepted} />
+        <SaveStatus state={saveState} onRetry={() => autosaveRef.current?.retry()} />
       </div>
+      {saveState.kind === 'conflict' && (
+        <SaveConflict
+          prefix=""
+          noun="Path"
+          revisionLabel="Revision"
+          acceptedRevision={saveState.acceptedRevision}
+          changes={keptView.liveChanges}
+          status={keptView.live}
+          busy={keptView.busy}
+          loadError={loadError}
+          onReapply={() => void kept.reapplyLive()}
+          onKeepAside={() => void loadAccepted(true)}
+          onDiscard={() => void loadAccepted(false)}
+        />
+      )}
+      <KeptWorkList
+        prefix=""
+        noun="Path"
+        entries={keptView.entries}
+        refused={keptView.refused}
+        busy={keptView.busy}
+        currentRevision={saveState.revision}
+        canReapply={saveState.kind === 'saved' && editorReady}
+        onReapply={(id) => void kept.reapply(id)}
+        onDiscard={(id) => kept.discard(id)}
+        onDismissRefused={() => kept.dismissRefused()}
+      />
       {ruleProblem && (
         <p id="draft-rule-problem" role="alert" className="shrink-0 px-4 py-1.5 text-xs text-amber-200 bg-amber-950/50 border-b border-amber-900/60">
           {ruleProblem} This Draft cannot be saved until it is fixed.
         </p>
       )}
-      <section className="w-full flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden relative">
+      <section inert={reapplying} aria-busy={reapplying} className={`w-full flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden relative ${reapplying ? 'pointer-events-none opacity-60' : ''}`}>
         <div className="w-full md:w-64 lg:w-72 shrink-0 md:h-full flex flex-col border-b md:border-b-0 md:border-r border-slate-800/80 min-h-0">
           <form id="new-skill-form" onSubmit={addSkill} className="shrink-0 p-3 border-b border-slate-800/80 flex flex-col gap-2">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400">New Skill</h2>
@@ -415,7 +500,7 @@ function DraftStatusChip({ skill }: { skill: PathSkill | undefined }) {
 }
 
 /** Tells the owner whether the local document is saved; nothing short of a backend acceptance says so. */
-function SaveStatus({ state, onRetry, onLoadAccepted }: { state: SaveState; onRetry: () => void; onLoadAccepted: () => void }) {
+function SaveStatus({ state, onRetry }: { state: SaveState; onRetry: () => void }) {
   const text = {
     saved: `Saved · revision ${state.revision}`,
     dirty: 'Unsaved changes',
@@ -435,14 +520,6 @@ function SaveStatus({ state, onRetry, onLoadAccepted }: { state: SaveState; onRe
           <span id="save-error" role="alert" className="text-red-300 max-w-[20rem] truncate" title={state.detail}>{state.detail}</span>
           <button id="retry-save-btn" onClick={onRetry} className="text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-1 rounded-lg cursor-pointer">Retry</button>
         </>
-      )}
-      {state.kind === 'conflict' && (
-        <div id="save-conflict" role="alert" className="flex items-center gap-2 text-amber-200">
-          <span>Revision {state.acceptedRevision} was saved elsewhere. Your changes here are kept but not saved.</span>
-          <button id="load-accepted-btn" onClick={onLoadAccepted} className="text-amber-100 bg-amber-900/60 hover:bg-amber-800/60 border border-amber-700 px-2 py-1 rounded-lg cursor-pointer">
-            Discard mine and load the saved version
-          </button>
-        </div>
       )}
     </div>
   )
