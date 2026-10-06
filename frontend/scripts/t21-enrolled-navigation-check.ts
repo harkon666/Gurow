@@ -150,9 +150,10 @@ async function shown(page: Page) {
     }
   })
 }
+// The learner's private draft fields (T22) are their own work, not the Version's content.
 const readOnlyControls = (page: Page) => page.evaluate(() => ({
-  panelInputs: document.querySelectorAll('#skill-detail-panel input, #skill-detail-panel textarea, #skill-detail-panel select').length,
-  pageInputs: document.querySelectorAll('#enrolled-version input, #enrolled-version textarea, #enrolled-version select').length,
+  panelInputs: [...document.querySelectorAll('#skill-detail-panel input, #skill-detail-panel textarea, #skill-detail-panel select')].filter((el) => !el.closest('[data-task-work]')).length,
+  pageInputs: [...document.querySelectorAll('#enrolled-version input, #enrolled-version textarea, #enrolled-version select')].filter((el) => !el.closest('[data-task-work]')).length,
   edits: ['#new-skill-form', '#editor-undo-btn', '#editor-redo-btn', '#editor-add-card-btn', '#connect-skill-select', '#add-task-btn', '[id^="disconnect-"]', '#save-status']
     .filter((s) => document.querySelector(s) !== null),
   badge: document.querySelector('#editor-read-only-badge')?.textContent?.trim() ?? null,

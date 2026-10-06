@@ -6,6 +6,8 @@ import { loadCameraState, saveCameraState } from '../editor/checkpoint'
 import type { CameraState } from '../editor/protocol'
 import type { GpuStatus, SelectedSkillInfo } from '../editor/types'
 import { readEnrollmentLearningState, readTaskSubmission, type EnrolledVersion, type EnrollmentLearningState, type EnrollmentSkillState, type SubmissionRevisionView } from '../../lib/api'
+import { TaskWork } from './TaskWork'
+import { revisionNote } from './submissionWork'
 
 /**
  * The Version an Enrollment joined, as its learner navigates it (ADR 0005, 0017): the
@@ -15,7 +17,8 @@ import { readEnrollmentLearningState, readTaskSubmission, type EnrolledVersion, 
  * derived them (ADR 0001); nothing here changes them or the published content.
  * The Coach can change them at any time (a Review, a revocation, a deactivation), so
  * they are read again whenever the page becomes visible or the learner asks.
- * Camera state is stored only locally, per Account and Enrollment.
+ * Camera state is stored only locally, per Account and Enrollment. The learner (never
+ * the Coach) prepares private work for each Task and sends it from the sidebar (ADR 0002).
  */
 
 /** The learning records as last confirmed by the backend; a failed read keeps them and says so. */
@@ -166,7 +169,9 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
           tasks={selected?.tasks}
           outcome={selected?.outcome ?? ''}
           learning={selected && <EnrolledSkillLearning view={view} skillId={selected.id} skillTitles={skillTitles} />}
-          renderTaskExtra={(taskId) => <EnrolledTaskLearning key={taskId} enrollmentId={enrollmentId} taskId={taskId} records={shown} generation={view.generation} />}
+          renderTaskExtra={(taskId) => (
+            <EnrolledTaskLearning key={taskId} accountId={accountId} viewer={document.viewer} enrollmentId={enrollmentId} taskId={taskId} records={shown} generation={view.generation} onRecordsStale={loadRecords} />
+          )}
         />
       </section>
     </div>
@@ -238,11 +243,20 @@ type History =
   | { state: 'failed'; error: string }
 
 /**
- * A Task's reward and contribution in this Enrollment, and the work already sent for it,
- * which stays readable when locked. It is read again with each confirmed read of the
- * records (`generation`); the history on show stays until the new one arrives.
+ * A Task's reward and contribution in this Enrollment, the learner's private draft, and
+ * the work already sent for it, which stays readable when locked. The sent history is
+ * read again with each confirmed read of the records (`generation`) and after each
+ * confirmed send; the history on show stays until the new one arrives.
  */
-function EnrolledTaskLearning({ enrollmentId, taskId, records, generation }: { enrollmentId: string; taskId: string; records: EnrollmentLearningState | null; generation: number }) {
+function EnrolledTaskLearning({ accountId, viewer, enrollmentId, taskId, records, generation, onRecordsStale }: {
+  accountId: string
+  viewer: EnrolledVersion['viewer']
+  enrollmentId: string
+  taskId: string
+  records: EnrollmentLearningState | null
+  generation: number
+  onRecordsStale: () => void
+}) {
   const [history, setHistory] = useState<History>({ state: 'loading' })
   const latest = useRef(0)
   const load = useCallback(async () => {
@@ -271,8 +285,19 @@ function EnrolledTaskLearning({ enrollmentId, taskId, records, generation }: { e
           {started && ' · started'}
         </p>
       )}
+      {viewer === 'learner' && (
+        <TaskWork
+          accountId={accountId}
+          enrollmentId={enrollmentId}
+          taskId={taskId}
+          records={records}
+          onSent={() => { void load(); onRecordsStale() }}
+          onRefused={onRecordsStale}
+        />
+      )}
       <div id={`task-history-${taskId}`} data-state={history.state} data-revisions={history.state === 'ready' ? history.revisions.length : 0} className="border-t border-slate-700/50 pt-2">
-        <h6 className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 mb-1">Your submitted work</h6>
+        <h6 className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">{viewer === 'learner' ? 'Your submitted work' : 'Submitted work'}</h6>
+        <p className="text-[10px] text-slate-500 mb-1">One Submission for this Task; each sent revision is kept unchanged.</p>
         {history.state === 'loading' && <p className="text-slate-500">Loading…</p>}
         {history.state === 'none' && <p className="text-slate-500">No work sent for this Task yet.</p>}
         {history.state === 'failed' && (
@@ -284,11 +309,13 @@ function EnrolledTaskLearning({ enrollmentId, taskId, records, generation }: { e
         {history.state === 'ready' && (
           <ol className="space-y-1.5">
             {history.revisions.map((revision) => (
-              <li key={revision.id} id={`revision-${revision.id}`} data-status={revision.status} className="rounded-lg bg-slate-950/60 border border-slate-800 p-2 space-y-1">
+              <li key={revision.id} id={`revision-${revision.id}`} data-status={revision.status} data-revision-number={revision.revisionNumber} className="rounded-lg bg-slate-950/60 border border-slate-800 p-2 space-y-1">
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-slate-300">Revision {revision.revisionNumber}</span>
                   <span className="text-slate-400">{REVISION_STATUS[revision.status]}</span>
                 </div>
+                <p className="text-[10px] text-slate-500">Sent {new Date(revision.sentAt).toLocaleString()}</p>
+                {viewer === 'learner' && <p className="revision-note text-[10px] text-slate-400">{revisionNote(revision, history.revisions)}</p>}
                 {revision.text && <p className="text-slate-300 whitespace-pre-wrap">{revision.text}</p>}
                 {revision.urls.map((url) => <a key={url} href={url} target="_blank" rel="noreferrer noopener" className="block text-sky-300 hover:text-sky-200 truncate">{url}</a>)}
                 {revision.review?.feedback && <p className="text-slate-400">Feedback: {revision.review.feedback}</p>}

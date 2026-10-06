@@ -360,3 +360,26 @@ export interface SubmissionRevisionView {
 /** A Task's Submission history in one Enrollment; a Task without one answers 404 `submission_not_found`. */
 export const readTaskSubmission = (enrollmentId: string, taskId: string) =>
   call<{ submission: { id: string; revisions: SubmissionRevisionView[] } }>(`/enrollments/${encodeURIComponent(enrollmentId)}/tasks/${encodeURIComponent(taskId)}/submission`)
+
+/** Text and URLs: the MVP evidence a private draft or a sent revision holds (ADR 0002). */
+export interface SubmissionContents { text: string; urls: string[] }
+
+/** The learner's saved, private draft for one Task; only its learner can read or write it. */
+export interface SubmissionDraft extends SubmissionContents { enrollmentId: string; taskId: string; updatedAt: string }
+
+const taskRoute = (enrollmentId: string, taskId: string) => `/enrollments/${encodeURIComponent(enrollmentId)}/tasks/${encodeURIComponent(taskId)}`
+
+/** The learner's own draft, or null when none is saved; the Coach is refused 403 `draft_private`. */
+export const readTaskDraft = (enrollmentId: string, taskId: string) => call<{ draft: SubmissionDraft | null }>(`${taskRoute(enrollmentId, taskId)}/draft`)
+
+/** Saves the draft, replacing its previous contents. Invalid evidence answers 422 `invalid_contents`. */
+export const saveTaskDraft = (enrollmentId: string, taskId: string, contents: SubmissionContents) =>
+  call<{ draft: SubmissionDraft }>(`${taskRoute(enrollmentId, taskId)}/draft`, { method: 'PUT', body: contents })
+
+/**
+ * Sends contents as a new immutable revision of the Task's one Submission; 201 is the
+ * backend's confirmation. Refusals: `skill_locked`, `enrollment_inactive` (403),
+ * `empty_submission`, `invalid_contents` (422).
+ */
+export const sendTaskRevision = (enrollmentId: string, taskId: string, contents: SubmissionContents) =>
+  call<{ submission: { id: string }; revision: { id: string; revisionNumber: number; sentAt: string }; createdSubmission: boolean }>(`${taskRoute(enrollmentId, taskId)}/submission/revisions`, { method: 'POST', body: contents })
