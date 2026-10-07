@@ -5,7 +5,7 @@ import { SkillPrerequisiteList } from '../editor/SkillPrerequisiteList'
 import { loadCameraState, saveCameraState } from '../editor/checkpoint'
 import type { CameraState, PrerequisiteConnection } from '../editor/protocol'
 import type { GpuStatus, SelectedSkillInfo } from '../editor/types'
-import { performLearningAction, readCoachPath, readLearningPath, readLearningState, saveCoachDraft, saveLearningPath, type ApiResult, type EditablePathDocument, type LearningAction, type LearningState, type PathSave, type PathSkill, type PathTask } from '../../lib/api'
+import { archiveDraftTask, archivePersonalTask, performLearningAction, readCoachPath, readCoachVersion, readLearningPath, readLearningState, saveCoachDraft, saveLearningPath, type ApiResult, type EditablePathDocument, type LearningAction, type LearningState, type PathSave, type PathSkill, type PathTask } from '../../lib/api'
 import { Autosave, type SaveState } from './autosave'
 import { CANVAS_FORMAT_VERSION, nameSkills, pathChanges, pathWorkProblem, reapplyPath, samePathWork, type PathWork, type WorkContext } from './keptWork'
 import { KeptWorkList, SaveConflict } from './KeptWorkPanel'
@@ -15,6 +15,7 @@ import { describeAction, LearningStatus, SkillLearning, SkillStatusChips, TaskLe
 import { draftRuleProblem, optionalPrerequisiteProblem, optionalToggleProblem, SkillDraftRules, TaskDraftRules } from './DraftRules'
 import { copySkills, copyTask, type ContentKind, type ReuseContent } from './reuse'
 import { ReusePanel } from './ReusePanel'
+import { ArchiveTaskControl, RetainedTasks, type RetainedTask } from './Archival'
 
 const AUTOSAVE_DELAY_MS = 500
 
@@ -52,6 +53,8 @@ export interface PathMode {
   save: (pathId: string, save: PathSave) => Promise<ApiResult<EditablePathDocument>>
   newSkill: (id: string, title: string, outcome: string) => PathSkill
   newTask: (id: string) => PathTask
+  /** Archives a saved Task (ADR 0018), based on the accepted revision; answers the new document. */
+  archiveTask: (pathId: string, taskId: string, expectedRevision: number) => Promise<ApiResult<EditablePathDocument>>
 }
 
 /** Personal Paths (ADR 0012): rewards and thresholds are learning records, not document content. */
@@ -61,6 +64,10 @@ export const PERSONAL_MODE: PathMode = {
   save: saveLearningPath,
   newSkill: (id, title, outcome) => ({ id, title, outcome, tasks: [] }),
   newTask: (id) => ({ id, title: 'New Task', description: '' }),
+  archiveTask: async (pathId, taskId, expectedRevision) => {
+    const result = await archivePersonalTask(pathId, taskId, expectedRevision)
+    return result.ok ? { ...result, value: result.value.document } : result
+  },
 }
 
 /** A Coach's Draft: a new Skill is required with no threshold, a new Task Required with no reward. */
@@ -70,6 +77,7 @@ export const COACH_MODE: PathMode = {
   save: saveCoachDraft,
   newSkill: (id, title, outcome) => ({ id, title, outcome, optional: false, xpThreshold: 0, tasks: [] }),
   newTask: (id) => ({ id, title: 'New Task', description: '', required: true, xpReward: 0 }),
+  archiveTask: archiveDraftTask,
 }
 
 const editorInput = (document: EditablePathDocument) => ({
@@ -94,7 +102,7 @@ const workOf = (document: EditablePathDocument): PathWork => ({
  * (completion, rewards, Mastery, thresholds, overrides) are separate backend actions
  * that never touch the document or its revision; a Draft has none.
  */
-export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId = null, draftControls }: {
+export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId = null, publishedVersionIds = [], draftControls }: {
   accountId: string
   initial: EditablePathDocument
   mode?: PathMode
@@ -102,6 +110,8 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
   draftId?: string | null
   /** A Draft's own controls (publication), given whether the Draft is saved and at which revision. */
   draftControls?: (save: { saved: boolean; revision: number }) => ReactNode
+  /** A Draft's published Versions: the Tasks they hold are the ones the Draft can archive, and keep once archived. */
+  publishedVersionIds?: string[]
 }) {
   const personal = mode.kind === 'personal'
   const pathId = initial.learningPath.id
@@ -120,6 +130,12 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
   const [reuseOpen, setReuseOpen] = useState(false)
   /** What the last copy added, until the next one. */
   const [reuseNotice, setReuseNotice] = useState<string | null>(null)
+  /** What the last archival did or why it failed. */
+  const [archival, setArchival] = useState<{ kind: 'done' | 'failed'; text: string } | null>(null)
+  /** The Tasks a Draft's published Versions hold, each with the newest Version that holds it. */
+  const [published, setPublished] = useState<Map<string, { title: string; skillId: string; versionNumber: number }> | null>(null)
+  /** The Skill to select again once an archival's document is shown. */
+  const reselect = useRef<string | null>(null)
   // The engine loads asynchronously; until then there is no document to add a card to.
   const [gpuStatus, setGpuStatus] = useState<GpuStatus>('initializing')
   const editorReady = gpuStatus !== 'initializing'
@@ -143,6 +159,25 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
     void records.refresh()
     return () => records.close()
   }, [pathId, personal])
+
+  // Every published Version, not only the latest: a Task archived from an earlier Draft is still held by the Version before it.
+  const versionList = publishedVersionIds.join(',')
+  useEffect(() => {
+    if (personal || versionList === '') return
+    let current = true
+    void Promise.all(versionList.split(',').map((id) => readCoachVersion(id))).then((results) => {
+      if (!current || !results.every((result) => result.ok)) return
+      const tasks = new Map<string, { title: string; skillId: string; versionNumber: number }>()
+      const versions = results.map((result) => (result as Extract<typeof result, { ok: true }>).value).sort((a, b) => (a.version?.versionNumber ?? 0) - (b.version?.versionNumber ?? 0))
+      for (const version of versions) {
+        for (const skill of version.application.skills) for (const task of skill.tasks) tasks.set(task.id, { title: task.title, skillId: skill.id, versionNumber: version.version?.versionNumber ?? 0 })
+      }
+      setPublished(tasks)
+    }).catch(() => {})
+    return () => { current = false }
+  }, [personal, versionList])
+  /** Names the newest published Version holding a Task. */
+  const retainedBy = (taskId: string) => `Version ${published?.get(taskId)?.versionNumber ?? ''}`
 
   /** The local document as a save would carry it; null until the engine can be read. */
   const build = useCallback((): LocalDocument | null => {
@@ -220,8 +255,13 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
     return () => window.removeEventListener('beforeunload', warn)
   }, [unsaved])
 
+  /** Whether an archival holds the editor, and whether an edit still reached it meanwhile. */
+  const archivalHold = useRef({ active: false, edited: false })
   const edited = useCallback(() => {
-    autosaveRef.current?.edit()
+    // While an archival is pending, an edit is not sent on the revision the archival replaces;
+    // it is kept, and saved as usual if the archival fails.
+    if (archivalHold.current.active) archivalHold.current.edited = true
+    else autosaveRef.current?.edit()
     // After a conflict the edit is not sent, but it is kept with the rest of the local work.
     kept.remember()
   }, [kept])
@@ -275,6 +315,36 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
   const handleCopyTask = (from: ContentKind, task: PathTask, skillId: string) => {
     const copy = copyTask(task, from, mode, () => crypto.randomUUID())
     changeSkills((all) => all.map((skill) => (skill.id === skillId ? { ...skill, tasks: [...skill.tasks, copy] } : skill)))
+  }
+
+  /**
+   * Archives a saved Task (ADR 0018, 0026) from the accepted revision and shows the
+   * document the backend answers. It starts only while the document is saved, and it
+   * holds the kept-work session meanwhile: the editor is locked, and an edit that still
+   * reaches it is kept for reapplying rather than replaced by the answered document.
+   */
+  const handleArchive = async (taskId: string, title: string) => {
+    if (saveState.kind !== 'saved') return
+    setArchival(null)
+    reselect.current = selectedSkill?.id ?? null
+    archivalHold.current = { active: true, edited: false }
+    const outcome = await kept.accept(async () => {
+      const result = await mode.archiveTask(pathId, taskId, saveState.revision)
+      if (result.ok) return { ok: true, accepted: result.value }
+      const detail = result.error === 'stale_revision'
+        ? 'this Path was saved elsewhere since; reload the page to archive from the saved version'
+        : typeof result.body?.detail === 'string' ? result.body.detail : result.status === 404 ? 'this Task is not available to the signed-in Account' : result.error
+      return { ok: false, detail }
+    }).finally(() => { archivalHold.current.active = false })
+    // Shown, the answered document replaced the editor and kept any later edit for reapplying; otherwise the edit is saved now.
+    if (outcome.kind !== 'shown' && archivalHold.current.edited) autosaveRef.current?.edit()
+    if (outcome.kind !== 'shown') reselect.current = null
+    if (outcome.kind === 'failed') return setArchival({ kind: 'failed', text: `Not archived: ${outcome.detail}.` })
+    if (outcome.kind === 'shown') {
+      setArchival({ kind: 'done', text: personal
+        ? `Archived “${title}”. Its completion and XP stay in this Path's history.`
+        : `Archived “${title}” from this Draft. ${retainedBy(taskId)} and its learners' work keep it.` })
+    }
   }
 
   const selectedId = selectedSkill?.id ?? null
@@ -347,6 +417,13 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
     if (outcome.kind === 'failed') setLoadError(`could not load the saved version (${outcome.detail}); your changes are still here, unsaved`)
   }
 
+  // After an archival the editor reloads its document; the Skill that was open is selected again.
+  useEffect(() => {
+    const id = reselect.current
+    reselect.current = null
+    if (id && local.current.skills.some((skill) => skill.id === id)) actionsRef.current?.selectCard(id)
+  }, [loaded])
+
   const handleSelectListSkill = useCallback((skill: SelectedSkillInfo | null) => {
     setSelectedSkill(skill)
     actionsRef.current?.selectCard(skill?.id ?? null)
@@ -357,6 +434,33 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
   const reapplying = keptView.busy
 
   const records = learning.records
+  // Archived Tasks of the selected Skill and the history they keep: a personal Path's own records,
+  // or a Draft's published Tasks it no longer carries.
+  const retained: RetainedTask[] = !selectedId ? [] : personal
+    ? (records?.tasks ?? []).filter((task) => task.skillId === selectedId && task.archivedAt).map((task) => ({
+      id: task.taskId, title: task.title,
+      detail: task.completed ? `Completed · ${task.xpContribution} XP still counted` : 'Not completed · no XP',
+    }))
+    : [...(published ?? [])].filter(([id, task]) => task.skillId === selectedId && !selected?.tasks.some((t) => t.id === id)).map(([id, task]) => ({
+      id, title: task.title, detail: `Archived from a Draft · ${retainedBy(id)} keeps it with its learners' work`,
+    }))
+  const archiveBlocked = saveState.kind === 'saved' ? null : 'Archiving waits until your changes are saved'
+  const archiveControl = (taskId: string) => {
+    const task = selected?.tasks.find((t) => t.id === taskId)
+    if (!task || (!personal && !published?.has(taskId))) return null
+    return (
+      <ArchiveTaskControl
+        taskId={taskId}
+        title={task.title}
+        consequence={personal
+          ? 'It leaves this Path\'s editing; its completion, XP and your Mastery stay as they are.'
+          : `It will not be in the next Version; ${retainedBy(taskId)} and its learners' Submissions, Reviews and XP keep it.`}
+        blocked={archiveBlocked}
+        busy={keptView.busy}
+        onArchive={() => void handleArchive(taskId, task.title)}
+      />
+    )
+  }
   const skillTitles = useMemo(() => new Map(skills.map((skill) => [skill.id, skill.title])), [skills])
   const taskTitles = useMemo(() => new Map([
     ...(records?.tasks ?? []).map((task) => [task.taskId, task.title] as const),
@@ -433,6 +537,11 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
         onDiscard={(id) => kept.discard(id)}
         onDismissRefused={() => kept.dismissRefused()}
       />
+      {archival && (
+        <p id="archive-status" role={archival.kind === 'failed' ? 'alert' : 'status'} data-outcome={archival.kind} className={`shrink-0 px-4 py-1.5 text-xs border-b ${archival.kind === 'failed' ? 'text-red-200 bg-red-950/40 border-red-900/60' : 'text-emerald-200 bg-emerald-950/30 border-emerald-900/50'}`}>
+          {archival.text}
+        </p>
+      )}
       {ruleProblem && (
         <p id="draft-rule-problem" role="alert" className="shrink-0 px-4 py-1.5 text-xs text-amber-200 bg-amber-950/50 border-b border-amber-900/60">
           {ruleProblem} This Draft cannot be saved until it is fixed.
@@ -513,14 +622,19 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
           onUpdateTask={handleUpdateTask}
           onUpdateOutcome={handleUpdateOutcome}
           onAddTask={handleAddTask}
-          learning={!selectedId ? null : personal
-            ? <SkillLearning view={learning} skillId={selectedId} skillTitles={skillTitles} taskTitles={taskTitles} onAction={act} />
-            : selected && <SkillDraftRules skill={selected} onOptional={handleOptional} onThreshold={handleThreshold} />}
+          learning={!selectedId ? null : (
+            <>
+              {personal
+                ? <SkillLearning view={learning} skillId={selectedId} skillTitles={skillTitles} taskTitles={taskTitles} onAction={act} />
+                : selected && <SkillDraftRules skill={selected} onOptional={handleOptional} onThreshold={handleThreshold} />}
+              <RetainedTasks heading={personal ? 'Archived Tasks · history kept' : 'Archived · kept by published Versions'} tasks={retained} />
+            </>
+          )}
           renderTaskExtra={personal
-            ? (taskId) => <TaskLearning view={learning} taskId={taskId} onAction={act} />
+            ? (taskId) => <><TaskLearning view={learning} taskId={taskId} onAction={act} />{archiveControl(taskId)}</>
             : (taskId) => {
               const task = selected?.tasks.find((t) => t.id === taskId)
-              return task && <TaskDraftRules task={task} onReward={(xpReward) => handleTaskReward(taskId, xpReward)} />
+              return task && <><TaskDraftRules task={task} onReward={(xpReward) => handleTaskReward(taskId, xpReward)} />{archiveControl(taskId)}</>
             }}
         />
         {reuseOpen && (

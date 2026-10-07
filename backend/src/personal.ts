@@ -57,6 +57,9 @@ async function readState(tx: Tx, learningPathId: string) {
 
 export type PersonalLearningState = Awaited<ReturnType<typeof readState>>
 
+/** The learning records inside a transaction that already holds the owner's Path lock. */
+export const readPersonalLearningStateIn = readState
+
 export async function readPersonalLearningState(db: Database, learningPathId: string, accountId: string): Promise<PersonalLearningState | null> {
   return db.transaction(async (tx) => (await lockOwnedPath(tx, learningPathId, accountId)) ? readState(tx, learningPathId) : null)
 }
@@ -127,15 +130,6 @@ export const startTask = (db: Database, learningPathId: string, taskId: string, 
   if (found.task.startedAt) return { ok: true, changed: false }
   if (!await hasAccess(tx, learningPathId, found.task.skillId)) return { ok: false, refusal: 'skill_locked' }
   await tx.update(personalTasks).set({ startedAt: now }).where(eq(personalTasks.taskId, taskId))
-  return { ok: true, changed: true }
-})
-
-/** One-way here: no restoration policy is defined. Contribution, Mastery and history are untouched. */
-export const archiveTask = (db: Database, learningPathId: string, taskId: string, accountId: string) => act(db, learningPathId, accountId, async (tx, now) => {
-  const [task] = await tx.select().from(personalTasks).where(and(eq(personalTasks.learningPathId, learningPathId), eq(personalTasks.taskId, taskId)))
-  if (!task) return { ok: false, refusal: 'task_not_found' }
-  if (task.archivedAt) return { ok: true, changed: false }
-  await tx.update(personalTasks).set({ archivedAt: now }).where(eq(personalTasks.taskId, taskId))
   return { ok: true, changed: true }
 })
 

@@ -103,6 +103,14 @@ export const readLearningPath = (pathId: string) => call<PathDocument>(`/persona
 export const saveLearningPath = (pathId: string, save: PathSave) =>
   call<PathDocument>(`/personal/learning-paths/${encodeURIComponent(pathId)}/document`, { method: 'PUT', body: save })
 
+/**
+ * Archives one Task of the owner's Path (ADR 0018): it leaves the document, so the
+ * revision advances, while its completion, contribution and history stay. Based on
+ * `expectedRevision`; a stale archive answers 409 with the accepted document in `body.current`.
+ */
+export const archivePersonalTask = (pathId: string, taskId: string, expectedRevision: number) =>
+  call<{ changed: boolean; learningState: LearningState; document: PathDocument }>(`/personal/learning-paths/${encodeURIComponent(pathId)}/tasks/${encodeURIComponent(taskId)}/archive`, { method: 'POST', body: { expectedRevision } })
+
 /** A Skill's current Access, Mastery and rule as the backend derives them for the owner. */
 export interface LearningSkill {
   skillId: string
@@ -214,6 +222,14 @@ export const readCoachPath = (pathId: string) => call<CoachPathDocument>(`/coach
 /** Saves the whole Draft; a stale save answers 409 with the accepted document in `body.current`. */
 export const saveCoachDraft = (pathId: string, save: PathSave) =>
   call<CoachPathDocument>(`/coach/learning-paths/${encodeURIComponent(pathId)}/draft`, { method: 'PUT', body: save })
+
+/**
+ * Archives a published Task from the open Draft (ADR 0018): the next Version leaves it
+ * out, while earlier Versions and their Enrollments keep it. A Task only the Draft holds
+ * answers 409 `task_not_published`; a stale archive 409 `stale_revision` with `body.current`.
+ */
+export const archiveDraftTask = (pathId: string, taskId: string, expectedRevision: number) =>
+  call<CoachPathDocument>(`/coach/learning-paths/${encodeURIComponent(pathId)}/draft/tasks/${encodeURIComponent(taskId)}/archive`, { method: 'POST', body: { expectedRevision } })
 
 /**
  * Publishes the open Draft as it stood at `expectedRevision`. A blocked required route

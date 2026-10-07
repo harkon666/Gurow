@@ -4,6 +4,7 @@ import type { Database } from './db/client'
 import { coachWorkspaces, learningPaths, learningPathVersions, skills, tasks, versionPrerequisites, versionSkillCards, versionSkills, versionTasks } from './db/schema'
 import type { Tx } from './personal'
 import { checkRequiredRoute, type BlockedSkill } from './publication'
+import { publishedContent } from './retention'
 
 /**
  * Coach Workspaces and Learning Path Drafts (ADR 0005, 0010, 0011). A Workspace has
@@ -241,7 +242,7 @@ export async function saveVersionLayout(db: Database, versionId: string, account
 
 export type DraftRefusal =
   | 'learning_path_not_found' | 'no_open_draft' | 'stale_revision' | 'skill_owned_elsewhere' | 'task_owned_elsewhere'
-  | 'task_skill_mismatch' | 'skill_missing' | 'task_missing'
+  | 'task_skill_mismatch' | 'skill_missing' | 'task_missing' | 'skill_has_history' | 'task_has_history'
 type SaveResult = { ok: true; document: CoachPathDocument } | { ok: false; refusal: DraftRefusal; detail: string; current?: CoachPathDocument }
 
 class Refused extends Error {
@@ -308,8 +309,18 @@ async function writeDraft(tx: Tx, path: typeof learningPaths.$inferSelect, draft
   const existingTasks = new Map((await tx.select().from(versionTasks).where(eq(versionTasks.learningPathVersionId, draftId))).map((row) => [row.taskId, row]))
   const sentSkills = new Set(input.application.skills.map((skill) => skill.id))
   const sentTasks = new Set(input.application.skills.flatMap((skill) => skill.tasks.map((task) => task.id)))
-  for (const id of existingSkills.keys()) if (!sentSkills.has(id)) throw new Refused('skill_missing', `Skill ${id} is missing; removing Skills is not supported yet`)
-  for (const id of existingTasks.keys()) if (!sentTasks.has(id)) throw new Refused('task_missing', `Task ${id} is missing; removing Tasks is not supported yet`)
+  // Content a published Version holds is history (ADR 0018): it is never deleted, and a Task leaves the Draft only by archival.
+  const removedSkills = [...existingSkills.values()].filter((skill) => !sentSkills.has(skill.skillId))
+  const removedTasks = [...existingTasks.values()].filter((task) => !sentTasks.has(task.taskId))
+  if (removedSkills.length > 0 || removedTasks.length > 0) {
+    const published = await publishedContent(tx, path.id)
+    const kept = removedSkills.find((skill) => published.skills.has(skill.skillId))
+    if (kept) throw new Refused('skill_has_history', `Skill "${kept.title}" is part of a published Version and cannot be deleted; its Tasks can be archived from this Draft`)
+    const worked = removedTasks.find((task) => published.tasks.has(task.taskId))
+    if (worked) throw new Refused('task_has_history', `Task "${worked.title}" is part of a published Version and cannot be deleted; archive it from this Draft instead`)
+  }
+  for (const skill of removedSkills) throw new Refused('skill_missing', `Skill ${skill.skillId} is missing; removing Skills is not supported yet`)
+  for (const task of removedTasks) throw new Refused('task_missing', `Task ${task.taskId} is missing; removing Tasks is not supported yet`)
 
   const newSkills = input.application.skills.filter((skill) => !existingSkills.has(skill.id))
   const newTasks: (TaskInput & { skillId: string; ordinal: number })[] = []
@@ -442,6 +453,32 @@ export async function prepareDraft(db: Database, learningPathId: string, account
     if (edgeRows.length > 0) await tx.insert(versionPrerequisites).values(copy(edgeRows))
     const cardRows = await tx.select().from(versionSkillCards).where(eq(versionSkillCards.learningPathVersionId, latest.id))
     if (cardRows.length > 0) await tx.insert(versionSkillCards).values(copy(cardRows))
+    return { ok: true, document: await readDocument(tx, await advanceRevision(tx, locked.path)) } as const
+  })
+}
+
+export type ArchiveDraftRefusal = 'learning_path_not_found' | 'stale_revision' | 'no_open_draft' | 'task_not_found' | 'task_not_published'
+type ArchiveDraftResult = { ok: true; document: CoachPathDocument } | { ok: false; refusal: ArchiveDraftRefusal; detail: string; current?: CoachPathDocument }
+
+/**
+ * Archives a published Task from the open Draft (ADR 0018): the Task is not carried
+ * into the next Version, while every published Version that holds it, and the
+ * Submissions, Reviews, XP and Mastery of their Enrollments, stay as they were. Its
+ * logical ID stays with the Path. A Task only this Draft holds has no history to
+ * keep and is not archived; removing unused content is a separate deletion.
+ */
+export async function archiveDraftTask(db: Database, learningPathId: string, taskId: string, accountId: string, expectedRevision: number): Promise<ArchiveDraftResult> {
+  return db.transaction(async (tx) => {
+    const locked = await lockForChange(tx, learningPathId, accountId, expectedRevision)
+    if (!locked.ok) return locked
+    const draft = await openDraft(tx, locked.path.id)
+    if (!draft) return { ok: false, refusal: 'no_open_draft', detail: 'this Path has no open Draft' } as const
+    const [task] = await tx.select().from(versionTasks).where(and(eq(versionTasks.learningPathVersionId, draft.id), eq(versionTasks.taskId, taskId)))
+    if (!task) return { ok: false, refusal: 'task_not_found', detail: 'no such Task in this Draft' } as const
+    if (!(await publishedContent(tx, locked.path.id)).tasks.has(taskId)) {
+      return { ok: false, refusal: 'task_not_published', detail: `Task "${task.title}" was never published, so it has no history to archive` } as const
+    }
+    await tx.delete(versionTasks).where(and(eq(versionTasks.learningPathVersionId, draft.id), eq(versionTasks.taskId, taskId)))
     return { ok: true, document: await readDocument(tx, await advanceRevision(tx, locked.path)) } as const
   })
 }

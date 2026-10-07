@@ -189,6 +189,28 @@ export class KeptWorkSession<D, A> {
     return { kind: 'shown' }
   }
 
+  /**
+   * Runs a change the backend answers with a new accepted document, such as an
+   * archival (ADR 0026). It holds the session like a reapplication: the editor is
+   * locked meanwhile, and an edit that still reaches it is kept as work of its own
+   * when the accepted document replaces what the editor shows. A failure changes nothing.
+   */
+  async accept(change: () => Promise<{ ok: true; accepted: A } | { ok: false; detail: string }>): Promise<{ kind: 'shown' } | { kind: 'ignored' } | { kind: 'failed'; detail: string }> {
+    if (this.view.busy || this.closed) return { kind: 'ignored' }
+    const shown = this.options.build()
+    this.publish({ busy: true })
+    let result: Awaited<ReturnType<typeof change>>
+    try {
+      result = await change()
+    } catch {
+      result = { ok: false, detail: 'the backend could not be reached' }
+    }
+    if (this.closed) return { kind: 'ignored' }
+    if (result.ok) this.replace(shown, result.accepted)
+    this.publish({ busy: false })
+    return result.ok ? { kind: 'shown' } : { kind: 'failed', detail: result.detail }
+  }
+
   /** Reapplies the editor's own work after a conflict; the editor shows the result once it is accepted. */
   async reapplyLive() {
     const mine = this.options.build()

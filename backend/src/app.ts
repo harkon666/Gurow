@@ -53,6 +53,8 @@ const SAVE_REFUSAL_STATUS: Record<authoring.SaveRefusal, ContentfulStatusCode> =
   task_archived: 409,
   skill_missing: 422,
   task_missing: 422,
+  skill_has_history: 409,
+  task_has_history: 409,
 }
 
 const DRAFT_REFUSAL_STATUS: Record<coaching.DraftRefusal, ContentfulStatusCode> = {
@@ -64,6 +66,16 @@ const DRAFT_REFUSAL_STATUS: Record<coaching.DraftRefusal, ContentfulStatusCode> 
   task_skill_mismatch: 409,
   skill_missing: 422,
   task_missing: 422,
+  skill_has_history: 409,
+  task_has_history: 409,
+}
+
+const ARCHIVE_DRAFT_REFUSAL_STATUS: Record<coaching.ArchiveDraftRefusal, ContentfulStatusCode> = {
+  learning_path_not_found: 404,
+  task_not_found: 404,
+  stale_revision: 409,
+  no_open_draft: 409,
+  task_not_published: 409,
 }
 
 const PUBLICATION_REFUSAL_STATUS: Record<coaching.PublicationRefusal, ContentfulStatusCode> = {
@@ -368,7 +380,6 @@ export function createApp({ db, identity, auth, delivery }: { db: Database; iden
     ['PUT', 'completion', personal.completeTask],
     ['DELETE', 'completion', personal.undoTaskCompletion],
     ['POST', 'start', personal.startTask],
-    ['POST', 'archive', personal.archiveTask],
   ] as const
   for (const [method, action, perform] of taskActions) {
     app.on(method, `${personalPath}/tasks/:taskId/${action}`, async (c) => {
@@ -377,6 +388,24 @@ export function createApp({ db, identity, auth, delivery }: { db: Database; iden
       return personalResult(c, await perform(db, target.pathId, target.targetId, c.get('accountId')))
     })
   }
+
+  // Archival (ADR 0018): the Task leaves the document, so the revision advances; its records stay.
+  // An optional expectedRevision makes it a revision-checked change like a document save.
+  app.post(`${personalPath}/tasks/:taskId/archive`, async (c) => {
+    const target = personalTarget(c.req.param('pathId'), c.req.param('taskId'))
+    if (!target) return c.json({ error: 'learning_path_not_found' }, 404)
+    const raw = await c.req.text()
+    let body: unknown = {}
+    try { if (raw !== '') body = JSON.parse(raw) } catch { body = null }
+    const expectedRevision = typeof body === 'object' && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>).expectedRevision ?? null : undefined
+    if (expectedRevision === undefined || (expectedRevision !== null && (typeof expectedRevision !== 'number' || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0))) {
+      if (!await authoring.readPersonalPath(db, target.pathId, c.get('accountId'))) return c.json({ error: 'learning_path_not_found' }, 404)
+      return c.json({ error: 'invalid_request', detail: 'expectedRevision must be a non-negative integer when given' }, 422)
+    }
+    const result = await authoring.archivePersonalTask(db, target.pathId, target.targetId, c.get('accountId'), expectedRevision as number | null)
+    if (!result.ok) return c.json({ error: result.refusal, ...(result.refusal === 'stale_revision' ? { detail: result.detail, current: result.current } : {}) }, result.refusal === 'stale_revision' ? 409 : 404)
+    return c.json({ changed: result.changed, learningState: result.learningState, document: result.document })
+  })
 
   app.put(`${personalPath}/tasks/:taskId/reward`, async (c) => {
     const target = personalTarget(c.req.param('pathId'), c.req.param('taskId'))
@@ -461,6 +490,22 @@ export function createApp({ db, identity, auth, delivery }: { db: Database; iden
     }
     const result = await coaching.saveCoachDraft(db, pathId, c.get('accountId'), input.value)
     if (!result.ok) return c.json({ error: result.refusal, detail: result.detail, ...(result.current ? { current: result.current } : {}) }, DRAFT_REFUSAL_STATUS[result.refusal])
+    return c.json(result.document)
+  })
+
+  // Archival from the open Draft (ADR 0018): a published Task is not carried into the next Version.
+  app.post(`${coachPath}/draft/tasks/:taskId/archive`, async (c) => {
+    const pathId = c.req.param('pathId')
+    if (!UUID.test(pathId)) return c.json({ error: 'learning_path_not_found' }, 404)
+    const taskId = UUID.test(c.req.param('taskId')) ? c.req.param('taskId') : NIL_UUID
+    const body: unknown = await c.req.json().catch(() => null)
+    const expectedRevision = typeof body === 'object' && body !== null ? (body as Record<string, unknown>).expectedRevision : undefined
+    if (typeof expectedRevision !== 'number' || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      if (!await coaching.readCoachPath(db, pathId, c.get('accountId'))) return c.json({ error: 'learning_path_not_found' }, 404)
+      return c.json({ error: 'invalid_request', detail: 'expectedRevision must be a non-negative integer' }, 422)
+    }
+    const result = await coaching.archiveDraftTask(db, pathId, taskId, c.get('accountId'), expectedRevision)
+    if (!result.ok) return c.json({ error: result.refusal, detail: result.detail, ...(result.current ? { current: result.current } : {}) }, ARCHIVE_DRAFT_REFUSAL_STATUS[result.refusal])
     return c.json(result.document)
   })
 

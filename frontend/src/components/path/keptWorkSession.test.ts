@@ -114,6 +114,45 @@ describe('kept work session', () => {
     expect(h.saves[1].expectedRevision).toBe(3)
   })
 
+  it('keeps an edit that reaches the editor while an archival is pending, instead of replacing it with the answered document', async () => {
+    const h = harness()
+    const archival = deferred<{ ok: true; accepted: Accepted }>()
+    const accepting = h.session.accept(() => archival.promise)
+    expect(h.view().busy).toBe(true)
+    // Nothing else runs meanwhile.
+    expect(await h.session.accept(async () => ({ ok: true, accepted: { revision: 9, cards: at(9, 9) } }))).toEqual({ kind: 'ignored' })
+    await h.session.reapplyLive()
+    expect(h.saves).toEqual([])
+    // An edit still reaches the editor (a keyboard shortcut, say) before the answer.
+    h.edit(at(0, 400))
+    archival.resolve({ ok: true, accepted: { revision: 2, cards: at(0, 100) } })
+    expect(await accepting).toEqual({ kind: 'shown' })
+    expect(h.shown).toEqual([2])
+    expect(h.local()).toEqual(at(0, 100))
+    expect(h.view().busy).toBe(false)
+    expect(h.view().entries.map((e) => e.changes)).toEqual([['Moved the card “Matrices”']])
+    const kept = h.kept()
+    expect(kept).toHaveLength(1)
+    expect([kept[0].base, kept[0].mine, kept[0].baseRevision]).toEqual([at(0, 100), at(0, 400), 2])
+  })
+
+  it('changes nothing when an archival fails, and starts none while a reapplication holds the session', async () => {
+    const h = harness()
+    expect(await h.session.accept(async () => ({ ok: false, detail: 'refused' }))).toEqual({ kind: 'failed', detail: 'refused' })
+    expect(await h.session.accept(async () => { throw new Error('offline') })).toEqual({ kind: 'failed', detail: 'the backend could not be reached' })
+    expect([h.shown, h.local(), h.view().busy, h.kept()]).toEqual([[], at(0, 100), false, []])
+    h.edit(at(0, 300))
+    h.backend.revision = 2
+    const reapplying = h.session.reapplyLive()
+    await settle()
+    let ran = false
+    expect(await h.session.accept(async () => { ran = true; return { ok: true, accepted: { revision: 5, cards: at(5, 5) } } })).toEqual({ kind: 'ignored' })
+    expect(ran).toBe(false)
+    h.accept(0)
+    await reapplying
+    expect(h.shown).toEqual([3])
+  })
+
   it('forgets the editor\'s work once its reapplication is accepted with nothing edited meanwhile', async () => {
     const h = harness()
     h.edit(at(0, 300))

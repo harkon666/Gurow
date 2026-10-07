@@ -1,7 +1,9 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm'
 import type { Database } from './db/client'
+import { lockedTimestamp } from './db/clock'
 import { learningPaths, personalPrerequisites, personalSkillCards, personalSkills, personalTasks, personalWorkspaces, skills, tasks } from './db/schema'
-import { lockOwnedPath, type Tx } from './personal'
+import { lockOwnedPath, readPersonalLearningStateIn, type Tx } from './personal'
+import { personalHistory } from './retention'
 
 /**
  * Authoring a personal Learning Path (ADR 0015, 0016). A Path document joins the
@@ -228,7 +230,7 @@ export async function readPersonalPath(db: Database, learningPathId: string, acc
 
 export type SaveRefusal =
   | 'learning_path_not_found' | 'stale_revision' | 'skill_owned_elsewhere' | 'task_owned_elsewhere'
-  | 'task_skill_mismatch' | 'task_archived' | 'skill_missing' | 'task_missing'
+  | 'task_skill_mismatch' | 'task_archived' | 'skill_missing' | 'task_missing' | 'skill_has_history' | 'task_has_history'
 type SaveResult = { ok: true; document: PathDocument } | { ok: false; refusal: SaveRefusal; detail: string; current?: PathDocument }
 
 class Refused extends Error {
@@ -272,8 +274,18 @@ async function writeDocument(tx: Tx, path: typeof learningPaths.$inferSelect, in
   const existingTasks = new Map((await tx.select().from(personalTasks).where(eq(personalTasks.learningPathId, path.id))).map((row) => [row.taskId, row]))
   const sentSkills = new Set(input.application.skills.map((skill) => skill.id))
   const sentTasks = new Set(input.application.skills.flatMap((skill) => skill.tasks.map((task) => task.id)))
-  for (const id of existingSkills.keys()) if (!sentSkills.has(id)) throw new Refused('skill_missing', `Skill ${id} is missing; removing Skills is not supported yet`)
-  for (const [id, task] of existingTasks) if (!task.archivedAt && !sentTasks.has(id)) throw new Refused('task_missing', `Task ${id} is missing; removing Tasks is not supported yet`)
+  // Content with progress history is never deleted (ADR 0018): a Task is archived instead, and a Skill is kept.
+  const removedSkills = [...existingSkills.values()].filter((skill) => !sentSkills.has(skill.skillId))
+  const removedTasks = [...existingTasks.values()].filter((task) => !task.archivedAt && !sentTasks.has(task.taskId))
+  if (removedSkills.length > 0 || removedTasks.length > 0) {
+    const history = await personalHistory(tx, path.id)
+    const kept = removedSkills.find((skill) => history.skills.has(skill.skillId))
+    if (kept) throw new Refused('skill_has_history', `Skill "${kept.title}" has learning history and cannot be deleted; its Tasks can be archived`)
+    const worked = removedTasks.find((task) => history.tasks.has(task.taskId))
+    if (worked) throw new Refused('task_has_history', `Task "${worked.title}" has learning history and cannot be deleted; archive it instead`)
+  }
+  for (const skill of removedSkills) throw new Refused('skill_missing', `Skill ${skill.skillId} is missing; removing Skills is not supported yet`)
+  for (const task of removedTasks) throw new Refused('task_missing', `Task ${task.taskId} is missing; removing Tasks is not supported yet`)
 
   // New logical identities are claimed for this Path; the primary key decides concurrent claims.
   const newSkills = input.application.skills.filter((skill) => !existingSkills.has(skill.id))
@@ -349,4 +361,34 @@ async function writeDocument(tx: Tx, path: typeof learningPaths.$inferSelect, in
     await tx.insert(personalPrerequisites).values(addedEdges.map((edge) => ({ learningPathId: path.id, prerequisiteSkillId: edge.from_id, skillId: edge.to_id })))
   }
   return changed
+}
+
+export type ArchiveRefusal = 'learning_path_not_found' | 'task_not_found' | 'stale_revision'
+type ArchiveResult =
+  | { ok: true; changed: boolean; document: PathDocument; learningState: Awaited<ReturnType<typeof readPersonalLearningStateIn>> }
+  | { ok: false; refusal: ArchiveRefusal; detail: string; current?: PathDocument }
+
+/**
+ * Archives one Task of the owner's Path (ADR 0018): it leaves the editable document
+ * and active use, while its completion, contribution, XP history and its Skill's
+ * Mastery stay as they were. There is no restoration. Because the document changes,
+ * the revision advances; when `expectedRevision` is given, an archive based on an
+ * older revision changes nothing and returns the accepted document, like a stale save.
+ */
+export async function archivePersonalTask(db: Database, learningPathId: string, taskId: string, accountId: string, expectedRevision: number | null): Promise<ArchiveResult> {
+  return db.transaction(async (tx) => {
+    const path = await lockOwnedPath(tx, learningPathId, accountId)
+    if (!path) return { ok: false, refusal: 'learning_path_not_found', detail: 'no such Path' } as const
+    if (expectedRevision !== null && path.revision !== expectedRevision) {
+      return { ok: false, refusal: 'stale_revision', detail: `the archive was based on revision ${expectedRevision}, but revision ${path.revision} is accepted`, current: await readDocument(tx, path) } as const
+    }
+    const [task] = await tx.select().from(personalTasks).where(and(eq(personalTasks.learningPathId, path.id), eq(personalTasks.taskId, taskId)))
+    if (!task) return { ok: false, refusal: 'task_not_found', detail: 'no such Task in this Path' } as const
+    let current = path
+    if (!task.archivedAt) {
+      await tx.update(personalTasks).set({ archivedAt: await lockedTimestamp(tx) }).where(eq(personalTasks.taskId, taskId))
+      ;[current] = await tx.update(learningPaths).set({ revision: sql`${learningPaths.revision} + 1` }).where(eq(learningPaths.id, path.id)).returning()
+    }
+    return { ok: true, changed: !task.archivedAt, document: await readDocument(tx, current), learningState: await readPersonalLearningStateIn(tx, path.id) } as const
+  })
 }
