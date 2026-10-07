@@ -367,7 +367,9 @@ async function main() {
     await lena.mouse.move(grab.x + 90, grab.y + 60, { steps: 12 })
     await lena.mouse.up()
     await settle(lena)
-    await waitSelected(lena, la.matrices)
+    // The press selects the card; since UX01 (#47) only an unmoved click opens its summary.
+    await lena.waitForSelector(`#card-label-${la.matrices}[data-selected="true"]`)
+    check(!await lena.$('#skill-detail-panel:not([hidden])'), 'a pan gesture opened the Skill summary')
     const afterDrag = await labels(lena)
     for (const label of beforeDrag) {
       const moved = afterDrag.find((l) => l.id === label.id)!

@@ -20,7 +20,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type BrowserContext, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
-import { openSkillList, readSkillStatus } from './editor-navigation'
+import { openSkillList, readCardProgress } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -263,8 +263,8 @@ async function main() {
     const revokeRoute = (task: string, revisionId: string) => `${taskRoute(task)}/submission/revisions/${revisionId}/review/revoke`
     const progress = async (page: Page) => ({
       xp: (await data(page, '#enrollment-xp')).xp,
-      vectors: await readSkillStatus(page, `#skill-status-${la.vectors}`).then((d) => [d.access, d.mastery]),
-      matrices: await readSkillStatus(page, `#skill-status-${la.matrices}`).then((d) => [d.access, d.mastery]),
+      vectors: await readCardProgress(page, la.vectors),
+      matrices: await readCardProgress(page, la.matrices),
     })
     const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
     const revisionStatus = (page: Page, revisionId: string) => page.$eval(`#revision-${revisionId}`, (el) => (el as HTMLElement).dataset.status)
@@ -389,7 +389,7 @@ async function main() {
     await carla.waitForSelector(`#revision-${r2}[data-status="approval_revoked"]`)
     const whileStale = await effect(carla, r2)
     check(same(whileStale, ['It was this Task\'s last valid Approval: its 20 XP were removed by an XP Correction.', 'Mastery of “Vectors” was revoked; its award stays in the Mastery history.'])
-      && !whileStale.join(' ').includes('no Mastery changed') && (await readSkillStatus(carla, `#skill-status-${la.vectors}`)).mastery === 'mastered', `effect with the history read and the records held: ${JSON.stringify(whileStale)}`)
+      && !whileStale.join(' ').includes('no Mastery changed') && (await readCardProgress(carla, la.vectors))[1] === 'mastered', `effect with the history read and the records held: ${JSON.stringify(whileStale)}`)
     await faults.heldRecords!.continue()
     await carla.waitForSelector(`${revocation(r2)}[data-refresh="read"]`)
     await carla.waitForSelector('#enrollment-xp[data-xp="15"]')

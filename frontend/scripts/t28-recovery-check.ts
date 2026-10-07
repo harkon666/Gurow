@@ -349,7 +349,7 @@ async function main() {
     check((await saveState(patB)).state === 'conflict', 'autosave resumed after the conflict')
     check(same(await storedPath(), acceptedByA), `the stale tab changed the accepted Path: ${JSON.stringify((await storedPath()).learningPath)}`)
     const conflictText = await text(patB, '#save-conflict')
-    check(conflictText.includes(`Revision ${r0 + 1} was saved elsewhere`) && conflictText.includes('kept but not saved') && conflictText.includes('nothing was overwritten'), `conflict text: ${conflictText}`)
+    check(/changed elsewhere/.test(conflictText) && !/revision\s*\d/i.test(conflictText) && conflictText.includes('kept but not saved') && conflictText.includes('nothing was overwritten'), `conflict text: ${conflictText}`)
     const conflictChanges = await texts(patB, '#conflict-changes li')
     check(same(conflictChanges, ['Edited the learning outcome of “Matrices”', 'Added the Task “New Task” to “Matrices”', 'Moved the card “Vectors”', 'Connected “Vectors” → “Matrices”']), `listed changes: ${JSON.stringify(conflictChanges)}`)
     check(await patB.$('#reapply-mine-btn') !== null && await patB.$('#keep-aside-btn') !== null && await patB.$('#load-accepted-btn') !== null, 'the conflict does not offer reapply, keep aside and discard')
@@ -372,7 +372,7 @@ async function main() {
     await openPath(patC, pathUrl, 2, r0 + 1)
     await patC.waitForSelector('#kept-work [data-kept-entry]')
     let entries = await keptEntries(patC)
-    check(entries.length === 1 && entries[0].id === kept.id && entries[0].baseRevision === r0 && same(entries[0].changes, conflictChanges) && entries[0].text.includes(`Revision ${r0 + 1} is saved now`), `kept work offered: ${JSON.stringify(entries)}`)
+    check(entries.length === 1 && entries[0].id === kept.id && entries[0].baseRevision === r0 && same(entries[0].changes, conflictChanges) && /saved version has changed/.test(entries[0].text) && !/revision\s*\d/i.test(entries[0].text), `kept work offered: ${JSON.stringify(entries)}`)
     check(await value(patC, '#path-goal-input') === 'Goal saved in tab A', 'the reopened tab does not show the accepted goal')
     await select(patC, p.matrices)
     check(await value(patC, '#skill-outcome-input') === 'Multiply matrices' && await patC.$(`#task-edit-title-${newTask.id}`) === null && (await graph(patC)).length === 0, 'the kept work was applied without being asked')
@@ -544,7 +544,7 @@ async function main() {
     const afterL1 = await storedLayout()
     await drag(l2, la.matrices, 70, 90)
     await waitForState(l2, 'conflict', '#layout-save-status')
-    check(same(await texts(l2, '#layout-conflict-changes li'), ['Moved the card “Matrices”']) && (await text(l2, '#layout-save-conflict')).includes('Layout revision 1 was saved elsewhere'), `layout conflict: ${await text(l2, '#layout-save-conflict')}`)
+    check(same(await texts(l2, '#layout-conflict-changes li'), ['Moved the card “Matrices”']) && /layout was changed elsewhere/.test(await text(l2, '#layout-save-conflict')) && !/revision\s*\d/i.test(await text(l2, '#layout-save-conflict')), `layout conflict: ${await text(l2, '#layout-save-conflict')}`)
     const layoutKept = (await keptRecords(l2, layoutPrefix))[0]
     const mineMatrices = layoutKept.mine.find((c: any) => c.id === la.matrices).position
     await l2.click('#layout-keep-aside-btn')

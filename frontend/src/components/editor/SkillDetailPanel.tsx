@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { TemporaryPanel } from './TemporaryPanel'
-import { connectionRejectionMessage } from './connectionRejection'
+import { connectionRejectionMessage, isConnectionRejection } from './connectionRejection'
 import { INITIAL_LEARNING_PATH_FIXTURE } from '../../fixtures/learningPath'
 import type { SelectedSkillInfo } from './types'
 import type { PrerequisiteConnection } from './protocol'
@@ -178,7 +178,10 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
                 </button>
               )}
             </div>
-            <p className="text-[11px] leading-relaxed text-amber-300/90">{connectionRejectionMessage(connectionRejection, allSkills)}</p>
+            <p className="text-[11px] leading-relaxed text-amber-300/90">{
+              // Engine diagnostics are rewritten by title; the application's own refusals are already user language.
+              isConnectionRejection(connectionRejection) ? connectionRejectionMessage(connectionRejection, allSkills) : connectionRejection
+            }</p>
           </div>
         )}
 

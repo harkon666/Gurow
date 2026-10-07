@@ -14,7 +14,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import path from 'node:path'
 import puppeteer, { type Page } from 'puppeteer-core'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
-import { closeEditorPanels, openNewSkill } from './editor-navigation'
+import { closeEditorPanels, openNewSkill, openSkillList } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -143,9 +143,10 @@ async function main() {
   }
   execFileSync('bun', ['run', 'test/support/prepare-browser-database.ts'], { cwd: BACKEND, stdio: 'inherit', env: { ...process.env, TEST_DATABASE_URL: DATABASE_URL } })
 
+  // A developer's backend/.env may hold a real Resend key; this check reads the logged mail instead.
   const apiServer = spawn('bun', ['run', 'src/index.ts'], {
     cwd: BACKEND,
-    env: { ...process.env, DATABASE_URL, PORT: String(API_PORT), BETTER_AUTH_URL: ORIGIN, BETTER_AUTH_SECRET: 't18-browser-check-secret-not-for-production', NODE_ENV: 'test' },
+    env: { ...process.env, DATABASE_URL, PORT: String(API_PORT), BETTER_AUTH_URL: ORIGIN, BETTER_AUTH_SECRET: 't18-browser-check-secret-not-for-production', NODE_ENV: 'test', RESEND_API_KEY: '' },
     stdio: ['ignore', 'ignore', 'inherit'],
   })
   const web = spawn('node', ['.output/server/index.mjs'], { cwd: FRONTEND, env: { ...process.env, PORT: String(PORT), GUROW_API_ORIGIN: `http://127.0.0.1:${API_PORT}` }, stdio: 'ignore' })
@@ -227,7 +228,10 @@ async function main() {
     check(JSON.stringify(rules(doc)) === JSON.stringify(expectedRules), `stored Draft rules: ${JSON.stringify(rules(doc))}`)
     check(JSON.stringify(edges(doc.editor.connections)) === JSON.stringify(edges([{ from_id: vectors, to_id: matrices }, { from_id: matrices, to_id: eigen }, { from_id: vectors, to_id: history }])), 'stored Prerequisites differ')
     check(doc.draft?.versionNumber === 1 && !JSON.stringify(doc.editor).includes('Vector exercises'), 'Draft version or snapshot/payload split is wrong')
+    // UX01 (#47): the Skill list is a temporary panel, opened where the designations are read.
+    await openSkillList(page)
     check(await text(page, `#skill-draft-status-${history}`) === 'Optional' && (await text(page, `#skill-draft-status-${eigen}`)).includes('50 XP'), 'the list does not show the Draft designations')
+    await closeEditorPanels(page)
     pass('draft rules', `rev ${doc.learningPath.revision}: Required/Enrichment Tasks with rewards 20/5/30/10, Optional "History of algebra", thresholds 20 and 50, an Eigenvalues Skill with no Task yet, 3 Prerequisites`)
 
     // 3. Forbidden edits are refused at once in the editor and change nothing.
@@ -304,6 +308,8 @@ async function main() {
 
     // 7. Back in the personal context, the Coach's Drafts are not personal Paths.
     recording = false
+    // UX01 (#47): the Skill summary is a temporary panel over the page; close it to reach the header.
+    await closeEditorPanels(page)
     await page.click('#switch-to-personal')
     await page.waitForSelector('#personal-workspace')
     const personalList = await text(page, '#workspace-paths')

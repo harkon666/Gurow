@@ -154,9 +154,10 @@ async function main() {
   }
   execFileSync('bun', ['run', 'test/support/prepare-browser-database.ts'], { cwd: BACKEND, stdio: 'inherit', env: { ...process.env, TEST_DATABASE_URL: DATABASE_URL } })
 
+  // A developer's backend/.env may hold a real Resend key; this check reads the logged mail instead.
   const apiServer = spawn('bun', ['run', 'src/index.ts'], {
     cwd: BACKEND,
-    env: { ...process.env, DATABASE_URL, PORT: String(API_PORT), BETTER_AUTH_URL: ORIGIN, BETTER_AUTH_SECRET: 't19-browser-check-secret-not-for-production', NODE_ENV: 'test' },
+    env: { ...process.env, DATABASE_URL, PORT: String(API_PORT), BETTER_AUTH_URL: ORIGIN, BETTER_AUTH_SECRET: 't19-browser-check-secret-not-for-production', NODE_ENV: 'test', RESEND_API_KEY: '' },
     stdio: ['ignore', 'ignore', 'inherit'],
   })
   const web = spawn('node', ['.output/server/index.mjs'], { cwd: FRONTEND, env: { ...process.env, PORT: String(PORT), GUROW_API_ORIGIN: `http://127.0.0.1:${API_PORT}` }, stdio: 'ignore' })

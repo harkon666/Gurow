@@ -23,7 +23,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type BrowserContext, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
-import { closeEditorPanels, openSkillList, readSkillStatus } from './editor-navigation'
+import { closeEditorPanels, openCoachReview, openSkillList, readCardProgress, readSkillStatus, waitAwaitingReview } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -126,6 +126,7 @@ async function openEnrollment(page: Page, enrollmentId: string, gpu: 'ready' | '
 }
 /** Selects a Skill by clicking its card on the WebGPU canvas. */
 async function canvasSelect(page: Page, id: string) {
+  await closeEditorPanels(page)
   await page.waitForFunction(() => document.querySelectorAll('[id^="card-label-"]').length === 2)
   const point = await cardPoint(page, id)
   await page.mouse.click(point.x, point.y)
@@ -284,8 +285,8 @@ async function main() {
     const revisionIds = async (task: string) => (await ok(carla, `${taskRoute(task)}/submission`)).submission.revisions.map((r: any) => r.id) as string[]
     const progress = async (page: Page) => ({
       xp: (await data(page, '#enrollment-xp')).xp,
-      vectors: await readSkillStatus(page, `#skill-status-${la.vectors}`).then((d) => [d.access, d.mastery]),
-      matrices: await readSkillStatus(page, `#skill-status-${la.matrices}`).then((d) => [d.access, d.mastery]),
+      vectors: await readCardProgress(page, la.vectors),
+      matrices: await readCardProgress(page, la.matrices),
     })
     const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 
@@ -333,7 +334,7 @@ async function main() {
     check((await text(carla, `#version-enrollment-${enrollment}`)).includes('1 awaiting Review'), 'Lena\'s entry does not say her work awaits Review')
     await carla.click(`#open-enrollment-${enrollment}`)
     await carla.waitForSelector('#enrolled-version[data-gpu-status="ready"]', { timeout: 20000 })
-    await carla.waitForSelector('#awaiting-review[data-count="1"]')
+    await waitAwaitingReview(carla, 1)
     check((await text(carla, '#enrolled-learner')).includes('lena@gurow.test') && (await data(carla, `#awaiting-review-${la.drills}`)).revisionNumber === '1' && (await readSkillStatus(carla, `#skill-status-${la.vectors}`)).awaitingReview === '1', 'the Enrollment page does not name Lena or list her revision awaiting Review')
     await canvasSelect(carla, la.vectors)
     let revisions = await history(carla, la.drills, 1)
@@ -359,7 +360,7 @@ async function main() {
     await carla.waitForSelector(`${reviewPanel(la.drills)}[data-refresh="read"]`)
     check((await text(carla, `#task-review-status-${la.drills}`)).startsWith('Changes Requested of Revision 1 recorded, confirmed by Gurow') && (await data(carla, reviewPanel(la.drills))).confirmedBy === 'answer', `status after Changes Requested: ${await text(carla, `#task-review-status-${la.drills}`)}`)
     await carla.waitForSelector(`#task-history-${la.drills} li[data-revision-number="1"][data-status="changes_requested"]`)
-    await carla.waitForSelector('#awaiting-review[data-count="0"]')
+    await waitAwaitingReview(carla, 0)
     revisions = await history(carla, la.drills, 1)
     check(revisions[0].text.includes(`Feedback: ${feedback1}`) && await carla.$(`#task-review-none-${la.drills}`) !== null && await value(carla, `#task-review-feedback-${la.drills}`).catch(() => '') === '', 'the recorded feedback is not shown, or a decision is still offered')
     check(same(await storedReviews(la.drills), [[1, 'changes_requested', feedback1, false]]) && (await data(carla, '#enrollment-xp')).xp === '0', `stored after Changes Requested: ${JSON.stringify(await storedReviews(la.drills))}`)
@@ -378,13 +379,14 @@ async function main() {
     // 4. A revision replaced while Carla was deciding cannot be decided; the page explains and reads the history again.
     await act(carla)
     await revisit(carla)
+    // Read before the stale case is set up: reading the Skill list reopens the summary (UX01, #47).
+    const beforeStale = await progress(carla)
     await carla.waitForSelector(`${reviewPanel(la.drills)}[data-target-revision="2"]`)
     await typeInto(carla, `#task-review-feedback-${la.drills}`, 'Correct now.')
     // Lena sends again from another device meanwhile; Carla's page is not told.
     const third = await ok(lena, `${taskRoute(la.drills)}/submission/revisions`, 'POST', { text: 'Exercise 1: u + v = (3, 1), with a sketch', urls: ['https://notes.example/sketch'] })
     check(third.revision.revisionNumber === 3, 'Lena\'s second correction is not Revision 3')
     check((await data(carla, reviewPanel(la.drills))).targetRevision === '2', 'Carla\'s page moved on before deciding; the stale case was not set up')
-    const beforeStale = await progress(carla)
     await carla.click(`#task-review-approve-${la.drills}`)
     await waitReview(carla, la.drills, 'refused')
     const refused = await text(carla, `#task-review-status-${la.drills}`)
@@ -500,14 +502,21 @@ async function main() {
     })
     await act(noGpu)
     await openEnrollment(noGpu, enrollment, 'unsupported')
-    await noGpu.waitForSelector('#awaiting-review[data-count="1"]')
+    await waitAwaitingReview(noGpu, 1)
     check(same(await progress(noGpu), { xp: '0', vectors: ['open', 'not-mastered'], matrices: ['locked', 'not-mastered'] }) && (await readSkillStatus(noGpu, `#skill-status-${la.matrices}`)).awaitingReview === '1', `Carla's records after the revocations: ${JSON.stringify(await progress(noGpu))}`)
-    // Tab from the start of the page until the queued revision has focus, then open it with Enter.
+    // Tab from the start of the page to Coach Review, open the queue with Enter (UX01, #47),
+    // then Tab until the queued revision has focus and open it with Enter.
+    await closeEditorPanels(noGpu)
     await noGpu.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
     let reached = false
-    for (let i = 0; i < 40 && !reached; i++) {
+    for (let i = 0; i < 60 && !reached; i++) {
       await noGpu.keyboard.press('Tab')
-      reached = await noGpu.evaluate((id) => document.activeElement?.id === id, `awaiting-review-${la.matrixDrills}`)
+      const focused = await noGpu.evaluate(() => document.activeElement?.id)
+      if (focused === 'btn-coach-review') {
+        await noGpu.keyboard.press('Enter')
+        await noGpu.waitForSelector('#awaiting-review', { visible: true })
+      }
+      reached = focused === `awaiting-review-${la.matrixDrills}`
     }
     check(reached, 'Tab never reached the queued Matrix drills revision')
     await noGpu.keyboard.press('Enter')
@@ -520,7 +529,7 @@ async function main() {
     await noGpu.keyboard.press('Enter')
     await waitReview(noGpu, la.matrixDrills, 'recorded')
     await noGpu.waitForSelector('#enrollment-xp[data-xp="15"]')
-    await noGpu.waitForSelector('#awaiting-review[data-count="0"]')
+    await waitAwaitingReview(noGpu, 0)
     check(same(await progress(noGpu), { xp: '15', vectors: ['open', 'not-mastered'], matrices: ['locked', 'mastered'] }), `after approving locked work: ${JSON.stringify(await progress(noGpu))}`)
     check(same(await storedReviews(la.matrixDrills), [[1, 'approval', 'Clear and complete.', false]]), 'the keyboard Approval was not stored')
     await act(lena)
@@ -543,10 +552,11 @@ async function main() {
     await pia.waitForSelector('#enrollment-unavailable')
     check(!(await pia.evaluate(() => document.body.innerText)).includes('Chapter 1 summary'), 'Pia sees Lena\'s work')
     await openEnrollment(pia, piaEnrollment)
-    check(await pia.$('[data-task-review]') === null && await pia.$('#awaiting-review') === null, 'Pia\'s own Enrollment offers a Review')
+    check(await pia.$('[data-task-review]') === null && await pia.$('#awaiting-review') === null && await pia.$('#btn-coach-review') === null, 'Pia\'s own Enrollment offers a Review')
     check((await storedReviews(la.reading)).length === 0, 'a learner\'s decision was stored')
     await act(noGpu)
     await revisit(noGpu)
+    await openCoachReview(noGpu)
     await noGpu.waitForSelector(`#awaiting-review-${la.reading}`)
     pass('self-approval and peers', 'Lena\'s page has no Review and her API decision answers 403 coach_only; Pia gets 404 on the decision and the Version\'s learners, and "Enrollment not available" without the work; nothing stored, the revision stays in Carla\'s queue')
 

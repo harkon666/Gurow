@@ -666,8 +666,9 @@ async function main() {
       '#checkpoint-status-badge',
       (el: any) => el.textContent?.trim()
     )
-    if (!badgeTextForeign?.includes('Checkpoint Error')) {
-      throw new Error(`Expected badge to reflect Checkpoint Error, got "${badgeTextForeign}"`)
+    // UX01 (#47) states the refusal in user language: not saved, local work kept.
+    if (!/not saved/i.test(badgeTextForeign ?? '') || !/preserved/i.test(badgeTextForeign ?? '') || /saved locally/i.test(badgeTextForeign ?? '')) {
+      throw new Error(`Expected badge to say the checkpoint was not saved and local work preserved, got "${badgeTextForeign}"`)
     }
 
     // Sub-phase 7B: Guard Invariant - Editing Task MUST NOT overwrite rejected checkpoint

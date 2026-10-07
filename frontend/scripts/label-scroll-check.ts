@@ -44,7 +44,16 @@ try {
   // Actual wheel camera input moves the bottom/right label beyond BOTH edges.
   const canvas = await page.$eval('#editor-canvas', el => el.getBoundingClientRect().toJSON())
   await page.mouse.move(canvas.x + canvas.width / 2, canvas.y + canvas.height / 2)
-  await page.mouse.wheel({ deltaX: -500, deltaY: -500 })
+  // Pan far enough for the canvas actually shown: since UX01 (#47) it spans the page with no sidebars.
+  const far = await page.evaluate(() => {
+    const canvas = document.querySelector('#editor-canvas')!.getBoundingClientRect()
+    const labels = [...document.querySelectorAll('[id^="card-label-"]')].map(el => el.getBoundingClientRect())
+    return {
+      x: Math.ceil(canvas.right - Math.max(...labels.map(r => r.right)) + 120),
+      y: Math.ceil(canvas.bottom - Math.max(...labels.map(r => r.bottom)) + 40),
+    }
+  })
+  await page.mouse.wheel({ deltaX: -far.x, deltaY: -far.y })
   await page.waitForFunction(() => {
     const canvas = document.querySelector('#editor-canvas')!.getBoundingClientRect()
     return [...document.querySelectorAll('[id^="card-label-"]')].some(el => {

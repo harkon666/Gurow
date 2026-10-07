@@ -26,7 +26,8 @@ export function TemporaryPanel({ title, closeId, onClose, children, initialFocus
   }, [initialFocus])
   return createPortal(
     <dialog ref={ref} aria-label={title} onCancel={(event) => { event.preventDefault(); close.current() }}
-      className="fixed inset-0 m-auto w-full h-dvh max-w-none max-h-none md:w-[36rem] md:h-auto md:max-h-[88dvh] md:rounded-2xl border border-slate-700 bg-slate-950 text-slate-200 p-0 shadow-2xl backdrop:bg-black/50">
+      // Scroll padding keeps content scrolled into view (focus, find) clear of the sticky header.
+      className="fixed inset-0 m-auto scroll-pt-16 w-full h-dvh max-w-none max-h-none md:w-[36rem] md:h-auto md:max-h-[88dvh] md:rounded-2xl border border-slate-700 bg-slate-950 text-slate-200 p-0 shadow-2xl backdrop:bg-black/50">
       <div className="sticky top-0 z-10 flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-800 bg-slate-950">
         <h2 className="font-semibold">{title}</h2>
         <button id={closeId} onClick={onClose} className="rounded-lg border border-slate-700 px-3 py-1 text-sm hover:bg-slate-800">Close</button>

@@ -22,7 +22,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type BrowserContext, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
-import { closeEditorPanels, openSkillList, readSkillStatus } from './editor-navigation'
+import { closeEditorPanels, openCoachReview, openSkillList, readSkillStatus } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -378,10 +378,11 @@ async function main() {
     pass('inactive', 'Vectors Locked with only the inactivity reason; Send disabled; the existing draft stays editable and saves; the untouched extension is not startable (textarea disabled, "a new Task cannot be started"); API start / new draft / send 403 enrollment_inactive; Revision 1 still pending, 0 XP; Carla 403 draft_private and her page holds no draft text')
 
     // 4. Carla still decides the work sent while active; XP and Mastery follow without reactivating.
+    await openCoachReview(carla)
     check((await text(carla, '#participation-inactive')).includes('lena cannot start Tasks or send work. You can still review work sent while it was active; only you can reactivate it.')
       && (await text(carla, '#awaiting-review-inactive')).includes('does not reactivate the Enrollment'), `Carla's inactive page: ${await text(carla, PARTICIPATION)}`)
+    await openCoachReview(carla)
     await carla.waitForSelector(`#awaiting-review-${la.drills}[data-revision-number="1"]`)
-    await closeEditorPanels(carla)
     await carla.click(`#awaiting-review-${la.drills}`)
     await carla.waitForSelector(`#task-review-${la.drills}[data-target-revision="1"]`)
     await carla.click(`#task-review-approve-${la.drills}`)
@@ -480,8 +481,8 @@ async function main() {
     const blankCoach = await api(carla, lifecycleRoute('reactivate'), 'POST', { reason: '  ' })
     const noReasonCoach = await api(carla, lifecycleRoute('reactivate'), 'POST', {})
     check(blankCoach.status === 422 && noReasonCoach.status === 422 && (await storedLifecycle()).length === 3, `reasonless Coach reactivation answered ${blankCoach.status}/${noReasonCoach.status}`)
+    await openCoachReview(carla)
     await carla.waitForSelector(`#awaiting-review-${la.extension}[data-revision-number="1"]`)
-    await closeEditorPanels(carla)
     await carla.click(`#awaiting-review-${la.extension}`)
     await carla.waitForSelector(`#task-review-${la.extension}[data-target-revision="1"]`)
     await carla.click(`#task-review-approve-${la.extension}`)

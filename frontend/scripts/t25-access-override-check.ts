@@ -23,7 +23,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type BrowserContext, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
-import { openSkillList, readSkillStatus } from './editor-navigation'
+import { openCoachReview, openSkillList, readSkillStatus } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -451,6 +451,7 @@ async function main() {
     const lockedSend = await api(lena, `${taskRoute(la.secondTask)}/submission/revisions`, 'POST', { text: 'After revocation', urls: [] })
     check(lockedSend.status === 403 && lockedSend.body?.error === 'skill_locked', `send after revocation answered ${lockedSend.status}`)
     await act(carla)
+    await openCoachReview(carla)
     await carla.waitForSelector(`#awaiting-review-${la.secondTask}[data-revision-number="1"]`)
     await carla.click(`#awaiting-review-${la.secondTask}`)
     await carla.waitForSelector(`#task-review-${la.secondTask}[data-target-revision="1"]`)

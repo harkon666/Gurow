@@ -21,7 +21,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type HTTPRequest, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
-import { closeEditorPanels, readSkillStatus } from './editor-navigation'
+import { closeEditorPanels, readSkillStatus, selectSkillFromList } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -308,9 +308,11 @@ async function main() {
     await pat.waitForSelector('#kept-work [data-kept-entry]')
     const slipped = await pat.$$eval('#kept-work [data-kept-entry]', (els) => els.map((el) => ({ id: (el as HTMLElement).dataset.keptEntry!, text: el.textContent ?? '' })))
     check(slipped.length === 1 && slipped[0].text.includes('Moved the card “Lifetimes”') && (await data(pat, '#path-editor')).reapplying === 'false', `edit made while archiving: ${JSON.stringify(slipped)}`)
+    // Kept work is handled with the summary closed (UX01, #47); then return to Ownership from the list.
+    await closeEditorPanels(pat)
     await pat.click(`#kept-work [data-kept-entry="${slipped[0].id}"] [data-action="discard"]`)
     await pat.waitForFunction(() => document.querySelector('#kept-work [data-kept-entry]') === null)
-    await pat.waitForFunction((want: string) => document.querySelector('#selected-skill-id')?.textContent?.trim() === want, {}, id.ownership)
+    await selectSkillFromList(pat, id.ownership)
     check(JSON.stringify(await taskIds(pat)) === JSON.stringify([id.chapter]), `Ownership's editable Tasks: ${await taskIds(pat)}`)
     await pat.waitForSelector(`#retained-task-${id.borrow}`)
     check(await retainedText(pat, id.borrow) === 'Borrow checker exercises · Completed · 20 XP still counted', `retained: ${await retainedText(pat, id.borrow)}`)

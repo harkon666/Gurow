@@ -2,7 +2,7 @@ import type { Page } from 'puppeteer-core'
 
 /** Dismiss temporary navigation through its real controls before canvas input. */
 export async function closeEditorPanels(page: Page) {
-  for (const selector of ['#btn-close-skill-list', '#btn-close-skill-details', '#btn-close-add-skill', '#btn-close-more-actions']) {
+  for (const selector of ['#btn-close-skill-list', '#btn-close-skill-details', '#btn-close-add-skill', '#btn-close-more-actions', '#btn-close-coach-review']) {
     const button = await page.$(selector)
     if (button && await button.isVisible()) {
       await button.click()
@@ -45,6 +45,38 @@ export async function openNewSkill(page: Page) {
   await closeEditorPanels(page)
   await page.click('#editor-add-card-btn')
   await page.waitForSelector('#new-skill-title', { visible: true })
+}
+
+/**
+ * A Skill's [Access, Mastery] from its always-mounted card label. Reading the Skill list instead
+ * would close and reopen an open summary (UX01, #47), remounting in-flight review state.
+ */
+export async function readCardProgress(page: Page, skillId: string): Promise<[string, string]> {
+  return page.$eval(`#card-status-${skillId}`, (el) => {
+    const d = (el as HTMLElement).dataset
+    return [d.locked === 'true' ? 'locked' : 'open', d.mastered === 'true' ? 'mastered' : 'not-mastered'] as [string, string]
+  })
+}
+
+/** The Coach's queue of work awaiting Review is a temporary panel since UX01 (#47). */
+export async function openCoachReview(page: Page) {
+  if (await page.$('#awaiting-review')) return
+  await closeEditorPanels(page)
+  await page.waitForSelector('#btn-coach-review', { visible: true })
+  await page.focus('#btn-coach-review')
+  await page.keyboard.press('Enter')
+  await page.waitForSelector('#awaiting-review', { visible: true })
+}
+
+/**
+ * Waits for the Coach's queue to hold `count` revisions. The queue stays open when no Skill
+ * was open; otherwise the same Skill is reopened, as a Coach would return to it.
+ */
+export async function waitAwaitingReview(page: Page, count: number) {
+  const selected = await page.$eval('#selected-skill-id', el => el.textContent?.trim()).catch(() => null)
+  await openCoachReview(page)
+  await page.waitForSelector(`#awaiting-review[data-count="${count}"]`)
+  if (selected) await selectSkillFromList(page, selected)
 }
 
 export async function openMoreActions(page: Page) {
