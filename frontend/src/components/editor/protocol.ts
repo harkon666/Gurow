@@ -142,6 +142,17 @@ export const SetCameraCommandSchema = z.object({
   zoom: z.number(),
 })
 
+/** Ends the gesture in progress without completing it (Escape, a cancelled pointer). */
+export const CancelInteractionCommandSchema = z.object({
+  type: z.literal('CancelInteraction'),
+})
+
+/** Selects one connection (or none) for deletion. */
+export const SelectConnectionCommandSchema = z.object({
+  type: z.literal('SelectConnection'),
+  connection: PrerequisiteConnectionSchema.nullable(),
+})
+
 /** A read-only canvas pans, zooms and selects, but refuses edits to its document. */
 export const SetReadOnlyCommandSchema = z.object({
   type: z.literal('SetReadOnly'),
@@ -173,6 +184,8 @@ export const EditorCommandSchema = z.discriminatedUnion('type', [
   SetCameraCommandSchema,
   SetReadOnlyCommandSchema,
   SetLayoutOnlyCommandSchema,
+  CancelInteractionCommandSchema,
+  SelectConnectionCommandSchema,
 ])
 
 /** Events emitted by the editor engine after a command has been applied. */
@@ -253,6 +266,30 @@ export const ConnectionsUpdatedEventSchema = z.object({
   connections: z.array(PrerequisiteConnectionSchema),
 })
 
+/** A drag from `from_id`'s connection point began; the graph accepts `valid_target_ids` as targets. */
+export const ConnectionDragStartedEventSchema = z.object({
+  type: z.literal('ConnectionDragStarted'),
+  from_id: z.string(),
+  valid_target_ids: z.array(z.string()),
+})
+
+export const ConnectionDragTargetChangedEventSchema = z.object({
+  type: z.literal('ConnectionDragTargetChanged'),
+  target_id: z.string().nullable(),
+})
+
+/** A drop only proposes `from_id` → `dropped_on`; null when cancelled or dropped on the empty canvas. */
+export const ConnectionDragEndedEventSchema = z.object({
+  type: z.literal('ConnectionDragEnded'),
+  from_id: z.string(),
+  dropped_on: z.string().nullable(),
+})
+
+export const ConnectionSelectedEventSchema = z.object({
+  type: z.literal('ConnectionSelected'),
+  connection: PrerequisiteConnectionSchema.nullable(),
+})
+
 export const SnapshotExportedEventSchema = z.object({
   type: z.literal('SnapshotExported'),
   document: z.object({
@@ -285,6 +322,10 @@ export const EditorEventSchema = z.discriminatedUnion('type', [
   ConnectionDeletedEventSchema,
   ConnectionRejectedEventSchema,
   ConnectionsUpdatedEventSchema,
+  ConnectionDragStartedEventSchema,
+  ConnectionDragTargetChangedEventSchema,
+  ConnectionDragEndedEventSchema,
+  ConnectionSelectedEventSchema,
   SnapshotExportedEventSchema,
   GpuErrorEventSchema,
   ErrorEventSchema,

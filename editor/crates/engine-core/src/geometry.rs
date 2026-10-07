@@ -163,3 +163,51 @@ impl Camera {
         }
     }
 }
+
+/// Screen-space radius, in CSS pixels, of a card's connection point.
+pub const CONNECTION_HANDLE_RADIUS_PX: f32 = 9.0;
+/// Screen-space distance, in CSS pixels, within which a press selects a connection.
+pub const CONNECTION_HIT_TOLERANCE_PX: f32 = 6.0;
+/// Segments used to draw and to hit-test a connection curve.
+pub const CONNECTION_CURVE_SEGMENTS: usize = 24;
+
+/// The cubic Bézier control points of a connection from `start` (the source
+/// card's connection point) to `end` (the target card's left edge). Rendering
+/// and hit testing share this curve, so a press lands on the edge that is drawn.
+pub fn connection_curve(start: Point, end: Point) -> [Point; 4] {
+    let dx = (end.x - start.x).abs().max(40.0) * 0.5;
+    [start, Point::new(start.x + dx, start.y), Point::new(end.x - dx, end.y), end]
+}
+
+/// The point of a cubic Bézier at `t` in [0, 1].
+pub fn cubic_point(curve: &[Point; 4], t: f32) -> Point {
+    let u = 1.0 - t;
+    let (c0, c1, c2, c3) = (u * u * u, 3.0 * u * u * t, 3.0 * u * t * t, t * t * t);
+    Point::new(
+        c0 * curve[0].x + c1 * curve[1].x + c2 * curve[2].x + c3 * curve[3].x,
+        c0 * curve[0].y + c1 * curve[1].y + c2 * curve[2].y + c3 * curve[3].y,
+    )
+}
+
+/// The derivative of a cubic Bézier at `t` in [0, 1]: the curve's direction there.
+pub fn cubic_tangent(curve: &[Point; 4], t: f32) -> Point {
+    let u = 1.0 - t;
+    let (d0, d1, d2, d3) = (-3.0 * u * u, 3.0 * u * u - 6.0 * u * t, 6.0 * u * t - 3.0 * t * t, 3.0 * t * t);
+    Point::new(
+        d0 * curve[0].x + d1 * curve[1].x + d2 * curve[2].x + d3 * curve[3].x,
+        d0 * curve[0].y + d1 * curve[1].y + d2 * curve[2].y + d3 * curve[3].y,
+    )
+}
+
+/// The distance from `p` to the segment `a`–`b`.
+pub fn distance_to_segment(p: Point, a: Point, b: Point) -> f32 {
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let length_sq = dx * dx + dy * dy;
+    let t = if length_sq > 0.0 {
+        (((p.x - a.x) * dx + (p.y - a.y) * dy) / length_sq).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let (cx, cy) = (a.x + t * dx, a.y + t * dy);
+    ((p.x - cx).powi(2) + (p.y - cy).powi(2)).sqrt()
+}

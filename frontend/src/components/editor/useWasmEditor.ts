@@ -62,6 +62,19 @@ interface UseWasmEditorOptions {
   onCardDeleted?: (id: string) => void
   /** A deleted card came back (an undo): the application brings its Skill's content back. */
   onCardRestored?: (id: string) => void
+  /**
+   * A connection drag was dropped on a card. The application applies its own rules and
+   * sends the same ConnectSkills command as the non-drag action; a returned message
+   * explains a refusal. Without it, the drop is sent to the engine directly.
+   */
+  onConnectionDrop?: (fromId: string, toId: string) => string | null | void
+}
+
+/** The connection being dragged, mirrored from engine events for highlighting only. */
+export interface ConnectionDrag {
+  fromId: string
+  validTargetIds: string[]
+  targetId: string | null
 }
 
 /**
@@ -84,6 +97,7 @@ export function useWasmEditor({
   layoutOnly = false,
   onCardDeleted,
   onCardRestored,
+  onConnectionDrop,
 }: UseWasmEditorOptions) {
   const editorRef = useRef<WasmEditor | null>(null)
   const activeDeviceRef = useRef<any>(null)
@@ -113,6 +127,10 @@ export function useWasmEditor({
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [connections, setConnections] = useState<PrerequisiteConnection[]>([])
   const [connectionRejection, setConnectionRejection] = useState<string | null>(null)
+  // Mirrors the engine's connection gesture and selected connection for display only.
+  const [connectionDrag, setConnectionDrag] = useState<ConnectionDrag | null>(null)
+  const connectionDragRef = useRef<ConnectionDrag | null>(null)
+  const [selectedConnection, setSelectedConnection] = useState<PrerequisiteConnection | null>(null)
   const [zoom, setZoom] = useState<number>(1.0)
   const [canUndo, setCanUndo] = useState<boolean>(false)
   const [canRedo, setCanRedo] = useState<boolean>(false)
@@ -231,6 +249,10 @@ export function useWasmEditor({
   onCardDeletedRef.current = onCardDeleted
   const onCardRestoredRef = useRef(onCardRestored)
   onCardRestoredRef.current = onCardRestored
+  const onConnectionDropRef = useRef(onConnectionDrop)
+  onConnectionDropRef.current = onConnectionDrop
+  // Set once dispatch exists: a drop is proposed through the same command as the non-drag action.
+  const connectDropRef = useRef<(fromId: string, toId: string) => void>(() => {})
 
   // Kept in sync on every render, like the callback refs above. The initial
   // document usually arrives after this component has already mounted, so a ref
@@ -246,6 +268,11 @@ export function useWasmEditor({
   const handleEvents = useCallback((events: EditorEvent[], appRevision: number | undefined) => {
     let nextLabels: LabelLayout[] | undefined
     let nextCamera: CameraState | undefined
+    let drop: { from: string; to: string } | undefined
+    const showDrag = (drag: ConnectionDrag | null) => {
+      connectionDragRef.current = drag
+      setConnectionDrag(drag)
+    }
     for (const event of events) {
       switch (event.type) {
         case 'SelectionChanged':
@@ -283,6 +310,19 @@ export function useWasmEditor({
         case 'ConnectionRejected':
           setConnectionRejection(event.reason)
           setEngineError(event.reason)
+          break
+        case 'ConnectionDragStarted':
+          showDrag({ fromId: event.from_id, validTargetIds: event.valid_target_ids, targetId: event.from_id })
+          break
+        case 'ConnectionDragTargetChanged':
+          if (connectionDragRef.current) showDrag({ ...connectionDragRef.current, targetId: event.target_id })
+          break
+        case 'ConnectionDragEnded':
+          showDrag(null)
+          if (event.dropped_on) drop = { from: event.from_id, to: event.dropped_on }
+          break
+        case 'ConnectionSelected':
+          setSelectedConnection(event.connection)
           break
         case 'CameraChanged':
           nextCamera = { offset_x: event.offset_x, offset_y: event.offset_y, zoom: event.zoom }
@@ -327,6 +367,15 @@ export function useWasmEditor({
         labelCamera: nextCamera ?? previous.labelCamera,
         benchmarkRevision,
       }))
+    }
+    // After this dispatch's events, so the proposal is its own validated command.
+    if (drop) {
+      const handler = onConnectionDropRef.current
+      if (!handler) connectDropRef.current(drop.from, drop.to)
+      else {
+        const refusal = handler(drop.from, drop.to)
+        if (refusal) setEngineError(refusal)
+      }
     }
   }, [retireDevice])
 
@@ -656,6 +705,22 @@ export function useWasmEditor({
     [canvasRef, dispatch, flushPointerMove]
   )
 
+  /** A cancelled pointer (lost capture, a system gesture) completes nothing. */
+  const handlePointerCancel = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (!isPointerDownRef.current) return
+      isPointerDownRef.current = false
+      flushPointerMove()
+      try {
+        e.currentTarget.releasePointerCapture(e.pointerId)
+      } catch {
+        // ignore
+      }
+      dispatch({ type: 'CancelInteraction' })
+    },
+    [dispatch, flushPointerMove]
+  )
+
   // Native non-passive wheel listener for cursor-anchored zoom & trackpad pan.
   // The handler only accumulates; one merged camera command per animation frame
   // keeps a fast wheel from queueing a full render per event.
@@ -702,6 +767,14 @@ export function useWasmEditor({
   // Keyboard shortcuts for Undo and Redo
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Escape abandons a connection drag wherever focus is.
+      if (e.key === 'Escape' && connectionDragRef.current) {
+        e.preventDefault()
+        e.stopPropagation()
+        isPointerDownRef.current = false
+        dispatch({ type: 'CancelInteraction' })
+        return
+      }
       if (readOnlyRef.current || ['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) {
         return
       }
@@ -725,8 +798,9 @@ export function useWasmEditor({
       }
     }
 
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    // Capture phase: a temporary panel's Escape must not also close it mid-drag.
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
   }, [dispatch])
 
   const undo = useCallback(() => dispatch({ type: 'Undo' }), [dispatch])
@@ -787,6 +861,13 @@ export function useWasmEditor({
         to_id: toId,
       })
     },
+    [dispatch]
+  )
+
+  connectDropRef.current = connectSkills
+
+  const selectConnection = useCallback(
+    (connection: PrerequisiteConnection | null) => dispatch({ type: 'SelectConnection', connection }),
     [dispatch]
   )
 
@@ -929,6 +1010,10 @@ export function useWasmEditor({
     benchmarkRevision,
     selectedIds,
     connections,
+    connectionDrag,
+    connectionDragRef,
+    selectedConnection,
+    selectConnection,
     connectionRejection,
     clearConnectionRejection: () => setConnectionRejection(null),
     zoom,
@@ -954,6 +1039,7 @@ export function useWasmEditor({
     handlePointerDown,
     handlePointerMove,
     handlePointerUp,
+    handlePointerCancel,
     undo,
     redo,
     zoomIn,

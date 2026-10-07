@@ -43,6 +43,17 @@ impl SkillCard {
     pub fn world_bounds(&self) -> Rect {
         Rect::new(self.position.x, self.position.y, self.size.width, self.size.height)
     }
+
+    /// Where outgoing connections start and a connection drag is grabbed: the
+    /// middle of the card's right edge.
+    pub fn connection_point(&self) -> Point {
+        Point::new(self.position.x + self.size.width, self.position.y + self.size.height * 0.5)
+    }
+
+    /// Where incoming connections end: the middle of the card's left edge.
+    pub fn incoming_point(&self) -> Point {
+        Point::new(self.position.x, self.position.y + self.size.height * 0.5)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]

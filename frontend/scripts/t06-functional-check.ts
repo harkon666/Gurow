@@ -213,7 +213,8 @@ async function main() {
     await connect(page, second, 'skill-rust-basics')
     await page.waitForSelector('#cycle-rejection-alert')
     const rejection = await page.$eval('#cycle-rejection-alert', el => el.textContent ?? '')
-    check(rejection.includes('creates a cycle'), `Unexpected rejection text: ${rejection}`)
+    // UX01 (#47) explains the cycle in user language, by Skill title.
+    check(/would create a cycle/.test(rejection) && rejection.includes('Rust Fundamentals'), `Unexpected rejection text: ${rejection}`)
     await settle(page)
     check(JSON.stringify(await graph(page)) === JSON.stringify(graphBefore), 'Rejected cycle changed the live graph')
     check(JSON.stringify(await savedEdges()) === JSON.stringify(graphBefore), 'Rejected cycle changed the saved graph')

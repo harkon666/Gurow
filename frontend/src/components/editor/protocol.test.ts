@@ -429,6 +429,27 @@ describe('Editor Protocol Schemas (Matt Pocock SDD)', () => {
       }
     })
 
+    it('validates connection gesture commands and events (UX02)', () => {
+      expect(EditorCommandSchema.parse({ type: 'CancelInteraction' })).toEqual({ type: 'CancelInteraction' })
+      expect(EditorCommandSchema.parse({ type: 'SelectConnection', connection: { from_id: 'a', to_id: 'b' } }))
+        .toEqual({ type: 'SelectConnection', connection: { from_id: 'a', to_id: 'b' } })
+      expect(EditorCommandSchema.parse({ type: 'SelectConnection', connection: null })).toEqual({ type: 'SelectConnection', connection: null })
+      expect(() => EditorCommandSchema.parse({ type: 'SelectConnection' })).toThrow()
+
+      const events = EditorEventsSchema.parse([
+        { type: 'ConnectionDragStarted', from_id: 'a', valid_target_ids: ['b', 'c'] },
+        { type: 'ConnectionDragTargetChanged', target_id: null },
+        { type: 'ConnectionDragEnded', from_id: 'a', dropped_on: 'c' },
+        { type: 'ConnectionDragEnded', from_id: 'a', dropped_on: null },
+        { type: 'ConnectionSelected', connection: { from_id: 'a', to_id: 'c' } },
+        { type: 'ConnectionSelected', connection: null },
+      ])
+      expect(events.map((event) => event.type)).toEqual([
+        'ConnectionDragStarted', 'ConnectionDragTargetChanged', 'ConnectionDragEnded', 'ConnectionDragEnded', 'ConnectionSelected', 'ConnectionSelected',
+      ])
+      expect(() => EditorEventSchema.parse({ type: 'ConnectionDragEnded', from_id: 'a' })).toThrow()
+    })
+
     it('validates LoadDocument with connections', () => {
       const loadWithConn = EditorCommandSchema.parse({
         type: 'LoadDocument',

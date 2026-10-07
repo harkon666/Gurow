@@ -1,5 +1,9 @@
 use crate::document::{CanvasDocument, ConnectionError, PrerequisiteConnection, SkillCard};
-use crate::geometry::{Camera, Point, Rect, Size, MAX_WORLD_COORD, MIN_WORLD_COORD};
+use crate::geometry::{
+    connection_curve, cubic_point, distance_to_segment, Camera, Point, Rect, Size,
+    CONNECTION_CURVE_SEGMENTS, CONNECTION_HANDLE_RADIUS_PX, CONNECTION_HIT_TOLERANCE_PX,
+    MAX_WORLD_COORD, MIN_WORLD_COORD,
+};
 use crate::protocol::{EditorCommand, EditorEvent, LabelLayout, SelectionChange};
 use std::collections::{HashMap, HashSet};
 
@@ -24,6 +28,28 @@ pub enum InteractionState {
     Panning {
         last_screen_pos: Point,
     },
+    /// A drag from a card's connection point. Nothing changes in the document
+    /// until the drop, which only proposes the connection (`ConnectionDragEnded`).
+    Connecting {
+        from_id: String,
+        pointer_world: Point,
+        /// The card under the pointer, if any.
+        target_id: Option<String>,
+        /// Cards the graph accepts as a target, computed once at the press.
+        valid_target_ids: Vec<String>,
+        /// Whether the pointer has left the source card: releasing on it before
+        /// then is a click on the connection point, not a self-connection attempt.
+        left_source: bool,
+    },
+}
+
+/// How the renderer draws the connection being dragged.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ConnectionPreview {
+    pub start: Point,
+    pub end: Point,
+    /// Whether the card under the pointer is a valid target; `None` over the empty canvas.
+    pub target_valid: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -69,6 +95,8 @@ pub struct EditorState {
     /// Positions only: cards can be dragged and the moves undone, but no card or
     /// connection can be added or removed.
     pub layout_only: bool,
+    /// The selected connection, offered for deletion; session-only, never saved.
+    pub selected_connection: Option<PrerequisiteConnection>,
 }
 
 impl Default for EditorState {
@@ -83,6 +111,7 @@ impl Default for EditorState {
             redo_stack: Vec::new(),
             read_only: false,
             layout_only: false,
+            selected_connection: None,
         }
     }
 }
@@ -107,6 +136,107 @@ impl EditorState {
             }
         }
         None
+    }
+
+    /// Whether cards and connections can be added or removed here.
+    pub fn edits_content(&self) -> bool {
+        !self.read_only && !self.layout_only
+    }
+
+    /// Returns the card whose visible connection point lies under a screen-space
+    /// point. Cards are tried front to back, and a card body under the point hides
+    /// every connection point behind it, so a covered point never takes a press on
+    /// the card in front. The point keeps its screen size at every zoom, but never
+    /// covers more than a quarter of a small card, so the card body stays draggable.
+    pub fn hit_connection_point(&self, screen_pos: Point) -> Option<String> {
+        let zoom = self.camera.zoom;
+        let world_pos = self.camera.screen_to_world(screen_pos);
+        for card in self.document.cards.iter().rev() {
+            let center = self.camera.world_to_screen(card.connection_point());
+            let radius = CONNECTION_HANDLE_RADIUS_PX
+                .min(card.size.width.min(card.size.height) * zoom * 0.25)
+                .max(2.0);
+            let distance = ((screen_pos.x - center.x).powi(2) + (screen_pos.y - center.y).powi(2)).sqrt();
+            if distance <= radius {
+                return Some(card.id.clone());
+            }
+            if card.world_bounds().contains(world_pos) {
+                return None;
+            }
+        }
+        None
+    }
+
+    /// Returns the connection drawn under a screen-space point, if any: the
+    /// closest one within the hit tolerance.
+    pub fn hit_connection(&self, screen_pos: Point) -> Option<PrerequisiteConnection> {
+        let mut best: Option<(f32, &PrerequisiteConnection)> = None;
+        for connection in &self.document.connections {
+            let (Some(from), Some(to)) = (
+                self.document.find_card(&connection.from_id),
+                self.document.find_card(&connection.to_id),
+            ) else {
+                continue;
+            };
+            let curve = connection_curve(from.connection_point(), to.incoming_point());
+            let mut previous = self.camera.world_to_screen(curve[0]);
+            for i in 1..=CONNECTION_CURVE_SEGMENTS {
+                let point = self
+                    .camera
+                    .world_to_screen(cubic_point(&curve, i as f32 / CONNECTION_CURVE_SEGMENTS as f32));
+                let distance = distance_to_segment(screen_pos, previous, point);
+                if distance <= CONNECTION_HIT_TOLERANCE_PX && best.map_or(true, |(d, _)| distance < d) {
+                    best = Some((distance, connection));
+                }
+                previous = point;
+            }
+        }
+        best.map(|(_, connection)| connection.clone())
+    }
+
+    /// Cards the graph accepts as targets of a connection from `from_id`, in
+    /// document order: no self-connection, duplicate or cycle.
+    pub fn connection_targets(&self, from_id: &str) -> Vec<String> {
+        self.document
+            .cards
+            .iter()
+            .filter(|card| self.document.can_connect(from_id, &card.id).is_ok())
+            .map(|card| card.id.clone())
+            .collect()
+    }
+
+    /// The connection being dragged, in world space, for the renderer. Over a
+    /// valid target it snaps to that card's incoming point.
+    pub fn connection_preview(&self) -> Option<ConnectionPreview> {
+        let InteractionState::Connecting {
+            from_id,
+            pointer_world,
+            target_id,
+            valid_target_ids,
+            left_source,
+        } = &self.interaction
+        else {
+            return None;
+        };
+        let start = self.document.find_card(from_id)?.connection_point();
+        let target = target_id
+            .as_ref()
+            .filter(|id| *left_source || *id != from_id)
+            .and_then(|id| self.document.find_card(id));
+        let (end, target_valid) = match target {
+            Some(card) if valid_target_ids.contains(&card.id) => (card.incoming_point(), Some(true)),
+            Some(_) => (*pointer_world, Some(false)),
+            None => (*pointer_world, None),
+        };
+        Some(ConnectionPreview { start, end, target_valid })
+    }
+
+    /// Selects one connection (or none) and emits the change.
+    fn set_connection_selection(&mut self, connection: Option<PrerequisiteConnection>, events: &mut Vec<EditorEvent>) {
+        if self.selected_connection != connection {
+            self.selected_connection = connection.clone();
+            events.push(EditorEvent::ConnectionSelected { connection });
+        }
     }
 
     /// The selected card when exactly one is selected: the Skill the application
@@ -218,6 +348,10 @@ impl EditorState {
             InteractionState::DraggingCards {
                 start_positions, ..
             } => self.place_cards(start_positions.iter().map(|(id, from)| (id.as_str(), *from)), events),
+            InteractionState::Connecting { from_id, .. } => {
+                events.push(EditorEvent::ConnectionDragEnded { from_id, dropped_on: None });
+                false
+            }
             InteractionState::SelectingBox { .. }
             | InteractionState::Panning { .. }
             | InteractionState::Idle => false,
@@ -412,6 +546,9 @@ impl EditorState {
                 self.document = document;
                 self.undo_stack.clear();
                 self.redo_stack.clear();
+                if let InteractionState::Connecting { from_id, .. } = &self.interaction {
+                    events.push(EditorEvent::ConnectionDragEnded { from_id: from_id.clone(), dropped_on: None });
+                }
                 self.interaction = InteractionState::Idle;
                 // Selected cards that the loaded document still holds stay selected.
                 let change = self.set_selection(self.selected_card_ids.clone());
@@ -447,8 +584,26 @@ impl EditorState {
                 if self.cancel_active_interaction(&mut events) {
                     labels_changed = true;
                 }
+                if id.is_some() {
+                    self.set_connection_selection(None, &mut events);
+                }
                 let change = self.select_card(id);
                 if Self::push_selection_change(change, &mut events) {
+                    labels_changed = true;
+                }
+            }
+            EditorCommand::SelectConnection { connection } => {
+                let connection = connection.filter(|c| self.document.has_connection(&c.from_id, &c.to_id));
+                if connection.is_some() {
+                    let change = self.select_card(None);
+                    if Self::push_selection_change(change, &mut events) {
+                        labels_changed = true;
+                    }
+                }
+                self.set_connection_selection(connection, &mut events);
+            }
+            EditorCommand::CancelInteraction => {
+                if self.cancel_active_interaction(&mut events) {
                     labels_changed = true;
                 }
             }
@@ -462,7 +617,28 @@ impl EditorState {
                 }
                 let screen_pt = Point::new(screen_x, screen_y);
                 let hit = self.hit_test(screen_pt);
-                if let Some(card_id) = hit {
+                let connection_from = if self.edits_content() && !shift_key {
+                    self.hit_connection_point(screen_pt)
+                } else {
+                    None
+                };
+                if let Some(from_id) = connection_from {
+                    // The connection point, not the card body: a connection drag, not a move.
+                    self.set_connection_selection(None, &mut events);
+                    let valid_target_ids = self.connection_targets(&from_id);
+                    events.push(EditorEvent::ConnectionDragStarted {
+                        from_id: from_id.clone(),
+                        valid_target_ids: valid_target_ids.clone(),
+                    });
+                    self.interaction = InteractionState::Connecting {
+                        target_id: Some(from_id.clone()),
+                        from_id,
+                        pointer_world: self.camera.screen_to_world(screen_pt),
+                        valid_target_ids,
+                        left_source: false,
+                    };
+                } else if let Some(card_id) = hit {
+                    self.set_connection_selection(None, &mut events);
                     // Pressing a card of the selection keeps it, so the whole selection drags.
                     let keep_selection = !self.read_only && self.selected_card_ids.contains(&card_id);
                     if !keep_selection {
@@ -496,6 +672,7 @@ impl EditorState {
                     }
                 } else if shift_key && !self.read_only {
                     // Shift on the empty canvas draws a selection box instead of panning.
+                    self.set_connection_selection(None, &mut events);
                     let origin_world = self.camera.screen_to_world(screen_pt);
                     self.interaction = InteractionState::SelectingBox {
                         origin_world,
@@ -506,10 +683,13 @@ impl EditorState {
                         labels_changed = true;
                     }
                 } else {
+                    // A press on a connection selects it; dragging from there still pans.
+                    let connection = self.hit_connection(screen_pt);
                     let change = self.select_card(None);
                     if Self::push_selection_change(change, &mut events) {
                         labels_changed = true;
                     }
+                    self.set_connection_selection(connection, &mut events);
                     self.interaction = InteractionState::Panning {
                         last_screen_pos: screen_pt,
                     };
@@ -566,6 +746,27 @@ impl EditorState {
                             self.interaction = InteractionState::Panning { last_screen_pos };
                         }
                     }
+                    InteractionState::Connecting {
+                        from_id,
+                        target_id,
+                        valid_target_ids,
+                        left_source,
+                        ..
+                    } => {
+                        let pointer_world = self.camera.screen_to_world(screen_pt);
+                        let hit = self.hit_test(screen_pt);
+                        let left_source = left_source || hit.as_deref() != Some(from_id.as_str());
+                        if hit != target_id {
+                            events.push(EditorEvent::ConnectionDragTargetChanged { target_id: hit.clone() });
+                        }
+                        self.interaction = InteractionState::Connecting {
+                            from_id,
+                            pointer_world,
+                            target_id: hit,
+                            valid_target_ids,
+                            left_source,
+                        };
+                    }
                     InteractionState::Idle => {}
                 }
             }
@@ -604,6 +805,14 @@ impl EditorState {
                         if Self::push_selection_change(change, &mut events) {
                             labels_changed = true;
                         }
+                    }
+                    InteractionState::Connecting { from_id, left_source, .. } => {
+                        // Releasing on the source before leaving it is a click on its
+                        // connection point; after leaving, it is a self-connection attempt.
+                        let dropped_on = self
+                            .hit_test(screen_pt)
+                            .filter(|id| left_source || *id != from_id);
+                        events.push(EditorEvent::ConnectionDragEnded { from_id, dropped_on });
                     }
                     InteractionState::Panning { .. } | InteractionState::Idle => {}
                 }
@@ -787,7 +996,18 @@ impl EditorState {
                 self.read_only = read_only;
             }
             EditorCommand::SetLayoutOnly { layout_only } => {
+                // A connection drag in progress would otherwise propose a connection after the switch.
+                if layout_only && matches!(self.interaction, InteractionState::Connecting { .. }) {
+                    self.cancel_active_interaction(&mut events);
+                }
                 self.layout_only = layout_only;
+            }
+        }
+
+        // A deleted, undone or replaced connection cannot stay selected.
+        if let Some(selected) = &self.selected_connection {
+            if !self.document.has_connection(&selected.from_id, &selected.to_id) {
+                self.set_connection_selection(None, &mut events);
             }
         }
 

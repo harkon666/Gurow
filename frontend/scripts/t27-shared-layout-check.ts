@@ -379,7 +379,7 @@ async function main() {
     const tabBBefore = await offset(tabB, la.vectors, la.matrices)
     await drag(tabB, la.matrices, 100, -50)
     await tabB.waitForSelector('#layout-save-status[data-state="conflict"]')
-    check((await text(tabB, '#layout-save-conflict')).includes('Layout revision 4 was saved elsewhere') && (await text(tabB, '#layout-save-conflict')).includes('kept but not saved'), `conflict text: ${await text(tabB, '#layout-save-conflict')}`)
+    check(/layout was changed elsewhere/.test(await text(tabB, '#layout-save-conflict')) && !/revision\s*\d/i.test(await text(tabB, '#layout-save-conflict')) && (await text(tabB, '#layout-save-conflict')).includes('kept but not saved'), `conflict text: ${await text(tabB, '#layout-save-conflict')}`)
     const tabBKept = await offset(tabB, la.vectors, la.matrices)
     await tabB.screenshot({ path: path.resolve(FRONTEND, '../.harness/t27-layout-conflict.png') })
     check(near(tabBKept.x - tabBBefore.x, 100) && near(tabBKept.y - tabBBefore.y, -50), 'tab B lost its local arrangement')

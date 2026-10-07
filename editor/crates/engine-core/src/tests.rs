@@ -1523,3 +1523,285 @@ fn test_deletion_follows_canvas_permissions_and_reports_unknown_cards() {
         assert_eq!(serde_json::from_str::<EditorEvent>(&json).unwrap(), event);
     }
 }
+
+// UX02: connection-point drags, connection selection and their invariants,
+// exercised only through public commands and events.
+
+fn three_cards() -> EditorState {
+    let mut state = EditorState::new();
+    for (id, x, y) in [("a", 0.0, 0.0), ("b", 0.0, 200.0), ("c", 400.0, 100.0)] {
+        state.apply_command(EditorCommand::CreateCard {
+            id: id.into(),
+            title: id.to_uppercase(),
+            position: Point::new(x, y),
+            size: None,
+        });
+    }
+    state
+}
+
+fn connect_press(state: &mut EditorState, p: Point) -> Vec<EditorEvent> {
+    state.apply_command(EditorCommand::PointerDown { screen_x: p.x, screen_y: p.y, shift_key: false })
+}
+fn drag_to(state: &mut EditorState, p: Point) -> Vec<EditorEvent> {
+    state.apply_command(EditorCommand::PointerMove { screen_x: p.x, screen_y: p.y })
+}
+fn connect_release(state: &mut EditorState, p: Point) -> Vec<EditorEvent> {
+    state.apply_command(EditorCommand::PointerUp { screen_x: p.x, screen_y: p.y })
+}
+fn connection_point_on_screen(state: &EditorState, id: &str) -> Point {
+    state.camera.world_to_screen(state.document.find_card(id).unwrap().connection_point())
+}
+fn centre_on_screen(state: &EditorState, id: &str) -> Point {
+    let b = state.document.find_card(id).unwrap().world_bounds();
+    state.camera.world_to_screen(Point::new(b.x + b.width / 2.0, b.y + b.height / 2.0))
+}
+fn dropped(events: &[EditorEvent]) -> Option<Option<String>> {
+    events.iter().find_map(|e| match e {
+        EditorEvent::ConnectionDragEnded { dropped_on, .. } => Some(dropped_on.clone()),
+        _ => None,
+    })
+}
+
+#[test]
+fn test_card_body_moves_while_connection_point_starts_a_connection() {
+    let mut state = three_cards();
+    // Body drag: the card moves and nothing connects.
+    connect_press(&mut state, Point::new(60.0, 40.0));
+    drag_to(&mut state, Point::new(80.0, 60.0));
+    connect_release(&mut state, Point::new(80.0, 60.0));
+    assert_eq!(state.document.find_card("a").unwrap().position, Point::new(20.0, 20.0));
+    assert!(state.document.connections.is_empty());
+
+    // Connection-point drag: the card stays put and the drop proposes A → C.
+    let start = connection_point_on_screen(&state, "a");
+    let started = connect_press(&mut state, start);
+    assert!(started.iter().any(|e| matches!(e,
+        EditorEvent::ConnectionDragStarted { from_id, valid_target_ids }
+            if from_id == "a" && valid_target_ids == &vec!["b".to_string(), "c".to_string()])));
+    let target = centre_on_screen(&state, "c");
+    let moved = drag_to(&mut state, target);
+    assert!(moved.iter().any(|e| matches!(e, EditorEvent::ConnectionDragTargetChanged { target_id: Some(t) } if t == "c")));
+    let preview = state.connection_preview().unwrap();
+    assert_eq!(preview.target_valid, Some(true));
+    assert_eq!(preview.end, state.document.find_card("c").unwrap().incoming_point());
+    let ended = connect_release(&mut state, target);
+    assert_eq!(dropped(&ended), Some(Some("c".to_string())));
+    assert_eq!(state.document.find_card("a").unwrap().position, Point::new(20.0, 20.0), "card moved");
+    // The drop proposes; the graph changes only through the validated ConnectSkills command.
+    assert!(state.document.connections.is_empty());
+    assert!(!ended.iter().any(|e| matches!(e, EditorEvent::HistoryChanged { .. })));
+    assert_eq!(state.interaction, InteractionState::Idle);
+    assert!(state.connection_preview().is_none());
+}
+
+#[test]
+fn test_two_drags_into_one_skill_make_two_connections_each_one_undo_step() {
+    let mut state = three_cards();
+    for from in ["a", "b"] {
+        let start = connection_point_on_screen(&state, from);
+        connect_press(&mut state, start);
+        let target = centre_on_screen(&state, "c");
+        drag_to(&mut state, target);
+        let ended = connect_release(&mut state, target);
+        let to = dropped(&ended).flatten().unwrap();
+        state.apply_command(EditorCommand::ConnectSkills { from_id: from.into(), to_id: to });
+    }
+    let edges: Vec<_> = state.document.connections.iter().map(|c| (c.from_id.as_str(), c.to_id.as_str())).collect();
+    assert_eq!(edges, vec![("a", "c"), ("b", "c")]);
+    assert_eq!(state.undo_stack.len(), 2);
+    state.apply_command(EditorCommand::Undo);
+    assert_eq!(state.document.connections.len(), 1);
+    state.apply_command(EditorCommand::Redo);
+    assert_eq!(state.document.connections.len(), 2);
+}
+
+#[test]
+fn test_connection_point_hit_testing_follows_pan_and_zoom() {
+    let mut state = three_cards();
+    state.apply_command(EditorCommand::SetCamera { offset_x: 137.0, offset_y: -52.0, zoom: 1.7 });
+    let start = connection_point_on_screen(&state, "b");
+    // The point is found where it is drawn, not where it would be at the initial camera.
+    assert_eq!(state.hit_connection_point(start).as_deref(), Some("b"));
+    assert_eq!(state.hit_connection_point(Point::new(180.0, 240.0)), None);
+    connect_press(&mut state, start);
+    let target = centre_on_screen(&state, "c");
+    drag_to(&mut state, target);
+    assert_eq!(dropped(&connect_release(&mut state, target)), Some(Some("c".to_string())));
+
+    // Zoomed far out, the point shrinks so the small card body still drags.
+    state.apply_command(EditorCommand::SetCamera { offset_x: 0.0, offset_y: 0.0, zoom: 0.1 });
+    let body = centre_on_screen(&state, "a");
+    assert_eq!(state.hit_connection_point(body), None);
+}
+
+#[test]
+fn test_cancelled_and_empty_drops_leave_the_graph_unchanged() {
+    let mut state = three_cards();
+    state.apply_command(EditorCommand::ConnectSkills { from_id: "a".into(), to_id: "c".into() });
+    let before = state.document.clone();
+
+    // A click on the connection point is neither a move nor a self-connection.
+    let start = connection_point_on_screen(&state, "a");
+    connect_press(&mut state, start);
+    assert_eq!(dropped(&connect_release(&mut state, start)), Some(None));
+
+    // Released on the empty canvas.
+    connect_press(&mut state, start);
+    drag_to(&mut state, Point::new(300.0, 500.0));
+    assert_eq!(state.connection_preview().unwrap().target_valid, None);
+    assert_eq!(dropped(&connect_release(&mut state, Point::new(300.0, 500.0))), Some(None));
+
+    // Escape mid-drag.
+    connect_press(&mut state, start);
+    { let p = centre_on_screen(&state, "b"); drag_to(&mut state, p) };
+    let cancelled = state.apply_command(EditorCommand::CancelInteraction);
+    assert_eq!(dropped(&cancelled), Some(None));
+    assert_eq!(state.interaction, InteractionState::Idle);
+    assert_eq!({ let p = centre_on_screen(&state, "b"); connect_release(&mut state, p) }, vec![]);
+
+    assert_eq!(state.document, before);
+    assert_eq!(state.undo_stack.len(), 1);
+}
+
+#[test]
+fn test_invalid_targets_are_marked_and_rejected_by_connect_skills() {
+    let mut state = three_cards();
+    state.apply_command(EditorCommand::ConnectSkills { from_id: "a".into(), to_id: "c".into() });
+    // From C, A would close a cycle; from A, C is a duplicate: neither is a valid target.
+    let started = { let p = connection_point_on_screen(&state, "c"); connect_press(&mut state, p) };
+    assert!(started.iter().any(|e| matches!(e,
+        EditorEvent::ConnectionDragStarted { valid_target_ids, .. } if valid_target_ids == &vec!["b".to_string()])));
+    let target = centre_on_screen(&state, "a");
+    drag_to(&mut state, target);
+    assert_eq!(state.connection_preview().unwrap().target_valid, Some(false));
+    let to = dropped(&connect_release(&mut state, target)).flatten().unwrap();
+    let rejected = state.apply_command(EditorCommand::ConnectSkills { from_id: "c".into(), to_id: to });
+    assert!(rejected.iter().any(|e| matches!(e, EditorEvent::ConnectionRejected { .. })));
+
+    // Leaving the source and returning is a self-connection attempt, which is rejected.
+    let start = connection_point_on_screen(&state, "b");
+    connect_press(&mut state, start);
+    drag_to(&mut state, Point::new(300.0, 500.0));
+    let own = centre_on_screen(&state, "b");
+    drag_to(&mut state, own);
+    assert_eq!(state.connection_preview().unwrap().target_valid, Some(false));
+    let to = dropped(&connect_release(&mut state, own)).flatten().unwrap();
+    assert_eq!(to, "b");
+    let rejected = state.apply_command(EditorCommand::ConnectSkills { from_id: "b".into(), to_id: to });
+    assert!(rejected.iter().any(|e| matches!(e, EditorEvent::ConnectionRejected { reason, .. } if reason.contains("itself"))));
+    assert_eq!(state.document.connections.len(), 1);
+    assert_eq!(state.undo_stack.len(), 1);
+}
+
+#[test]
+fn test_pressing_a_connection_selects_it_for_deletion_and_undo() {
+    let mut state = three_cards();
+    state.apply_command(EditorCommand::ConnectSkills { from_id: "a".into(), to_id: "c".into() });
+    state.apply_command(EditorCommand::ConnectSkills { from_id: "b".into(), to_id: "c".into() });
+    state.apply_command(EditorCommand::SetCamera { offset_x: 40.0, offset_y: 30.0, zoom: 1.5 });
+    let curve = crate::connection_curve(
+        state.document.find_card("b").unwrap().connection_point(),
+        state.document.find_card("c").unwrap().incoming_point(),
+    );
+    let on_edge = state.camera.world_to_screen(crate::cubic_point(&curve, 0.5));
+    let events = connect_press(&mut state, on_edge);
+    let wanted = crate::PrerequisiteConnection::new("b", "c");
+    assert!(events.iter().any(|e| matches!(e, EditorEvent::ConnectionSelected { connection: Some(c) } if *c == wanted)));
+    connect_release(&mut state, on_edge);
+    assert!(state.selected_card_ids.is_empty());
+
+    // Deleting the selected connection clears the selection; undo brings the edge back.
+    let deleted = state.apply_command(EditorCommand::DisconnectSkills { from_id: "b".into(), to_id: "c".into() });
+    assert!(deleted.iter().any(|e| matches!(e, EditorEvent::ConnectionSelected { connection: None })));
+    assert_eq!(state.selected_connection, None);
+    state.apply_command(EditorCommand::Undo);
+    assert!(state.document.has_connection("b", "c"));
+
+    // Selecting by command, then a card, then the empty canvas.
+    state.apply_command(EditorCommand::SelectConnection { connection: Some(wanted.clone()) });
+    assert_eq!(state.selected_connection, Some(wanted.clone()));
+    state.apply_command(EditorCommand::SelectCard { id: Some("a".into()) });
+    assert_eq!(state.selected_connection, None);
+    state.apply_command(EditorCommand::SelectConnection { connection: Some(crate::PrerequisiteConnection::new("c", "a")) });
+    assert_eq!(state.selected_connection, None, "a missing connection cannot be selected");
+    state.apply_command(EditorCommand::SelectConnection { connection: Some(wanted) });
+    connect_press(&mut state, Point::new(5.0, 900.0));
+    assert_eq!(state.selected_connection, None);
+}
+
+#[test]
+fn test_read_only_and_layout_only_canvases_never_start_a_connection() {
+    for layout in [false, true] {
+        let mut state = three_cards();
+        if layout {
+            state.apply_command(EditorCommand::SetLayoutOnly { layout_only: true });
+        } else {
+            state.apply_command(EditorCommand::SetReadOnly { read_only: true });
+        }
+        let start = connection_point_on_screen(&state, "a");
+        let events = connect_press(&mut state, start);
+        assert!(!events.iter().any(|e| matches!(e, EditorEvent::ConnectionDragStarted { .. })));
+        { let p = centre_on_screen(&state, "c"); drag_to(&mut state, p) };
+        let ended = { let p = centre_on_screen(&state, "c"); connect_release(&mut state, p) };
+        assert_eq!(dropped(&ended), None);
+        assert!(state.document.connections.is_empty());
+        let moved = state.document.find_card("a").unwrap().position != Point::new(0.0, 0.0);
+        // A Coach arranging a published layout still moves the card; a learner only pans.
+        assert_eq!(moved, layout);
+    }
+
+    // Entering layout-only mid-drag cancels the connection drag.
+    let mut state = three_cards();
+    { let p = connection_point_on_screen(&state, "a"); connect_press(&mut state, p) };
+    let switched = state.apply_command(EditorCommand::SetLayoutOnly { layout_only: true });
+    assert_eq!(dropped(&switched), Some(None));
+}
+
+#[test]
+fn test_connection_gesture_protocol_roundtrip() {
+    let commands = vec![
+        EditorCommand::CancelInteraction,
+        EditorCommand::SelectConnection { connection: Some(crate::PrerequisiteConnection::new("a", "b")) },
+        EditorCommand::SelectConnection { connection: None },
+    ];
+    for command in commands {
+        let json = serde_json::to_string(&command).unwrap();
+        assert_eq!(serde_json::from_str::<EditorCommand>(&json).unwrap(), command);
+    }
+    let events = vec![
+        EditorEvent::ConnectionDragStarted { from_id: "a".into(), valid_target_ids: vec!["b".into()] },
+        EditorEvent::ConnectionDragTargetChanged { target_id: None },
+        EditorEvent::ConnectionDragEnded { from_id: "a".into(), dropped_on: Some("b".into()) },
+        EditorEvent::ConnectionSelected { connection: None },
+    ];
+    let json = serde_json::to_string(&events).unwrap();
+    assert!(json.contains(r#""type":"ConnectionDragEnded""#));
+    assert_eq!(serde_json::from_str::<Vec<EditorEvent>>(&json).unwrap(), events);
+}
+
+#[test]
+fn test_covered_connection_point_never_takes_the_front_card_body() {
+    // Back's connection point (180, 40) lies under Front's body: pressing there moves Front.
+    let mut state = EditorState::new();
+    for (id, x, y) in [("back", 0.0, 0.0), ("front", 100.0, 0.0), ("target", 0.0, 300.0)] {
+        state.apply_command(EditorCommand::CreateCard { id: id.into(), title: id.into(), position: Point::new(x, y), size: None });
+    }
+    assert_eq!(state.hit_connection_point(Point::new(180.0, 40.0)), None);
+    let events = connect_press(&mut state, Point::new(180.0, 40.0));
+    assert!(!events.iter().any(|e| matches!(e, EditorEvent::ConnectionDragStarted { .. })));
+    drag_to(&mut state, Point::new(200.0, 60.0));
+    connect_release(&mut state, Point::new(200.0, 60.0));
+    assert_eq!(state.document.find_card("front").unwrap().position, Point::new(120.0, 20.0));
+    assert_eq!(state.document.find_card("back").unwrap().position, Point::new(0.0, 0.0));
+    assert!(state.document.connections.is_empty());
+
+    // Front's own point sticks out past its edge and stays usable; so does an uncovered point.
+    assert_eq!(state.hit_connection_point(Point::new(120.0 + 180.0 + 4.0, 60.0)).as_deref(), Some("front"));
+    let target = state.camera.world_to_screen(state.document.find_card("target").unwrap().connection_point());
+    assert_eq!(state.hit_connection_point(target).as_deref(), Some("target"));
+
+    // The inner half of a card's own point, over its own body, is still that card's point.
+    let front_point = state.document.find_card("front").unwrap().connection_point();
+    assert_eq!(state.hit_connection_point(Point::new(front_point.x - 4.0, front_point.y)).as_deref(), Some("front"));
+}

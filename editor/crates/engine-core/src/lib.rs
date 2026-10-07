@@ -8,9 +8,9 @@ mod tests;
 
 pub use document::{CanvasDocument, PrerequisiteConnection, SkillCard};
 pub use geometry::{
-    clamp_world_coord, clamp_world_point, Camera, Point, Rect, Size, MAX_WORLD_COORD, MAX_ZOOM,
-    MIN_WORLD_COORD, MIN_ZOOM,
+    clamp_world_coord, clamp_world_point, connection_curve, cubic_point, cubic_tangent, Camera, Point, Rect, Size,
+    CONNECTION_CURVE_SEGMENTS, MAX_WORLD_COORD, MAX_ZOOM, MIN_WORLD_COORD, MIN_ZOOM,
 };
 pub use protocol::{EditorCommand, EditorEvent, LabelLayout, SelectionChange};
-pub use state::{CardMove, EditorState, HistoryAction, InteractionState};
+pub use state::{CardMove, ConnectionPreview, EditorState, HistoryAction, InteractionState};
 

@@ -44,7 +44,9 @@ pub enum EditorCommand {
         id: Option<String>,
     },
     /// With `shift_key` on the empty canvas, the press starts a selection box
-    /// instead of panning.
+    /// instead of panning. On an editable canvas, a press on a card's connection
+    /// point starts a connection drag instead of moving the card; a press near a
+    /// connection on the empty canvas selects that connection.
     PointerDown {
         screen_x: f32,
         screen_y: f32,
@@ -67,6 +69,14 @@ pub enum EditorCommand {
         screen_x: f32,
         screen_y: f32,
         factor: f32,
+    },
+    /// Ends the gesture in progress without completing it: a card drag returns its
+    /// cards, a connection drag adds nothing.
+    CancelInteraction,
+    /// Selects one connection (or none) for deletion; selecting one clears the
+    /// card selection.
+    SelectConnection {
+        connection: Option<PrerequisiteConnection>,
     },
     Undo,
     Redo,
@@ -176,6 +186,29 @@ pub enum EditorEvent {
     },
     ConnectionsUpdated {
         connections: Vec<PrerequisiteConnection>,
+    },
+    /// A drag from `from_id`'s connection point began. `valid_target_ids` are the
+    /// cards the graph accepts as its Prerequisite dependents (no self-connection,
+    /// duplicate or cycle); the application may refuse more by its own rules.
+    ConnectionDragStarted {
+        from_id: String,
+        valid_target_ids: Vec<String>,
+    },
+    /// The card under the pointer during a connection drag changed.
+    ConnectionDragTargetChanged {
+        target_id: Option<String>,
+    },
+    /// The connection drag ended. `dropped_on` names the card it was released on;
+    /// it is `None` when cancelled or released on the empty canvas. A drop only
+    /// proposes `from_id` → `dropped_on`: the application validates it and sends
+    /// `ConnectSkills`, the same command as the non-drag action.
+    ConnectionDragEnded {
+        from_id: String,
+        dropped_on: Option<String>,
+    },
+    /// The selected connection changed (`None` when no connection is selected).
+    ConnectionSelected {
+        connection: Option<PrerequisiteConnection>,
     },
     SnapshotExported {
         document: CanvasDocument,

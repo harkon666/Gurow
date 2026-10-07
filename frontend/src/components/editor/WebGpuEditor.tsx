@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useEffect } from 'react'
+import React, { useRef, useMemo, useEffect, useState } from 'react'
 import { INITIAL_LEARNING_PATH_FIXTURE } from '../../fixtures/learningPath'
 import type { SelectedSkillInfo, GpuStatus } from './types'
 import type {
@@ -12,7 +12,8 @@ import { useWasmEditor } from './useWasmEditor'
 import { EditorToolbar } from './EditorToolbar'
 import { WebGpuEnableHint } from './WebGpuEnableHint'
 import { connectionRejectionMessage, isConnectionRejection } from './connectionRejection'
-import { SkillCardOverlay, type LabelStatus } from './SkillCardOverlay'
+import { SkillCardOverlay, connectionPointRadius, type ConnectionOverlay, type LabelStatus } from './SkillCardOverlay'
+import { cssToLogicalPoint } from './coords'
 
 export interface WebGpuEditorActions {
   createCard: (id: string, title: string, position: Point, size?: Size) => void
@@ -64,6 +65,14 @@ interface WebGpuEditorProps {
   onCardDeleted?: (id: string) => void
   /** A deleted card came back (an undo). */
   onCardRestored?: (id: string) => void
+  /**
+   * A connection dragged from one card's connection point was dropped on another.
+   * Apply the same rules as the non-drag action and send the connection; return a
+   * message to explain a refusal. Without it, the engine's validation alone decides.
+   */
+  onConnectionDrop?: (fromId: string, toId: string) => string | null | void
+  /** The application's own reason to refuse a connection, so its targets are not highlighted as valid. */
+  connectionProblem?: (fromId: string, toId: string) => string | null
 }
 
 export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
@@ -84,6 +93,8 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
   layoutOnly = false,
   onCardDeleted,
   onCardRestored,
+  onConnectionDrop,
+  connectionProblem,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -109,6 +120,10 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
     benchmarkRevision,
     selectedIds,
     connections,
+    connectionDrag,
+    connectionDragRef,
+    selectedConnection,
+    selectConnection,
     connectionRejection,
     zoom,
     canUndo,
@@ -131,6 +146,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
     handlePointerDown,
     handlePointerMove,
     handlePointerUp,
+    handlePointerCancel,
     undo,
     redo,
     zoomIn,
@@ -152,7 +168,43 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
     layoutOnly,
     onCardDeleted,
     onCardRestored,
+    onConnectionDrop,
   })
+
+  // Connections are edited only where Skills are: not in a learner's or a published layout's view.
+  const editsConnections = !readOnly && !layoutOnly && gpuStatus === 'ready'
+  const [hover, setHover] = useState<{ id: string | null; onPoint: boolean }>({ id: null, onPoint: false })
+  /** Which card, and whether its connection point, lies under the pointer; mirrors the engine's hit test for display. */
+  const hoverAt = (clientX: number, clientY: number) => {
+    const canvas = canvasRef.current
+    if (!canvas) return { id: null, onPoint: false }
+    const screen = cssToLogicalPoint(clientX, clientY, canvas.getBoundingClientRect())
+    const { offset_x, offset_y, zoom: z } = labelCamera
+    const wx = (screen.x - offset_x) / z, wy = (screen.y - offset_y) / z
+    // Front to back, as the engine resolves a press: a card body hides the points behind it.
+    for (let i = labels.length - 1; i >= 0; i--) {
+      const { x, y, width, height } = labels[i].world_rect
+      const px = (x + width) * z + offset_x, py = (y + height / 2) * z + offset_y
+      if (Math.hypot(screen.x - px, screen.y - py) <= connectionPointRadius(width, height, z)) return { id: labels[i].card_id, onPoint: true }
+      if (wx >= x && wx <= x + width && wy >= y && wy <= y + height) return { id: labels[i].card_id, onPoint: false }
+    }
+    return { id: null, onPoint: false }
+  }
+  const drag = useMemo(() => {
+    if (!connectionDrag) return null
+    const valid = connectionDrag.validTargetIds.filter((id) => !connectionProblem?.(connectionDrag.fromId, id))
+    return { fromId: connectionDrag.fromId, validTargetIds: new Set(valid), targetId: connectionDrag.targetId }
+    // connectionProblem reads the application's rules at the press; the drag is short.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [connectionDrag])
+  const connecting = useMemo<ConnectionOverlay | undefined>(
+    () => (editsConnections ? { hoveredId: hover.id, drag } : undefined),
+    [editsConnections, hover.id, drag]
+  )
+  const titleOf = (id: string) => labels.find((label) => label.card_id === id)?.title ?? 'a Skill'
+  const deleteSelectedConnection = () => {
+    if (selectedConnection) disconnectSkills(selectedConnection.from_id, selectedConnection.to_id)
+  }
 
   useEffect(() => {
     onConnectionsChange?.(connections)
@@ -226,7 +278,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
 
       {/* Engine Error Toast Banner */}
       {engineError && (
-        <div className="absolute top-14 left-4 right-4 z-40 bg-red-950/90 border border-red-800/80 text-red-200 px-4 py-2 rounded-xl text-xs flex items-center justify-between shadow-lg">
+        <div id="editor-error-toast" role="alert" className="absolute top-14 left-4 right-4 z-40 bg-red-950/90 border border-red-800/80 text-red-200 px-4 py-2 rounded-xl text-xs flex items-center justify-between shadow-lg">
           <span>{engineError === connectionRejection || isConnectionRejection(engineError)
             ? connectionRejectionMessage(engineError, labels.map((label) => ({ id: label.card_id, title: label.title })))
             : engineError}</span>
@@ -336,14 +388,32 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
           ref={canvasRef}
           tabIndex={0}
           aria-label="Learning Path canvas. Use Skill list to browse with the keyboard."
+          data-hover-connection-point={hover.onPoint ? 'true' : 'false'}
           onPointerDown={(event) => {
             gesture.current = { x: event.clientX, y: event.clientY, moved: false, open: event.button === 0 && !event.shiftKey }
             handlePointerDown(event)
+            // A press on a connection point starts a connection, never opens the Skill.
+            if (connectionDragRef.current) gesture.current.open = false
           }}
           onPointerMove={(event) => {
             const current = gesture.current
             if (current && Math.hypot(event.clientX - current.x, event.clientY - current.y) > 3) current.moved = true
+            if (!current && editsConnections) {
+              const next = hoverAt(event.clientX, event.clientY)
+              if (next.id !== hover.id || next.onPoint !== hover.onPoint) setHover(next)
+            }
             handlePointerMove(event)
+          }}
+          onPointerLeave={() => { if (!gesture.current && hover.id) setHover({ id: null, onPoint: false }) }}
+          onKeyDown={(event) => {
+            if (!selectedConnection) return
+            if (event.key === 'Escape') {
+              event.preventDefault()
+              selectConnection(null)
+            } else if (editsConnections && (event.key === 'Delete' || event.key === 'Backspace')) {
+              event.preventDefault()
+              deleteSelectedConnection()
+            }
           }}
           onPointerUp={(event) => {
             const current = gesture.current
@@ -351,8 +421,8 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
             gesture.current = null
             if (current?.open && !current.moved) onSelectSkill(latestSelection.current)
           }}
-          onPointerCancel={(event) => { handlePointerUp(event); gesture.current = null }}
-          className="absolute inset-0 w-full h-full block cursor-pointer touch-none"
+          onPointerCancel={(event) => { handlePointerCancel(event); gesture.current = null }}
+          className={`absolute inset-0 w-full h-full block touch-none ${connectionDrag || hover.onPoint ? 'cursor-crosshair' : 'cursor-pointer'}`}
         />
 
         {/* A multiselection opens no single Skill; say what a drag will move. */}
@@ -366,8 +436,49 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
           </div>
         )}
 
+        {connectionDrag && (
+          <div
+            id="connection-drag-hint"
+            role="status"
+            className="absolute top-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none text-[11px] text-emerald-100 bg-emerald-950/85 border border-emerald-800/70 px-2.5 py-1 rounded-lg shadow"
+          >
+            Drop on a highlighted Skill to make “{titleOf(connectionDrag.fromId)}” its prerequisite · Esc cancels
+          </div>
+        )}
+
+        {/* The selected connection, with its deletion where connections are editable. */}
+        {selectedConnection && (
+          <div
+            id="selected-connection-bar"
+            data-from-id={selectedConnection.from_id}
+            data-to-id={selectedConnection.to_id}
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 text-[11px] text-amber-100 bg-slate-900/95 border border-amber-700/70 px-3 py-1.5 rounded-lg shadow"
+          >
+            <span id="selected-connection-label">
+              Prerequisite: “{titleOf(selectedConnection.from_id)}” → “{titleOf(selectedConnection.to_id)}”
+            </span>
+            {editsConnections && (
+              <button
+                id="btn-delete-connection"
+                onClick={deleteSelectedConnection}
+                className="rounded border border-red-700/70 bg-red-950/60 px-2 py-0.5 text-red-200 hover:bg-red-900/70"
+              >
+                Delete connection
+              </button>
+            )}
+            <button
+              id="btn-deselect-connection"
+              aria-label="Deselect connection"
+              onClick={() => selectConnection(null)}
+              className="text-slate-400 hover:text-slate-200 px-1"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         {/* HTML Labels Overlay: positioned from engine output */}
-        <SkillCardOverlay labels={labels} camera={labelCamera} benchmarkRevision={benchmarkRevision} status={labelStatus} />
+        <SkillCardOverlay labels={labels} camera={labelCamera} benchmarkRevision={benchmarkRevision} status={labelStatus} connecting={connecting} />
       </div>
     </div>
   )

@@ -1,5 +1,5 @@
 use bytemuck::{Pod, Zeroable};
-use engine_core::EditorState;
+use engine_core::{connection_curve, cubic_point, cubic_tangent, EditorState, Point, CONNECTION_CURVE_SEGMENTS};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
@@ -319,21 +319,30 @@ impl WgpuRenderer {
 
         let mut connection_vertices = Vec::new();
         let connection_color = [0.23, 0.51, 0.96, 0.85];
+        let selected_color = [0.98, 0.75, 0.14, 1.0];
         for conn in &state.document.connections {
             if let (Some(from_card), Some(to_card)) = (
                 state.document.find_card(&conn.from_id),
                 state.document.find_card(&conn.to_id),
             ) {
-                let p0 = [
-                    from_card.position.x + from_card.size.width,
-                    from_card.position.y + from_card.size.height * 0.5,
-                ];
-                let p3 = [
-                    to_card.position.x,
-                    to_card.position.y + to_card.size.height * 0.5,
-                ];
-                generate_bezier_connection_mesh(p0, p3, 2.5, connection_color, &mut connection_vertices);
+                let selected = state.selected_connection.as_ref() == Some(conn);
+                generate_bezier_connection_mesh(
+                    from_card.connection_point(),
+                    to_card.incoming_point(),
+                    if selected { 5.0 } else { 2.5 },
+                    if selected { selected_color } else { connection_color },
+                    &mut connection_vertices,
+                );
             }
+        }
+        // The connection being dragged: green over a valid target, red over an invalid one.
+        if let Some(preview) = state.connection_preview() {
+            let color = match preview.target_valid {
+                Some(true) => [0.20, 0.83, 0.45, 1.0],
+                Some(false) => [0.94, 0.33, 0.33, 1.0],
+                None => [0.58, 0.77, 0.99, 0.9],
+            };
+            generate_bezier_connection_mesh(preview.start, preview.end, 3.0, color, &mut connection_vertices);
         }
 
         if connection_vertices.len() > self.connection_buffer_capacity {
@@ -441,42 +450,26 @@ impl WgpuRenderer {
     }
 }
 
+/// Meshes the connection curve shared with engine hit testing, so a press selects
+/// the edge that is drawn.
 fn generate_bezier_connection_mesh(
-    p0: [f32; 2],
-    p3: [f32; 2],
+    start: Point,
+    end: Point,
     thickness: f32,
     color: [f32; 4],
     vertices: &mut Vec<ConnectionVertexRaw>,
 ) {
-    let dx = (p3[0] - p0[0]).abs().max(40.0) * 0.5;
-    let p1 = [p0[0] + dx, p0[1]];
-    let p2 = [p3[0] - dx, p3[1]];
-
-    let segments = 24;
+    let curve = connection_curve(start, end);
+    let segments = CONNECTION_CURVE_SEGMENTS;
     let half_w = thickness * 0.5;
 
     let eval_bezier = |t: f32| -> [f32; 2] {
-        let one_minus_t = 1.0 - t;
-        let c0 = one_minus_t * one_minus_t * one_minus_t;
-        let c1 = 3.0 * one_minus_t * one_minus_t * t;
-        let c2 = 3.0 * one_minus_t * t * t;
-        let c3 = t * t * t;
-        [
-            c0 * p0[0] + c1 * p1[0] + c2 * p2[0] + c3 * p3[0],
-            c0 * p0[1] + c1 * p1[1] + c2 * p2[1] + c3 * p3[1],
-        ]
+        let p = cubic_point(&curve, t);
+        [p.x, p.y]
     };
-
     let eval_tangent = |t: f32| -> [f32; 2] {
-        let one_minus_t = 1.0 - t;
-        let d0 = -3.0 * one_minus_t * one_minus_t;
-        let d1 = 3.0 * one_minus_t * one_minus_t - 6.0 * one_minus_t * t;
-        let d2 = 6.0 * one_minus_t * t - 3.0 * t * t;
-        let d3 = 3.0 * t * t;
-        [
-            d0 * p0[0] + d1 * p1[0] + d2 * p2[0] + d3 * p3[0],
-            d0 * p0[1] + d1 * p1[1] + d2 * p2[1] + d3 * p3[1],
-        ]
+        let d = cubic_tangent(&curve, t);
+        [d.x, d.y]
     };
 
     let mut prev_left = [0.0, 0.0];
@@ -506,7 +499,7 @@ fn generate_bezier_connection_mesh(
         prev_right = right;
     }
 
-    // Directional Arrowhead pointing toward p3
+    // Directional Arrowhead pointing toward the end of the curve
     let end_tan = eval_tangent(1.0);
     let end_len = (end_tan[0] * end_tan[0] + end_tan[1] * end_tan[1]).sqrt().max(1e-4);
     let dir = [end_tan[0] / end_len, end_tan[1] / end_len];
@@ -515,7 +508,7 @@ fn generate_bezier_connection_mesh(
     let arrow_len = 10.0;
     let arrow_w = 6.0;
 
-    let tip = p3;
+    let tip = [end.x, end.y];
     let base_left = [
         tip[0] - dir[0] * arrow_len + norm[0] * arrow_w,
         tip[1] - dir[1] * arrow_len + norm[1] * arrow_w,

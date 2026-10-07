@@ -410,10 +410,17 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
     setConnectionRejection(null)
     updateSelected((skill) => ({ ...skill, optional }))
   }
-  const handleConnect = (from: string, to: string) => {
-    const problem = personal ? null : optionalPrerequisiteProblem(local.current.skills, from, to)
-    if (problem) return setConnectionRejection(`${problem} Make the dependent Skill optional, or the Prerequisite required, first.`)
+  const connectionProblem = (from: string, to: string) => (personal ? null : optionalPrerequisiteProblem(local.current.skills, from, to))
+  /** The one connection path for the detail action and a dropped drag: the Draft's rules, then the engine's. */
+  const handleConnect = (from: string, to: string): string | null => {
+    const problem = connectionProblem(from, to)
+    if (problem) {
+      const message = `${problem} Make the dependent Skill optional, or the Prerequisite required, first.`
+      setConnectionRejection(message)
+      return message
+    }
     actionsRef.current?.connectSkills(from, to)
+    return null
   }
   const handleUpdateOutcome = (outcome: string) => updateSelected((skill) => ({ ...skill, outcome }))
 
@@ -685,6 +692,8 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
           labelStatus={labelStatus}
           onCardDeleted={handleCardDeleted}
           onCardRestored={handleCardRestored}
+          onConnectionDrop={handleConnect}
+          connectionProblem={connectionProblem}
         />
         <SkillDetailPanel
           selectedSkill={selectedSkill}

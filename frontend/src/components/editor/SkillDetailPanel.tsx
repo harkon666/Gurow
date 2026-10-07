@@ -66,6 +66,7 @@ const ConnectionListItem: React.FC<ConnectionListItemProps> = ({
       <button
         id={`disconnect-${fromId}-${toId}`}
         onClick={() => onDisconnect(fromId, toId)}
+        aria-label={`Remove connection ${direction === '←' ? 'from' : 'to'} ${title}`}
         className="text-[10px] text-red-400 hover:text-red-300 ml-2 px-1 py-0.5 rounded bg-red-950/40 hover:bg-red-950/80 transition-colors cursor-pointer"
         title="Remove connection"
       >
