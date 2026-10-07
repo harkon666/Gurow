@@ -12,6 +12,7 @@ import shlex
 import signal
 import subprocess
 import sys
+import threading
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -134,33 +135,97 @@ def proof_gaps(current):
     return gaps
 
 
-def run_check(argv, cwd, timeout, log):
-    print(f'  {shlex.join(argv)} ({cwd.relative_to(ROOT)})', flush=True)
+class Running:
+    """Child process groups still running, so an interrupt can stop parallel checks too."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.processes = set()
+
+    def add(self, process):
+        with self.lock:
+            self.processes.add(process)
+
+    def discard(self, process):
+        with self.lock:
+            self.processes.discard(process)
+
+    def stop_all(self):
+        with self.lock:
+            processes = list(self.processes)
+        for process in processes:
+            stop(process)
+
+
+def stop(process):
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+    except ProcessLookupError:
+        pass
+
+
+def run_check(name, argv, cwd, timeout, log, running=None):
+    print(f'  [{name}] {shlex.join(argv)} ({cwd.relative_to(ROOT)})', flush=True)
     started = time.monotonic()
     with log.open('w') as output:
         process = subprocess.Popen(argv, cwd=cwd, stdout=output, stderr=subprocess.STDOUT,
                                    start_new_session=True)
+        if running:
+            running.add(process)
         try:
             code = process.wait(timeout=timeout)
         except (subprocess.TimeoutExpired, KeyboardInterrupt):
-            os.killpg(process.pid, signal.SIGTERM)
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
+            stop(process)
             raise
-    print(f'  exit={code}; {time.monotonic() - started:.1f}s; {log.relative_to(ROOT)}', flush=True)
+        finally:
+            if running:
+                running.discard(process)
+    print(f'  [{name}] exit={code}; {time.monotonic() - started:.1f}s; {log.relative_to(ROOT)}', flush=True)
     if code:
-        print(log.read_text(errors='replace')[-6000:])
+        print(log.read_text(errors='replace')[-6000:], flush=True)
     return code
+
+
+def plan(config, names):
+    """
+    Orders the checks to run: each check's `requires` (for example the frontend build a
+    browser check serves, or the database) run before it. Checks marked `parallel` use
+    their own ports, databases and files, so they run together after all the others.
+    """
+    ordered = []
+
+    def add(name, chain):
+        if name in chain:
+            raise ValueError(f"Check requirements form a cycle: {' -> '.join(chain + (name,))}")
+        command = config['checks'].get(name)
+        if command is None:
+            raise ValueError(f'Unknown check: {name}')
+        for required in command.get('requires', []):
+            if config['checks'].get(required, {}).get('parallel'):
+                raise ValueError(f'{name} requires {required}, which runs in parallel; requirements must run first.')
+            add(required, chain + (name,))
+        if name not in ordered:
+            ordered.append(name)
+
+    for name in names:
+        add(name, ())
+    serial = [name for name in ordered if not config['checks'][name].get('parallel')]
+    return serial, [name for name in ordered if config['checks'][name].get('parallel')]
 
 
 def check(args):
     current = task()
     config = read_json(ROOT / 'harness.json')
-    mode = 'quick' if args.quick else 'full'
-    names = list(config['profiles'][mode])
+    if args.only:
+        mode = 'focused'
+        names = list(args.only)
+    else:
+        mode = 'quick' if args.quick else 'full'
+        names = list(config['profiles'][mode])
     if mode == 'full':
         acceptance = config['tickets'].get(current['ticket'])
         if not acceptance:
@@ -169,32 +234,46 @@ def check(args):
         if gaps:
             raise ValueError('\n'.join(gaps))
         names = list(dict.fromkeys(names + acceptance))
-    for name in names:
+    serial, parallel = plan(config, names)
+    for name in serial + parallel:
         command = config['checks'][name]
         if not command['argv'] or not all(isinstance(arg, str) for arg in command['argv']):
             raise ValueError(f'{name}: argv must be a nonempty string array.')
         if not (ROOT / command['cwd']).resolve().is_relative_to(ROOT):
             raise ValueError(f'{name}: cwd must be inside the repository.')
+    jobs = args.jobs if args.jobs is not None else int(config.get('jobs', 1))
+    if jobs < 1:
+        raise ValueError('--jobs must be at least 1.')
     run_id = dt.datetime.now(dt.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
     folder = STATE / 'runs' / run_id
     folder.mkdir(parents=True)
     report = {'mode': mode, 'status': 'RUNNING', 'head': git('rev-parse', 'HEAD'),
-              'base': current['base'], 'input_hash': input_hash(), 'checks': []}
+              'base': current['base'], 'input_hash': input_hash(), 'jobs': jobs, 'checks': []}
     latest = STATE / f'{mode}.json'
     write_json(latest, report)  # Invalidate previous success before executing.
+    numbered = {name: i + 1 for i, name in enumerate(serial + parallel)}
+    results = {}
+    running = Running()
+
+    def execute(name):
+        command = config['checks'][name]
+        log = folder / f'{numbered[name]:02}-{name}.log'
+        code = run_check(name, command['argv'], (ROOT / command['cwd']).resolve(), command['timeout'], log, running)
+        results[name] = {'name': name, 'argv': command['argv'], 'cwd': command['cwd'],
+                         'exit_code': code, 'log': str(log.relative_to(ROOT)),
+                         'log_sha256': digest(log.read_bytes())}
+        return code
+
     try:
-        whitespace = run_check(['git', 'diff', '--check', current['base']], ROOT, 30, folder / 'diff.log')
+        whitespace = run_check('diff', ['git', 'diff', '--check', current['base']], ROOT, 30, folder / 'diff.log')
         if whitespace:
             raise ValueError('Diff whitespace check failed.')
-        for i, name in enumerate(names):
-            command = config['checks'][name]
-            log = folder / f'{i + 1:02}-{name}.log'
-            code = run_check(command['argv'], (ROOT / command['cwd']).resolve(), command['timeout'], log)
-            report['checks'].append({'name': name, 'argv': command['argv'], 'cwd': command['cwd'],
-                                     'exit_code': code, 'log': str(log.relative_to(ROOT)),
-                                     'log_sha256': digest(log.read_bytes())})
-            if code:
+        for name in serial:
+            if execute(name):
                 raise ValueError(f'{name} failed; fix it and rerun.')
+        failure = run_parallel(parallel, jobs, execute, running)
+        if failure:
+            raise ValueError(failure)
         if input_hash() != report['input_hash']:
             raise ValueError('Source/spec/task changed during checks; results are stale. Rerun on stable inputs.')
         report['status'] = 'PASSED'
@@ -203,16 +282,60 @@ def check(args):
         report['error'] = str(error) or type(error).__name__
         raise
     finally:
+        report['checks'] = [results[name] for name in serial + parallel if name in results]
         write_json(folder / 'result.json', report)
         write_json(latest, report)
     print(f'{mode.upper()} checks PASSED. This is command evidence, not acceptance or review approval.')
+
+
+def run_parallel(names, jobs, execute, running):
+    """
+    Runs `names` with at most `jobs` at a time. After the first failure no further check
+    starts; those already running finish. Returns the failure, or None.
+    """
+    pending = list(names)
+    lock = threading.Lock()
+    failures = []
+
+    def worker():
+        while True:
+            with lock:
+                if failures or not pending:
+                    return
+                name = pending.pop(0)
+            try:
+                code = execute(name)
+                problem = f'{name} failed; fix it and rerun.' if code else None
+            except subprocess.TimeoutExpired:
+                problem = f'{name} timed out.'
+            except Exception as error:  # Reported as the run's failure, never swallowed.
+                problem = f'{name}: {error}'
+            if problem:
+                with lock:
+                    failures.append(problem)
+
+    workers = [threading.Thread(target=worker, name=f'check-{i}') for i in range(min(jobs, len(names)))]
+    for thread in workers:
+        thread.start()
+    try:
+        for thread in workers:
+            while thread.is_alive():
+                thread.join(0.2)
+    except KeyboardInterrupt:
+        with lock:
+            pending.clear()
+        running.stop_all()
+        for thread in workers:
+            thread.join()
+        raise
+    return '; '.join(failures) or None
 
 
 def status():
     current = task()
     print(f"{current['ticket']} | base {current['base']}")
     identity = input_hash()
-    for mode in ('quick', 'full'):
+    for mode in ('quick', 'focused', 'full'):
         path = STATE / f'{mode}.json'
         report = read_json(path) if path.exists() else {}
         state = report.get('status', 'NOT RUN')
@@ -264,8 +387,12 @@ def main():
     prepare = commands.add_parser('start', help='Capture a GitHub ticket and pin its review baseline')
     prepare.add_argument('ticket', help='Local ticket ID, e.g. T04')
     prepare.add_argument('--base', required=True, help='Branch/commit before this work, e.g. main')
-    checks = commands.add_parser('check', help='Run full checks (default), or quick checks while editing')
-    checks.add_argument('--quick', action='store_true')
+    checks = commands.add_parser('check', help='Run full checks (default), quick checks while editing, or chosen checks with --only')
+    group = checks.add_mutually_exclusive_group()
+    group.add_argument('--quick', action='store_true')
+    group.add_argument('--only', nargs='+', metavar='CHECK',
+                       help='Run these checks (and what they require) only; never counts as full evidence')
+    checks.add_argument('--jobs', type=int, help='Parallel checks at a time (default: harness.json "jobs")')
     commands.add_parser('status', help='Show missing/stale/current command evidence')
     commands.add_parser('review', help='Prepare a review packet after current full checks pass')
     args = parser.parse_args()

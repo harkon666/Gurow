@@ -40,6 +40,9 @@ python3 scripts/harness.py check --quick
 # Lengkap: pemeriksaan di atas, build baru, browser, dan acceptance tiket
 python3 scripts/harness.py check
 
+# Terfokus: hanya check pilihan beserta yang dibutuhkannya (build, database)
+python3 scripts/harness.py check --only t28-recovery t16-path-authoring
+
 # Lihat hasil dan apakah kode berubah sejak diperiksa
 python3 scripts/harness.py status
 
@@ -47,7 +50,9 @@ python3 scripts/harness.py status
 python3 scripts/harness.py review
 ```
 
-Pemeriksaan berhenti pada kegagalan pertama dan mengembalikan exit code bukan nol. Log per perintah tersimpan di `.harness/runs/`; hasil terbaru ada di `.harness/quick.json` dan `full.json`. Perubahan source, file baru, konfigurasi, atau peta AC membuat bukti lama `STALE`. Pemeriksaan yang gagal/terputus tidak memakai ulang status lulus sebelumnya. Build selalu dilakukan sebelum tes browser pada profil full bawaan.
+Check serial (build, database, backend, Rust) berjalan lebih dulu, lalu check bertanda `parallel` (tes browser dan unit test frontend, masing-masing dengan port, database, dan file sendiri) berjalan bersamaan, sebanyak `jobs` sekaligus (default 3; `--jobs 1` untuk menjalankannya satu per satu saat menyelidiki tes yang flaky). Tes browser memakai build dari run itu (`--skip-build` dan `requires: ["build"]`), jadi frontend dibangun sekali per run. Kegagalan pertama menghentikan check yang belum mulai dan mengembalikan exit code bukan nol. Log per perintah tersimpan di `.harness/runs/`; hasil terbaru ada di `.harness/quick.json`, `focused.json`, dan `full.json`. Perubahan source, file baru, konfigurasi, atau peta AC membuat bukti lama `STALE`. Pemeriksaan yang gagal/terputus tidak memakai ulang status lulus sebelumnya. Hanya `full.json` yang bisa dipakai untuk paket review.
+
+Selama siklus perbaikan review, jalankan `--only` dengan check acceptance tiket dan regresi area yang disentuh; full run cukup sekali setelah perbaikan terakhir, sebelum commit atau merge.
 
 `review` menghasilkan `.harness/review.md` dan `review.diff`. Buka sesi reviewer baru dan kirim:
 

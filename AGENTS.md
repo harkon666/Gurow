@@ -18,4 +18,4 @@ This project uses one domain context. Before domain exploration, specification, 
 
 ### Implementation and review harness
 
-When implementing a ticket, fixing review findings, or preparing a review handoff, follow [the harness workflow](docs/agents/harness.md). Resume `.harness/task.json` for the same ticket; pin the ticket/base once, map every acceptance criterion to observable assertions, and run current full checks before claiming readiness for independent review.
+When implementing a ticket, fixing review findings, or preparing a review handoff, follow [the harness workflow](docs/agents/harness.md). Resume `.harness/task.json` for the same ticket; pin the ticket/base once, map every acceptance criterion to observable assertions, and run current full checks before claiming readiness for independent review. During review-fix cycles run only the affected checks with `check --only`; run full checks again once after the last fix. New browser checks take `--skip-build`, declare `requires`, and run in parallel only with their own port and database.

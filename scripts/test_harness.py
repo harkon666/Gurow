@@ -164,6 +164,91 @@ class HarnessTests(unittest.TestCase):
         self.cli('review', code=1)
         self.assertIn('spec.md differs', self.cli('check', code=1))
 
+    def stamp(self, name, sleep=0.0, code=0):
+        """A check that records when it started and ended, then exits with `code`."""
+        return {'cwd': '.', 'timeout': 10, 'argv': [sys.executable, '-c',
+            'import json, sys, time; from pathlib import Path; started = time.time(); '
+            f'time.sleep({sleep}); Path("stamps").mkdir(exist_ok=True); '
+            f'Path("stamps/{name}.json").write_text(json.dumps([started, time.time()])); sys.exit({code})']}
+
+    def stamps(self, name):
+        path = self.root / 'stamps' / f'{name}.json'
+        return json.loads(path.read_text()) if path.exists() else None
+
+    def test_parallel_checks_run_together_after_their_requirements(self):
+        (self.root / '.gitignore').write_text('.harness/\nstamps/\n')
+        self.config['checks'].update({
+            'build': self.stamp('build', 0.3),
+            'one': {**self.stamp('one', 1.0), 'parallel': True, 'requires': ['build']},
+            'two': {**self.stamp('two', 1.0), 'parallel': True, 'requires': ['build']},
+        })
+        self.config['jobs'] = 2
+        # Listed before the build: requirements still run first.
+        self.config['tickets'] = {'T04': ['one', 'two', 'behavior']}
+        self.save_config()
+        self.cli('check')
+        build, one, two = self.stamps('build'), self.stamps('one'), self.stamps('two')
+        self.assertLessEqual(build[1], min(one[0], two[0]))
+        # Both ran at the same time rather than one after the other.
+        self.assertLess(max(one[0], two[0]), min(one[1], two[1]))
+        report = json.loads((self.root / '.harness/full.json').read_text())
+        self.assertEqual([c['name'] for c in report['checks']], ['behavior', 'build', 'one', 'two'])
+        self.assertEqual(report['jobs'], 2)
+        self.cli('review')
+
+    def test_a_parallel_failure_starts_nothing_more_and_fails_the_run(self):
+        (self.root / '.gitignore').write_text('.harness/\nstamps/\n')
+        self.config['checks'].update({
+            'first': {**self.stamp('first', code=3), 'parallel': True},
+            'second': {**self.stamp('second'), 'parallel': True},
+        })
+        self.config['tickets'] = {'T04': ['behavior', 'first', 'second']}
+        self.save_config()
+        self.assertIn('first failed', self.cli('check', '--jobs', '1', code=1))
+        self.assertIsNone(self.stamps('second'))
+        report = json.loads((self.root / '.harness/full.json').read_text())
+        self.assertEqual((report['status'], [c['exit_code'] for c in report['checks']]), ('FAILED', [0, 3]))
+        self.cli('review', code=1)
+
+    def test_only_runs_the_chosen_checks_and_their_requirements_and_never_authorizes_review(self):
+        (self.root / '.gitignore').write_text('.harness/\nstamps/\n')
+        self.config['checks'].update({
+            'build': self.stamp('build'),
+            'browser': {**self.stamp('browser'), 'parallel': True, 'requires': ['build']},
+            'unrelated': self.stamp('unrelated'),
+        })
+        self.config['tickets'] = {'T04': ['behavior', 'browser', 'unrelated']}
+        self.save_config()
+        self.assertIn('FOCUSED checks PASSED', self.cli('check', '--only', 'browser'))
+        self.assertIsNotNone(self.stamps('build'))
+        self.assertIsNotNone(self.stamps('browser'))
+        self.assertIsNone(self.stamps('unrelated'))
+        self.assertIn('focused: PASSED', self.cli('status'))
+        self.assertIn('full: NOT RUN', self.cli('status'))
+        self.cli('review', code=1)
+        self.assertIn('Unknown check', self.cli('check', '--only', 'missing', code=1))
+
+    def test_invalid_requirements_are_refused_before_anything_runs(self):
+        self.config['checks'].update({
+            'a': {**self.stamp('a'), 'requires': ['b']},
+            'b': {**self.stamp('b'), 'requires': ['a']},
+            'p': {**self.stamp('p'), 'parallel': True},
+            'needs-p': {**self.stamp('needs-p'), 'requires': ['p']},
+        })
+        self.save_config()
+        self.assertIn('cycle', self.cli('check', '--only', 'a', code=1))
+        self.assertIn('runs in parallel', self.cli('check', '--only', 'needs-p', code=1))
+        self.assertIsNone(self.stamps('a'))
+        self.assertIsNone(self.stamps('p'))
+
+    def test_a_parallel_timeout_fails_the_run(self):
+        self.config['checks']['slow'] = {**self.stamp('slow', 5), 'parallel': True, 'timeout': 0.2}
+        self.config['tickets'] = {'T04': ['behavior', 'slow']}
+        self.save_config()
+        self.assertIn('slow timed out', self.cli('check', '--jobs', '2', code=1))
+        self.assertEqual(json.loads((self.root / '.harness/full.json').read_text())['status'], 'FAILED')
+        self.cli('review', code=1)
+
 
 if __name__ == '__main__':
     unittest.main()
