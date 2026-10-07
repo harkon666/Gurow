@@ -16,6 +16,7 @@ import { draftRuleProblem, optionalPrerequisiteProblem, optionalToggleProblem, S
 import { copySkills, copyTask, type ContentKind, type ReuseContent } from './reuse'
 import { ReusePanel } from './ReusePanel'
 import { ArchiveTaskControl, RetainedTasks, type RetainedTask } from './Archival'
+import { DeleteSkillControl } from './Deletion'
 
 const AUTOSAVE_DELAY_MS = 500
 
@@ -134,6 +135,10 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
   const [archival, setArchival] = useState<{ kind: 'done' | 'failed'; text: string } | null>(null)
   /** The Tasks a Draft's published Versions hold, each with the newest Version that holds it. */
   const [published, setPublished] = useState<Map<string, { title: string; skillId: string; versionNumber: number }> | null>(null)
+  /** The Skills a Draft's published Versions hold: history, never deleted. */
+  const [publishedSkills, setPublishedSkills] = useState<Set<string> | null>(null)
+  /** What the last deletion did. */
+  const [deletion, setDeletion] = useState<string | null>(null)
   /** The Skill to select again once an archival's document is shown. */
   const reselect = useRef<string | null>(null)
   // The engine loads asynchronously; until then there is no document to add a card to.
@@ -173,6 +178,7 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
         for (const skill of version.application.skills) for (const task of skill.tasks) tasks.set(task.id, { title: task.title, skillId: skill.id, versionNumber: version.version?.versionNumber ?? 0 })
       }
       setPublished(tasks)
+      setPublishedSkills(new Set(versions.flatMap((version) => version.application.skills.map((skill) => skill.id))))
     }).catch(() => {})
     return () => { current = false }
   }, [personal, versionList])
@@ -271,6 +277,30 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
     setSkills(local.current.skills)
     edited()
   }, [edited])
+
+  /**
+   * The content of Skills whose cards were deleted, with their place in the list, so an
+   * undo brings each back as it was. Rust owns the history: the engine reports the card
+   * leaving or coming back, and the application follows with the Skill's content.
+   */
+  const deletedSkills = useRef(new Map<string, { skill: PathSkill; index: number }>())
+  const handleCardDeleted = useCallback((id: string) => {
+    const index = local.current.skills.findIndex((skill) => skill.id === id)
+    if (index < 0) return
+    deletedSkills.current.set(id, { skill: local.current.skills[index], index })
+    local.current.skills = local.current.skills.filter((skill) => skill.id !== id)
+    setSkills(local.current.skills)
+  }, [])
+  const handleCardRestored = useCallback((id: string) => {
+    const stashed = deletedSkills.current.get(id)
+    if (!stashed || local.current.skills.some((skill) => skill.id === id)) return
+    deletedSkills.current.delete(id)
+    const restored = [...local.current.skills]
+    restored.splice(Math.min(stashed.index, restored.length), 0, stashed.skill)
+    local.current.skills = restored
+    setSkills(restored)
+    setDeletion(null)
+  }, [])
 
   const handleActionsReady = useCallback((actions: WebGpuEditorActions) => { actionsRef.current = actions }, [])
   const handleCameraChanged = useCallback((next: CameraState) => {
@@ -393,6 +423,9 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
   /** Shows an accepted document, replacing whatever the editor showed, and autosaves from its revision. */
   const showAccepted = (document: EditablePathDocument) => {
     setLoadError(null)
+    // The new document starts a new editing history: no deletion can be undone any more.
+    deletedSkills.current.clear()
+    setDeletion(null)
     local.current = { skills: document.application.skills, title: document.learningPath.title, goal: document.learningPath.goal }
     setSkills(local.current.skills)
     setTitle(local.current.title)
@@ -458,6 +491,38 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
         blocked={archiveBlocked}
         busy={keptView.busy}
         onArchive={() => void handleArchive(taskId, task.title)}
+      />
+    )
+  }
+  /** Why the selected Skill cannot be deleted because of its learning history; undefined while that is not known yet. */
+  const deletionHistory = (skill: PathSkill): string | null | undefined => {
+    if (personal) {
+      if (!records) return undefined
+      return records.historySkillIds.includes(skill.id) ? `“${skill.title}” has learning history, so it cannot be deleted. Archive its Tasks to take them out of active use.` : null
+    }
+    const held = publishedVersionIds.length === 0 ? new Set<string>() : publishedSkills
+    if (!held) return undefined
+    return held.has(skill.id) ? `“${skill.title}” is part of a published Version, so it cannot be deleted. Archive its Tasks from this Draft to leave them out of the next Version.` : null
+  }
+  /** Deletes the selected unused Skill through the engine: one undo step with its card and connections. */
+  const handleDeleteSkill = (skill: PathSkill) => {
+    actionsRef.current?.deleteCard(skill.id)
+    // The engine reported the deletion synchronously; the Skill's content followed.
+    if (local.current.skills.some((s) => s.id === skill.id)) return
+    const recorded = personal && ((records?.skills.find((s) => s.skillId === skill.id)?.xpThreshold ?? 0) > 0 ||
+      (records?.tasks ?? []).some((task) => task.skillId === skill.id && task.xpReward > 0))
+    setDeletion(`Deleted “${skill.title}”${skill.tasks.length ? ` with ${skill.tasks.length === 1 ? 'its Task' : `its ${skill.tasks.length} Tasks`}` : ''} and its connections. Undo brings it back${recorded ? ', with its XP rewards and threshold back at 0' : ''}.`)
+  }
+  const deleteControl = (skill: PathSkill) => {
+    const history = deletionHistory(skill)
+    return (
+      <DeleteSkillControl
+        skillId={skill.id}
+        title={skill.title}
+        taskCount={skill.tasks.length}
+        history={history ?? null}
+        blocked={history === undefined ? 'Checking its learning history…' : !editorReady ? 'The editor is still loading' : keptView.busy ? 'Wait until the saved version is shown' : null}
+        onDelete={() => handleDeleteSkill(skill)}
       />
     )
   }
@@ -542,6 +607,11 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
           {archival.text}
         </p>
       )}
+      {deletion && (
+        <p id="deletion-status" role="status" className="shrink-0 px-4 py-1.5 text-xs border-b text-slate-200 bg-slate-900/70 border-slate-800">
+          {deletion}
+        </p>
+      )}
       {ruleProblem && (
         <p id="draft-rule-problem" role="alert" className="shrink-0 px-4 py-1.5 text-xs text-amber-200 bg-amber-950/50 border-b border-amber-900/60">
           {ruleProblem} This Draft cannot be saved until it is fixed.
@@ -608,6 +678,8 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
           onCameraChanged={handleCameraChanged}
           onGpuStatusChange={setGpuStatus}
           labelStatus={labelStatus}
+          onCardDeleted={handleCardDeleted}
+          onCardRestored={handleCardRestored}
         />
         <SkillDetailPanel
           selectedSkill={selectedSkill}
@@ -622,6 +694,7 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
           onUpdateTask={handleUpdateTask}
           onUpdateOutcome={handleUpdateOutcome}
           onAddTask={handleAddTask}
+          skillActions={selected ? deleteControl(selected) : null}
           learning={!selectedId ? null : (
             <>
               {personal

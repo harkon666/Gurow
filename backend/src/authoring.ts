@@ -1,8 +1,9 @@
-import { and, asc, eq, isNull, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import type { Database } from './db/client'
 import { lockedTimestamp } from './db/clock'
-import { learningPaths, personalPrerequisites, personalSkillCards, personalSkills, personalTasks, personalWorkspaces, skills, tasks } from './db/schema'
+import { learningPaths, personalPrerequisites, personalSkillCards, personalSkills, personalTasks, personalWorkspaces } from './db/schema'
 import { lockOwnedPath, readPersonalLearningStateIn, type Tx } from './personal'
+import { claimLogicalIds } from './logicalIds'
 import { personalHistory } from './retention'
 
 /**
@@ -230,7 +231,7 @@ export async function readPersonalPath(db: Database, learningPathId: string, acc
 
 export type SaveRefusal =
   | 'learning_path_not_found' | 'stale_revision' | 'skill_owned_elsewhere' | 'task_owned_elsewhere'
-  | 'task_skill_mismatch' | 'task_archived' | 'skill_missing' | 'task_missing' | 'skill_has_history' | 'task_has_history'
+  | 'task_skill_mismatch' | 'task_archived' | 'skill_has_history' | 'task_has_history'
 type SaveResult = { ok: true; document: PathDocument } | { ok: false; refusal: SaveRefusal; detail: string; current?: PathDocument }
 
 class Refused extends Error {
@@ -242,8 +243,8 @@ class Refused extends Error {
  * then advances the revision. Under the Path lock, a stale save changes nothing
  * and returns the accepted document instead (ADR 0016). Skill and Task IDs are
  * claimed for this Path only (ADR 0004): an ID already owned by another Path, or a
- * Task under another Skill, refuses the whole save. Removing Skills or Tasks is not
- * part of this slice. Task rewards, completion, Mastery, thresholds and overrides
+ * Task under another Skill, refuses the whole save. Skills and Tasks the save leaves
+ * out are deleted when they have no learning history, and refuse it otherwise. Task rewards, completion, Mastery, thresholds and overrides
  * are learning records outside the document and are never written here.
  */
 export async function savePersonalPath(db: Database, learningPathId: string, accountId: string, input: DocumentInput): Promise<SaveResult> {
@@ -275,6 +276,7 @@ async function writeDocument(tx: Tx, path: typeof learningPaths.$inferSelect, in
   const sentSkills = new Set(input.application.skills.map((skill) => skill.id))
   const sentTasks = new Set(input.application.skills.flatMap((skill) => skill.tasks.map((task) => task.id)))
   // Content with progress history is never deleted (ADR 0018): a Task is archived instead, and a Skill is kept.
+  // Content without history is deleted.
   const removedSkills = [...existingSkills.values()].filter((skill) => !sentSkills.has(skill.skillId))
   const removedTasks = [...existingTasks.values()].filter((task) => !task.archivedAt && !sentTasks.has(task.taskId))
   if (removedSkills.length > 0 || removedTasks.length > 0) {
@@ -284,17 +286,16 @@ async function writeDocument(tx: Tx, path: typeof learningPaths.$inferSelect, in
     const worked = removedTasks.find((task) => history.tasks.has(task.taskId))
     if (worked) throw new Refused('task_has_history', `Task "${worked.title}" has learning history and cannot be deleted; archive it instead`)
   }
-  for (const skill of removedSkills) throw new Refused('skill_missing', `Skill ${skill.skillId} is missing; removing Skills is not supported yet`)
-  for (const task of removedTasks) throw new Refused('task_missing', `Task ${task.taskId} is missing; removing Tasks is not supported yet`)
 
-  // New logical identities are claimed for this Path; the primary key decides concurrent claims.
+  // New logical identities are claimed for this Path; one it already owns (deleted, then undone) is its own again.
   const newSkills = input.application.skills.filter((skill) => !existingSkills.has(skill.id))
+  const newTasks: (TaskInput & { skillId: string; ordinal: number })[] = []
+  for (const skill of input.application.skills) {
+    for (const [ordinal, task] of skill.tasks.entries()) if (!existingTasks.has(task.id)) newTasks.push({ ...task, skillId: skill.id, ordinal })
+  }
+  const claim = await claimLogicalIds(tx, path.id, newSkills.map((skill) => skill.id), newTasks)
+  if (claim) throw new Refused(claim.refusal, claim.detail)
   if (newSkills.length > 0) {
-    const claimed = await tx.insert(skills).values(newSkills.map((skill) => ({ id: skill.id, learningPathId: path.id }))).onConflictDoNothing().returning({ id: skills.id })
-    if (claimed.length !== newSkills.length) {
-      const taken = newSkills.find((skill) => !claimed.some((row) => row.id === skill.id))!
-      throw new Refused('skill_owned_elsewhere', `Skill ${taken.id} belongs to another Learning Path`)
-    }
     changed = true
     await tx.insert(personalSkills).values(newSkills.map((skill) => ({
       skillId: skill.id, learningPathId: path.id, personalWorkspaceId: path.personalWorkspaceId!, title: skill.title, learningOutcome: skill.outcome,
@@ -309,14 +310,10 @@ async function writeDocument(tx: Tx, path: typeof learningPaths.$inferSelect, in
     }
   }
 
-  const newTasks: (TaskInput & { skillId: string; ordinal: number })[] = []
   for (const skill of input.application.skills) {
     for (const [ordinal, task] of skill.tasks.entries()) {
       const row = existingTasks.get(task.id)
-      if (!row) {
-        newTasks.push({ ...task, skillId: skill.id, ordinal })
-        continue
-      }
+      if (!row) continue
       if (row.skillId !== skill.id) throw new Refused('task_skill_mismatch', `Task ${task.id} belongs to another Skill`)
       if (row.archivedAt) throw new Refused('task_archived', `Task ${task.id} is archived`)
       if (row.title !== task.title || row.description !== task.description || row.ordinal !== ordinal) {
@@ -326,11 +323,6 @@ async function writeDocument(tx: Tx, path: typeof learningPaths.$inferSelect, in
     }
   }
   if (newTasks.length > 0) {
-    const claimed = await tx.insert(tasks).values(newTasks.map((task) => ({ id: task.id, skillId: task.skillId }))).onConflictDoNothing().returning({ id: tasks.id })
-    if (claimed.length !== newTasks.length) {
-      const taken = newTasks.find((task) => !claimed.some((row) => row.id === task.id))!
-      throw new Refused('task_owned_elsewhere', `Task ${taken.id} belongs to another Skill`)
-    }
     changed = true
     await tx.insert(personalTasks).values(newTasks.map((task) => ({ taskId: task.id, learningPathId: path.id, skillId: task.skillId, title: task.title, description: task.description, ordinal: task.ordinal })))
   }
@@ -359,6 +351,19 @@ async function writeDocument(tx: Tx, path: typeof learningPaths.$inferSelect, in
   if (addedEdges.length > 0) {
     changed = true
     await tx.insert(personalPrerequisites).values(addedEdges.map((edge) => ({ learningPathId: path.id, prerequisiteSkillId: edge.from_id, skillId: edge.to_id })))
+  }
+
+  // Unused content leaves the Path for good, after its connections went with the edges above.
+  // Its logical IDs stay this Path's, so an editor undo can bring it back.
+  if (removedTasks.length > 0) {
+    changed = true
+    await tx.delete(personalTasks).where(and(eq(personalTasks.learningPathId, path.id), inArray(personalTasks.taskId, removedTasks.map((task) => task.taskId))))
+  }
+  if (removedSkills.length > 0) {
+    changed = true
+    const ids = removedSkills.map((skill) => skill.skillId)
+    await tx.delete(personalSkillCards).where(and(eq(personalSkillCards.learningPathId, path.id), inArray(personalSkillCards.skillId, ids)))
+    await tx.delete(personalSkills).where(and(eq(personalSkills.learningPathId, path.id), inArray(personalSkills.skillId, ids)))
   }
   return changed
 }

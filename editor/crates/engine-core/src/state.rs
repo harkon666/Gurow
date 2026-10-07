@@ -1,4 +1,4 @@
-use crate::document::{CanvasDocument, ConnectionError, SkillCard};
+use crate::document::{CanvasDocument, ConnectionError, PrerequisiteConnection, SkillCard};
 use crate::geometry::{Camera, Point, Rect, Size, MAX_WORLD_COORD, MIN_WORLD_COORD};
 use crate::protocol::{EditorCommand, EditorEvent, LabelLayout, SelectionChange};
 use std::collections::{HashMap, HashSet};
@@ -36,9 +36,18 @@ pub struct CardMove {
 
 #[derive(Debug, Clone, PartialEq)]
 /// Undoable editor operation. A completed drag is one history action, however
-/// many selected cards it moved.
+/// many selected cards it moved; a deleted card is one with its connections.
+/// Connection changes are actions too, so undoing in order never forms a cycle.
 pub enum HistoryAction {
     MoveCards { moves: Vec<CardMove> },
+    /// The card, its place in the document, and the connections it took along.
+    DeleteCard {
+        card: SkillCard,
+        index: usize,
+        connections: Vec<PrerequisiteConnection>,
+    },
+    AddConnection { connection: PrerequisiteConnection },
+    RemoveConnection { connection: PrerequisiteConnection },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -281,6 +290,102 @@ impl EditorState {
         )
     }
 
+    /// Records a completed edit as one undo step; a new edit ends the redo history.
+    fn record(&mut self, action: HistoryAction, events: &mut Vec<EditorEvent>) {
+        self.undo_stack.push(action);
+        self.redo_stack.clear();
+        events.push(EditorEvent::HistoryChanged {
+            can_undo: true,
+            can_redo: false,
+        });
+    }
+
+    /// Removes a card with every connection that names it; returns them with the
+    /// card's place in the document, so an undo can put all of it back.
+    fn delete_card(
+        &mut self,
+        id: &str,
+        events: &mut Vec<EditorEvent>,
+    ) -> Option<(SkillCard, usize, Vec<PrerequisiteConnection>)> {
+        let index = self.document.cards.iter().position(|c| c.id == id)?;
+        let card = self.document.cards.remove(index);
+        let (taken, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.document.connections)
+            .into_iter()
+            .partition(|c| c.from_id == id || c.to_id == id);
+        self.document.connections = kept;
+        events.push(EditorEvent::CardDeleted { card_id: card.id.clone() });
+        events.push(EditorEvent::ConnectionsUpdated {
+            connections: self.document.connections.clone(),
+        });
+        let change = self.set_selection(self.selected_card_ids.clone());
+        Self::push_selection_change(change, events);
+        Some((card, index, taken))
+    }
+
+    /// Puts a deleted card back at its place with the connections it took along.
+    /// Each connection is validated again; one that no longer fits is left out.
+    fn restore_card(
+        &mut self,
+        card: &SkillCard,
+        index: usize,
+        connections: &[PrerequisiteConnection],
+        events: &mut Vec<EditorEvent>,
+    ) -> bool {
+        if self.document.find_card(&card.id).is_some() {
+            return false;
+        }
+        let index = index.min(self.document.cards.len());
+        self.document.cards.insert(index, card.clone());
+        for connection in connections {
+            let _ = self.document.try_add_connection(&connection.from_id, &connection.to_id);
+        }
+        events.push(EditorEvent::CardRestored { card_id: card.id.clone() });
+        events.push(EditorEvent::ConnectionsUpdated {
+            connections: self.document.connections.clone(),
+        });
+        true
+    }
+
+    /// Adds or removes one connection for an undo or redo; returns whether it changed.
+    fn set_connection(&mut self, connection: &PrerequisiteConnection, present: bool, events: &mut Vec<EditorEvent>) -> bool {
+        let changed = if present {
+            self.document.try_add_connection(&connection.from_id, &connection.to_id).is_ok()
+        } else {
+            self.document.remove_connection(&connection.from_id, &connection.to_id)
+        };
+        if changed {
+            events.push(EditorEvent::ConnectionsUpdated {
+                connections: self.document.connections.clone(),
+            });
+        }
+        changed
+    }
+
+    /// Undoes (`forward` false) or redoes one history action; returns whether labels changed.
+    fn apply_history(&mut self, action: &HistoryAction, forward: bool, events: &mut Vec<EditorEvent>) -> bool {
+        match action {
+            HistoryAction::MoveCards { moves } => self.place_cards(
+                moves.iter().map(|m| (m.card_id.as_str(), if forward { m.to } else { m.from })),
+                events,
+            ),
+            HistoryAction::DeleteCard { card, index, connections } => {
+                if forward {
+                    self.delete_card(&card.id, events).is_some()
+                } else {
+                    self.restore_card(card, *index, connections, events)
+                }
+            }
+            HistoryAction::AddConnection { connection } => {
+                self.set_connection(connection, forward, events);
+                false
+            }
+            HistoryAction::RemoveConnection { connection } => {
+                self.set_connection(connection, !forward, events);
+                false
+            }
+        }
+    }
+
     /// Applies one JSON-protocol command and returns the resulting events.
     ///
     /// The command is applied to CPU state first. The Wasm boundary then uses
@@ -490,12 +595,7 @@ impl EditorState {
                             })
                             .collect();
                         if !moves.is_empty() {
-                            self.undo_stack.push(HistoryAction::MoveCards { moves });
-                            self.redo_stack.clear();
-                            events.push(EditorEvent::HistoryChanged {
-                                can_undo: true,
-                                can_redo: false,
-                            });
+                            self.record(HistoryAction::MoveCards { moves }, &mut events);
                         }
                     }
                     InteractionState::SelectingBox { origin_world, .. } => {
@@ -533,11 +633,11 @@ impl EditorState {
                 if self.cancel_active_interaction(&mut events) {
                     labels_changed = true;
                 }
-                if let Some(HistoryAction::MoveCards { moves }) = self.undo_stack.pop() {
-                    if self.place_cards(moves.iter().map(|m| (m.card_id.as_str(), m.from)), &mut events) {
+                if let Some(action) = self.undo_stack.pop() {
+                    if self.apply_history(&action, false, &mut events) {
                         labels_changed = true;
                     }
-                    self.redo_stack.push(HistoryAction::MoveCards { moves });
+                    self.redo_stack.push(action);
                     events.push(EditorEvent::HistoryChanged {
                         can_undo: !self.undo_stack.is_empty(),
                         can_redo: true,
@@ -548,15 +648,29 @@ impl EditorState {
                 if self.cancel_active_interaction(&mut events) {
                     labels_changed = true;
                 }
-                if let Some(HistoryAction::MoveCards { moves }) = self.redo_stack.pop() {
-                    if self.place_cards(moves.iter().map(|m| (m.card_id.as_str(), m.to)), &mut events) {
+                if let Some(action) = self.redo_stack.pop() {
+                    if self.apply_history(&action, true, &mut events) {
                         labels_changed = true;
                     }
-                    self.undo_stack.push(HistoryAction::MoveCards { moves });
+                    self.undo_stack.push(action);
                     events.push(EditorEvent::HistoryChanged {
                         can_undo: true,
                         can_redo: !self.redo_stack.is_empty(),
                     });
+                }
+            }
+            EditorCommand::DeleteCard { id } => {
+                if self.cancel_active_interaction(&mut events) {
+                    labels_changed = true;
+                }
+                match self.delete_card(&id, &mut events) {
+                    Some((card, index, connections)) => {
+                        labels_changed = true;
+                        self.record(HistoryAction::DeleteCard { card, index, connections }, &mut events);
+                    }
+                    None => events.push(EditorEvent::Error {
+                        message: format!("Skill card '{}' does not exist", id),
+                    }),
                 }
             }
             EditorCommand::ResizeViewport { width, height } => {
@@ -572,6 +686,8 @@ impl EditorState {
                         events.push(EditorEvent::ConnectionsUpdated {
                             connections: self.document.connections.clone(),
                         });
+                        let connection = PrerequisiteConnection::new(from_id.clone(), to_id.clone());
+                        self.record(HistoryAction::AddConnection { connection }, &mut events);
                     }
                     Err(ConnectionError::SourceCardNotFound(id)) => {
                         events.push(EditorEvent::ConnectionRejected {
@@ -638,6 +754,8 @@ impl EditorState {
                     events.push(EditorEvent::ConnectionsUpdated {
                         connections: self.document.connections.clone(),
                     });
+                    let connection = PrerequisiteConnection::new(from_id, to_id);
+                    self.record(HistoryAction::RemoveConnection { connection }, &mut events);
                 } else {
                     events.push(EditorEvent::Error {
                         message: format!("Connection from '{}' to '{}' does not exist", from_id, to_id),

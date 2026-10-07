@@ -980,6 +980,8 @@ fn test_read_only_canvas_navigates_and_selects_without_changing_the_document() {
         });
     }
     state.apply_command(EditorCommand::ConnectSkills { from_id: "card-a".into(), to_id: "card-b".into() });
+    let document = state.document.clone();
+    state.apply_command(EditorCommand::LoadDocument { document });
     let events = state.apply_command(EditorCommand::SetReadOnly { read_only: true });
     assert!(events.is_empty());
     let document = state.document.clone();
@@ -1123,6 +1125,9 @@ fn multiselect_state() -> EditorState {
     }
     state.apply_command(EditorCommand::ConnectSkills { from_id: "card-a".into(), to_id: "card-b".into() });
     state.apply_command(EditorCommand::ConnectSkills { from_id: "card-b".into(), to_id: "card-d".into() });
+    // Opened as a saved document: its editing history starts empty.
+    let document = state.document.clone();
+    state.apply_command(EditorCommand::LoadDocument { document });
     state
 }
 
@@ -1398,4 +1403,123 @@ fn test_multiselect_follows_canvas_edit_permissions() {
     assert_eq!(position(&state, "card-b"), Point::new(450.0, 100.0));
     state.apply_command(EditorCommand::Undo);
     assert_eq!(position(&state, "card-b"), Point::new(400.0, 100.0));
+}
+
+/// A → B → C, opened as a saved document, with B selected.
+fn deletion_state() -> EditorState {
+    let mut state = EditorState::new();
+    for (id, x) in [("card-a", 100.0), ("card-b", 400.0), ("card-c", 700.0)] {
+        state.apply_command(EditorCommand::CreateCard { id: id.into(), title: id.to_uppercase(), position: Point::new(x, 120.0), size: None });
+    }
+    state.apply_command(EditorCommand::ConnectSkills { from_id: "card-a".into(), to_id: "card-b".into() });
+    state.apply_command(EditorCommand::ConnectSkills { from_id: "card-b".into(), to_id: "card-c".into() });
+    let document = state.document.clone();
+    state.apply_command(EditorCommand::LoadDocument { document });
+    state.apply_command(EditorCommand::SelectCard { id: Some("card-b".into()) });
+    state
+}
+
+fn edges(state: &EditorState) -> Vec<String> {
+    let mut list: Vec<String> = state.document.connections.iter().map(|c| format!("{}>{}", c.from_id, c.to_id)).collect();
+    list.sort();
+    list
+}
+
+#[test]
+fn test_deletion_removes_a_card_with_its_connections_as_one_undo_step() {
+    let mut state = deletion_state();
+    let saved = state.document.clone();
+    let deleted = state.apply_command(EditorCommand::DeleteCard { id: "card-b".into() });
+    assert!(deleted.iter().any(|e| matches!(e, EditorEvent::CardDeleted { card_id } if card_id == "card-b")));
+    assert!(deleted.iter().any(|e| matches!(e, EditorEvent::ConnectionsUpdated { connections } if connections.is_empty())));
+    assert!(deleted.iter().any(|e| matches!(e, EditorEvent::SelectionChanged { selected_id: None, selected_ids, .. } if selected_ids.is_empty())));
+    assert!(deleted.iter().any(|e| matches!(e, EditorEvent::HistoryChanged { can_undo: true, can_redo: false })));
+    let labels = deleted.iter().find_map(|e| match e { EditorEvent::LabelsUpdated { labels } => Some(labels.clone()), _ => None }).expect("labels follow the deletion");
+    assert_eq!(labels.iter().map(|l| l.card_id.as_str()).collect::<Vec<_>>(), vec!["card-a", "card-c"]);
+    // Nothing in the document names the deleted card any more.
+    assert!(state.document.find_card("card-b").is_none());
+    assert!(edges(&state).is_empty());
+    assert_eq!(state.undo_stack.len(), 1);
+
+    // One undo puts back the card at its place, position and title, with both its connections.
+    let undone = state.apply_command(EditorCommand::Undo);
+    assert!(undone.iter().any(|e| matches!(e, EditorEvent::CardRestored { card_id } if card_id == "card-b")));
+    assert!(undone.iter().any(|e| matches!(e, EditorEvent::HistoryChanged { can_undo: false, can_redo: true })));
+    assert!(undone.iter().any(|e| matches!(e, EditorEvent::LabelsUpdated { labels } if labels.len() == 3)));
+    assert_eq!(state.document, saved);
+    // One redo deletes it again.
+    let redone = state.apply_command(EditorCommand::Redo);
+    assert!(redone.iter().any(|e| matches!(e, EditorEvent::CardDeleted { card_id } if card_id == "card-b")));
+    assert!(state.document.find_card("card-b").is_none() && edges(&state).is_empty());
+    state.apply_command(EditorCommand::Undo);
+    assert_eq!(state.document, saved);
+
+    // A deletion during a drag first puts the dragged cards back.
+    state.apply_command(EditorCommand::PointerDown { screen_x: 120.0, screen_y: 140.0, shift_key: false });
+    state.apply_command(EditorCommand::PointerMove { screen_x: 220.0, screen_y: 240.0 });
+    state.apply_command(EditorCommand::DeleteCard { id: "card-c".into() });
+    state.apply_command(EditorCommand::PointerUp { screen_x: 300.0, screen_y: 300.0 });
+    assert_eq!(state.document.find_card("card-a").unwrap().position, Point::new(100.0, 120.0));
+    state.apply_command(EditorCommand::Undo);
+    assert_eq!(state.document, saved);
+}
+
+#[test]
+fn test_deletion_connection_changes_are_undo_steps_so_undo_never_forms_a_cycle() {
+    let mut state = deletion_state();
+    // Remove A → B, then add C → A, which only the removal allowed.
+    state.apply_command(EditorCommand::DisconnectSkills { from_id: "card-a".into(), to_id: "card-b".into() });
+    let added = state.apply_command(EditorCommand::ConnectSkills { from_id: "card-c".into(), to_id: "card-a".into() });
+    assert!(added.iter().any(|e| matches!(e, EditorEvent::HistoryChanged { can_undo: true, can_redo: false })));
+    assert_eq!(edges(&state), vec!["card-b>card-c", "card-c>card-a"]);
+    // Undoing in order removes C → A before A → B comes back.
+    state.apply_command(EditorCommand::Undo);
+    assert_eq!(edges(&state), vec!["card-b>card-c"]);
+    let undone = state.apply_command(EditorCommand::Undo);
+    assert!(undone.iter().any(|e| matches!(e, EditorEvent::ConnectionsUpdated { connections } if connections.len() == 2)));
+    assert_eq!(edges(&state), vec!["card-a>card-b", "card-b>card-c"]);
+    state.apply_command(EditorCommand::Redo);
+    state.apply_command(EditorCommand::Redo);
+    assert_eq!(edges(&state), vec!["card-b>card-c", "card-c>card-a"]);
+    // A rejected connection is not an edit.
+    let cycle = state.apply_command(EditorCommand::ConnectSkills { from_id: "card-a".into(), to_id: "card-b".into() });
+    assert!(cycle.iter().any(|e| matches!(e, EditorEvent::ConnectionRejected { .. })));
+    assert!(!cycle.iter().any(|e| matches!(e, EditorEvent::HistoryChanged { .. })));
+    assert_eq!(state.undo_stack.len(), 2);
+}
+
+#[test]
+fn test_deletion_restore_validates_connections_again() {
+    let mut state = deletion_state();
+    state.apply_command(EditorCommand::DeleteCard { id: "card-b".into() });
+    // A change outside the editing history (as a loaded document could bring) adds C → A.
+    state.document.try_add_connection("card-c", "card-a").unwrap();
+    state.apply_command(EditorCommand::Undo);
+    // B is back; A → B fits, but B → C would close A → B → C → A and stays out.
+    assert!(state.document.find_card("card-b").is_some());
+    assert_eq!(edges(&state), vec!["card-a>card-b", "card-c>card-a"]);
+}
+
+#[test]
+fn test_deletion_follows_canvas_permissions_and_reports_unknown_cards() {
+    let mut state = deletion_state();
+    let saved = state.document.clone();
+    let unknown = state.apply_command(EditorCommand::DeleteCard { id: "card-x".into() });
+    assert!(unknown.len() == 1 && matches!(&unknown[0], EditorEvent::Error { message } if message.contains("card-x")));
+    assert!(state.undo_stack.is_empty());
+    for (read_only, layout_only) in [(true, false), (false, true)] {
+        let mut state = deletion_state();
+        state.apply_command(EditorCommand::SetReadOnly { read_only });
+        state.apply_command(EditorCommand::SetLayoutOnly { layout_only });
+        let refused = state.apply_command(EditorCommand::DeleteCard { id: "card-b".into() });
+        assert!(refused.len() == 1 && matches!(&refused[0], EditorEvent::Error { .. }), "{refused:?}");
+        assert_eq!(state.document, saved);
+    }
+    // The command and its events cross the JSON boundary.
+    let cmd: EditorCommand = serde_json::from_str(r#"{"type":"DeleteCard","id":"card-b"}"#).unwrap();
+    assert_eq!(cmd, EditorCommand::DeleteCard { id: "card-b".into() });
+    for event in [EditorEvent::CardDeleted { card_id: "card-b".into() }, EditorEvent::CardRestored { card_id: "card-b".into() }] {
+        let json = serde_json::to_string(&event).unwrap();
+        assert_eq!(serde_json::from_str::<EditorEvent>(&json).unwrap(), event);
+    }
 }

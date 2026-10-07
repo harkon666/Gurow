@@ -161,6 +161,31 @@ describe('reapplying Path work onto the accepted document', () => {
     expect(reapplyPath(unconnected, reversed, theirs).editor.connections).toEqual([{ from_id: 'vec', to_id: 'mat' }, { from_id: 'mat', to_id: 'vec' }])
   })
 
+  it('applies the owner\'s deletion of a Skill with its Tasks, card and connections, keeping what was added elsewhere', () => {
+    const base = doc()
+    const withoutVectors = (d: PathWork) => {
+      d.application.skills = d.application.skills.filter((s) => s.id !== 'vec')
+      d.editor.cards = d.editor.cards.filter((c) => c.id !== 'vec')
+      d.editor.connections = []
+    }
+    const mine = edit(base, withoutVectors)
+    // Elsewhere: Vectors got a new Task and a connection, and a new Skill arrived.
+    const current = edit(base, (d) => {
+      d.application.skills[0].tasks.push({ id: 't2', title: 'Scale one', description: '' })
+      d.application.skills.push({ id: 'det', title: 'Determinants', outcome: 'Compute determinants', tasks: [] })
+      d.editor.cards.push({ id: 'det', title: 'Determinants', position: { x: 700, y: 100 } })
+      d.editor.connections.push({ from_id: 'mat', to_id: 'det' }, { from_id: 'vec', to_id: 'det' })
+    })
+    const merged = reapplyPath(base, mine, current)
+    expect(merged.application.skills.map((s) => s.id)).toEqual(['mat', 'det'])
+    expect(merged.editor.cards.map((c) => c.id)).toEqual(['mat', 'det'])
+    expect(merged.editor.connections).toEqual([{ from_id: 'mat', to_id: 'det' }])
+    expect(pathWorkProblem(merged)).toBeNull()
+    // A deleted Task of a kept Skill leaves too; Tasks added elsewhere stay.
+    const lessTasks = edit(base, (d) => { d.application.skills[0].tasks = [] })
+    expect(reapplyPath(base, lessTasks, current).application.skills[0].tasks.map((t) => t.id)).toEqual(['t2'])
+  })
+
   it('reapplies nothing when the accepted document already holds the owner\'s changes', () => {
     const base = doc()
     const mine = edit(base, (d) => { d.goal = 'New goal'; d.editor.cards[0].position = { x: 1, y: 2 } })
@@ -196,6 +221,13 @@ describe('inspecting kept work', () => {
       'Removed the connection “Vectors” → “Matrices”',
     ])
     expect(pathChanges(base, base)).toEqual([])
+    // A deleted Skill is one change; its connections went with it.
+    const deleted = edit(base, (d) => {
+      d.application.skills = d.application.skills.filter((s) => s.id !== 'vec')
+      d.editor.cards = d.editor.cards.filter((c) => c.id !== 'vec')
+      d.editor.connections = []
+    })
+    expect(pathChanges(base, deleted)).toEqual(['Deleted the Skill “Vectors” with 1 Task'])
   })
 
   it('names Skills in a backend refusal', () => {

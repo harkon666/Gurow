@@ -2,6 +2,7 @@ import { and, asc, desc, eq, sql, type SQL } from 'drizzle-orm'
 import type { Database } from './db/client'
 import { lockedTimestamp } from './db/clock'
 import { learningPaths, personalMasteryEvents, personalOverrideRecords, personalPrerequisites, personalSkills, personalTasks, personalWorkspaces, personalXpEvents } from './db/schema'
+import { personalHistory } from './retention'
 
 export type Tx = Parameters<Parameters<Database['transaction']>[0]>[0]
 
@@ -52,6 +53,8 @@ async function readState(tx: Tx, learningPathId: string) {
     ...await derivePersonalState(tx, learningPathId),
     xpHistory: await tx.select().from(personalXpEvents).where(eq(personalXpEvents.learningPathId, learningPathId)).orderBy(asc(personalXpEvents.id)),
     masteryHistory: await tx.select().from(personalMasteryEvents).where(eq(personalMasteryEvents.learningPathId, learningPathId)).orderBy(asc(personalMasteryEvents.id)),
+    // The Skills with learning history: a save cannot delete them (ADR 0018), so the editor offers no deletion.
+    historySkillIds: [...(await personalHistory(tx, learningPathId)).skills].sort(),
   }
 }
 

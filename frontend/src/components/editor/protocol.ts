@@ -125,6 +125,12 @@ export const DisconnectSkillsCommandSchema = z.object({
   to_id: z.string(),
 })
 
+/** Deletes a card with its connections as one undo step; the application decides whether the Skill may go. */
+export const DeleteCardCommandSchema = z.object({
+  type: z.literal('DeleteCard'),
+  id: z.string(),
+})
+
 export const ExportSnapshotCommandSchema = z.object({
   type: z.literal('ExportSnapshot'),
 })
@@ -162,6 +168,7 @@ export const EditorCommandSchema = z.discriminatedUnion('type', [
   ResizeViewportCommandSchema,
   ConnectSkillsCommandSchema,
   DisconnectSkillsCommandSchema,
+  DeleteCardCommandSchema,
   ExportSnapshotCommandSchema,
   SetCameraCommandSchema,
   SetReadOnlyCommandSchema,
@@ -182,6 +189,18 @@ export const CardMovedEventSchema = z.object({
   type: z.literal('CardMoved'),
   card_id: z.string(),
   position: PointSchema,
+})
+
+/** A card left the document (a deletion or its redo), with its connections. */
+export const CardDeletedEventSchema = z.object({
+  type: z.literal('CardDeleted'),
+  card_id: z.string(),
+})
+
+/** A deleted card came back (the undo of a deletion), with its connections. */
+export const CardRestoredEventSchema = z.object({
+  type: z.literal('CardRestored'),
+  card_id: z.string(),
 })
 
 /** `selected_id` names the selected Skill when exactly one is selected; `selected_ids` lists every selected Skill. */
@@ -256,6 +275,8 @@ export const EditorEventSchema = z.discriminatedUnion('type', [
   DocumentLoadedEventSchema,
   CardCreatedEventSchema,
   CardMovedEventSchema,
+  CardDeletedEventSchema,
+  CardRestoredEventSchema,
   SelectionChangedEventSchema,
   LabelsUpdatedEventSchema,
   CameraChangedEventSchema,

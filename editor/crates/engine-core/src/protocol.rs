@@ -82,6 +82,11 @@ pub enum EditorCommand {
         from_id: String,
         to_id: String,
     },
+    /// Deletes a card with its connections, as one undo step. Whether the Skill may
+    /// be deleted (no learning history) is the application's and backend's decision.
+    DeleteCard {
+        id: String,
+    },
     ExportSnapshot,
     SetCamera {
         offset_x: f32,
@@ -114,6 +119,7 @@ impl EditorCommand {
         matches!(
             self,
             EditorCommand::CreateCard { .. }
+                | EditorCommand::DeleteCard { .. }
                 | EditorCommand::ConnectSkills { .. }
                 | EditorCommand::DisconnectSkills { .. }
         )
@@ -129,6 +135,14 @@ pub enum EditorEvent {
     CardMoved {
         card_id: String,
         position: Point,
+    },
+    /// A card left the document (a deletion, or the redo of one) with its connections.
+    CardDeleted {
+        card_id: String,
+    },
+    /// A deleted card came back (the undo of a deletion) with its connections.
+    CardRestored {
+        card_id: String,
     },
     /// `selected_id` names the selected card when exactly one is selected;
     /// `selected_ids` lists every selected card.

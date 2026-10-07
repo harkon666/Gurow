@@ -57,6 +57,10 @@ interface UseWasmEditorOptions {
   readOnly?: boolean
   /** Positions only (a Coach arranging a published Version): drag, undo and redo, no new cards or connection changes. */
   layoutOnly?: boolean
+  /** A card left the document (a deletion, or its redo): the application drops its Skill's content. */
+  onCardDeleted?: (id: string) => void
+  /** A deleted card came back (an undo): the application brings its Skill's content back. */
+  onCardRestored?: (id: string) => void
 }
 
 /**
@@ -77,6 +81,8 @@ export function useWasmEditor({
   onCameraChanged,
   readOnly = false,
   layoutOnly = false,
+  onCardDeleted,
+  onCardRestored,
 }: UseWasmEditorOptions) {
   const editorRef = useRef<WasmEditor | null>(null)
   const activeDeviceRef = useRef<any>(null)
@@ -220,6 +226,11 @@ export function useWasmEditor({
   const onCameraChangedRef = useRef(onCameraChanged)
   onCameraChangedRef.current = onCameraChanged
 
+  const onCardDeletedRef = useRef(onCardDeleted)
+  onCardDeletedRef.current = onCardDeleted
+  const onCardRestoredRef = useRef(onCardRestored)
+  onCardRestoredRef.current = onCardRestored
+
   // Kept in sync on every render, like the callback refs above. The initial
   // document usually arrives after this component has already mounted, so a ref
   // frozen at first render would make the engine load an empty document and
@@ -249,6 +260,13 @@ export function useWasmEditor({
           break
         case 'CardCreated':
           onOperationCompletedRef.current?.()
+          break
+        // Before the HistoryChanged that follows, so the save it triggers carries the application change too.
+        case 'CardDeleted':
+          onCardDeletedRef.current?.(event.card_id)
+          break
+        case 'CardRestored':
+          onCardRestoredRef.current?.(event.card_id)
           break
         case 'LabelsUpdated':
           nextLabels = event.labels
@@ -767,6 +785,8 @@ export function useWasmEditor({
     [dispatch]
   )
 
+  const deleteCard = useCallback((id: string) => dispatch({ type: 'DeleteCard', id }), [dispatch])
+
   const exportSnapshot = useCallback((): {
     cards: SkillCard[]
     connections: PrerequisiteConnection[]
@@ -920,6 +940,7 @@ export function useWasmEditor({
     createCard,
     connectSkills,
     disconnectSkills,
+    deleteCard,
     exportSnapshot,
     setCamera,
     selectCard,

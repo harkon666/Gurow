@@ -199,11 +199,6 @@ it('AC3: one Path per Skill and one Skill per Task; a refused save writes nothin
     ...[px.tasks.otherTask.id, px.tasks.peerTask.id, fx.content.taskA.id].map((id) => ['task_owned_elsewhere', 409, edit(doc, (d) => {
       d.application.skills[0].tasks.push({ id, title: 'Stolen task', description: '' })
     })] as [string, number, ReturnType<typeof edit>]),
-    // Removing content is not part of this slice.
-    ['skill_missing', 422, edit(doc, (d) => {
-      d.editor.cards.splice(1, 1); d.application.skills.splice(1, 1); d.editor.connections = []
-    })],
-    ['task_missing', 422, edit(doc, (d) => { d.application.skills[0].tasks = [] })],
   ]
   for (const [error, status, body] of cases) {
     expect(await json(save(doc.learningPath.id, body), status)).toMatchObject({ error })

@@ -157,6 +157,8 @@ export interface LearningState {
   xpHistory: XpEvent[]
   masteryHistory: { id: number; skillId: string; occurredAt: string; action: 'declare' | 'withdraw' }[]
   overrideHistory: { skillId: string; occurredAt: string; action: 'grant' | 'revoke' }[]
+  /** Skills with learning history (ADR 0018): a save cannot delete them. */
+  historySkillIds: string[]
 }
 
 /** One owner action on the Path's learning records; every one is idempotent, so a retry never multiplies it. */

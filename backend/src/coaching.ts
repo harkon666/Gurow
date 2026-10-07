@@ -1,9 +1,10 @@
 import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { defaultPosition, LIMITS, SNAPSHOT_FORMAT_VERSION, type DocumentInput, type TaskInput } from './authoring'
 import type { Database } from './db/client'
-import { coachWorkspaces, learningPaths, learningPathVersions, skills, tasks, versionPrerequisites, versionSkillCards, versionSkills, versionTasks } from './db/schema'
+import { coachWorkspaces, learningPaths, learningPathVersions, versionPrerequisites, versionSkillCards, versionSkills, versionTasks } from './db/schema'
 import type { Tx } from './personal'
 import { checkRequiredRoute, type BlockedSkill } from './publication'
+import { claimLogicalIds } from './logicalIds'
 import { publishedContent } from './retention'
 
 /**
@@ -242,7 +243,7 @@ export async function saveVersionLayout(db: Database, versionId: string, account
 
 export type DraftRefusal =
   | 'learning_path_not_found' | 'no_open_draft' | 'stale_revision' | 'skill_owned_elsewhere' | 'task_owned_elsewhere'
-  | 'task_skill_mismatch' | 'skill_missing' | 'task_missing' | 'skill_has_history' | 'task_has_history'
+  | 'task_skill_mismatch' | 'skill_has_history' | 'task_has_history'
 type SaveResult = { ok: true; document: CoachPathDocument } | { ok: false; refusal: DraftRefusal; detail: string; current?: CoachPathDocument }
 
 class Refused extends Error {
@@ -278,30 +279,6 @@ export async function saveCoachDraft(db: Database, learningPathId: string, accou
   }
 }
 
-/**
- * Claims new logical IDs for this Path. An ID already known is accepted only when
- * it is this Path's own Skill (or a Task of the same Skill), e.g. from an earlier
- * Version; otherwise the save is refused.
- */
-async function claimIdentities(tx: Tx, pathId: string, newSkillIds: string[], newTasks: (TaskInput & { skillId: string })[]) {
-  if (newSkillIds.length > 0) {
-    await tx.insert(skills).values(newSkillIds.map((id) => ({ id, learningPathId: pathId }))).onConflictDoNothing()
-    const known = await tx.select().from(skills).where(inArray(skills.id, newSkillIds))
-    const foreign = known.find((row) => row.learningPathId !== pathId)
-    if (foreign) throw new Refused('skill_owned_elsewhere', `Skill ${foreign.id} belongs to another Learning Path`)
-  }
-  if (newTasks.length > 0) {
-    await tx.insert(tasks).values(newTasks.map((task) => ({ id: task.id, skillId: task.skillId }))).onConflictDoNothing()
-    const known = new Map((await tx.select({ id: tasks.id, skillId: tasks.skillId, pathId: skills.learningPathId }).from(tasks)
-      .innerJoin(skills, eq(skills.id, tasks.skillId)).where(inArray(tasks.id, newTasks.map((task) => task.id)))).map((row) => [row.id, row]))
-    for (const task of newTasks) {
-      const row = known.get(task.id)!
-      if (row.pathId !== pathId) throw new Refused('task_owned_elsewhere', `Task ${task.id} belongs to another Skill`)
-      if (row.skillId !== task.skillId) throw new Refused('task_skill_mismatch', `Task ${task.id} belongs to another Skill`)
-    }
-  }
-}
-
 /** Writes the difference between the stored and the sent Draft; returns whether there was any. */
 async function writeDraft(tx: Tx, path: typeof learningPaths.$inferSelect, draftId: string, input: DocumentInput) {
   let changed = false
@@ -310,6 +287,7 @@ async function writeDraft(tx: Tx, path: typeof learningPaths.$inferSelect, draft
   const sentSkills = new Set(input.application.skills.map((skill) => skill.id))
   const sentTasks = new Set(input.application.skills.flatMap((skill) => skill.tasks.map((task) => task.id)))
   // Content a published Version holds is history (ADR 0018): it is never deleted, and a Task leaves the Draft only by archival.
+  // Content only the Draft holds is unused and is deleted.
   const removedSkills = [...existingSkills.values()].filter((skill) => !sentSkills.has(skill.skillId))
   const removedTasks = [...existingTasks.values()].filter((task) => !sentTasks.has(task.taskId))
   if (removedSkills.length > 0 || removedTasks.length > 0) {
@@ -319,8 +297,6 @@ async function writeDraft(tx: Tx, path: typeof learningPaths.$inferSelect, draft
     const worked = removedTasks.find((task) => published.tasks.has(task.taskId))
     if (worked) throw new Refused('task_has_history', `Task "${worked.title}" is part of a published Version and cannot be deleted; archive it from this Draft instead`)
   }
-  for (const skill of removedSkills) throw new Refused('skill_missing', `Skill ${skill.skillId} is missing; removing Skills is not supported yet`)
-  for (const task of removedTasks) throw new Refused('task_missing', `Task ${task.taskId} is missing; removing Tasks is not supported yet`)
 
   const newSkills = input.application.skills.filter((skill) => !existingSkills.has(skill.id))
   const newTasks: (TaskInput & { skillId: string; ordinal: number })[] = []
@@ -331,7 +307,8 @@ async function writeDraft(tx: Tx, path: typeof learningPaths.$inferSelect, draft
       else if (row.skillId !== skill.id) throw new Refused('task_skill_mismatch', `Task ${task.id} belongs to another Skill`)
     }
   }
-  await claimIdentities(tx, path.id, newSkills.map((skill) => skill.id), newTasks)
+  const claim = await claimLogicalIds(tx, path.id, newSkills.map((skill) => skill.id), newTasks)
+  if (claim) throw new Refused(claim.refusal, claim.detail)
 
   for (const [ordinal, skill] of input.application.skills.entries()) {
     const values = { title: skill.title, learningOutcome: skill.outcome, optional: skill.optional!, xpThreshold: skill.xpThreshold!, ordinal }
@@ -382,6 +359,19 @@ async function writeDraft(tx: Tx, path: typeof learningPaths.$inferSelect, draft
   if (addedEdges.length > 0) {
     changed = true
     await tx.insert(versionPrerequisites).values(addedEdges.map((edge) => ({ learningPathVersionId: draftId, prerequisiteSkillId: edge.from_id, skillId: edge.to_id })))
+  }
+
+  // Unused content leaves the Draft for good, after its connections went with the edges above.
+  // Its logical IDs stay this Path's, so an editor undo can bring it back.
+  if (removedTasks.length > 0) {
+    changed = true
+    await tx.delete(versionTasks).where(and(eq(versionTasks.learningPathVersionId, draftId), inArray(versionTasks.taskId, removedTasks.map((task) => task.taskId))))
+  }
+  if (removedSkills.length > 0) {
+    changed = true
+    const ids = removedSkills.map((skill) => skill.skillId)
+    await tx.delete(versionSkillCards).where(and(eq(versionSkillCards.learningPathVersionId, draftId), inArray(versionSkillCards.skillId, ids)))
+    await tx.delete(versionSkills).where(and(eq(versionSkills.learningPathVersionId, draftId), inArray(versionSkills.skillId, ids)))
   }
   return changed
 }

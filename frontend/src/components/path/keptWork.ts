@@ -216,8 +216,10 @@ function mergeSkill(base: PathSkill | undefined, mine: PathSkill, current: PathS
   const mineTasks = byId(mine.tasks)
   const currentTasks = new Set(current.tasks.map((task) => task.id))
   const tasks = [
-    ...current.tasks.map((task) => (mineTasks.has(task.id) ? mergeTask(baseTasks.get(task.id), mineTasks.get(task.id)!, task) : task)),
-    // Tasks the owner added; Tasks are never removed by an edit, so the accepted ones all stay.
+    // The owner's deletions apply (a deleted Task is in the base, not in theirs); Tasks added elsewhere stay.
+    ...current.tasks.filter((task) => mineTasks.has(task.id) || !baseTasks.has(task.id))
+      .map((task) => (mineTasks.has(task.id) ? mergeTask(baseTasks.get(task.id), mineTasks.get(task.id)!, task) : task)),
+    // Tasks the owner added.
     ...mine.tasks.filter((task) => !currentTasks.has(task.id) && !baseTasks.has(task.id)),
   ]
   if (!base) return { ...current, ...mine, tasks }
@@ -245,8 +247,12 @@ export function reapplyPath(base: PathWork, mine: PathWork, current: PathWork): 
   const baseSkills = byId(base.application.skills)
   const mineSkills = byId(mine.application.skills)
   const currentSkills = new Set(current.application.skills.map((skill) => skill.id))
+  // Skills the owner deleted leave with their cards and connections, even where they were edited elsewhere;
+  // the backend still refuses the save if they gained learning history meanwhile.
+  const deleted = new Set([...baseSkills.keys()].filter((id) => !mineSkills.has(id)))
   const skills = [
-    ...current.application.skills.map((skill) => (mineSkills.has(skill.id) ? mergeSkill(baseSkills.get(skill.id), mineSkills.get(skill.id)!, skill) : skill)),
+    ...current.application.skills.filter((skill) => !deleted.has(skill.id))
+      .map((skill) => (mineSkills.has(skill.id) ? mergeSkill(baseSkills.get(skill.id), mineSkills.get(skill.id)!, skill) : skill)),
     ...mine.application.skills.filter((skill) => !currentSkills.has(skill.id) && !baseSkills.has(skill.id)),
   ]
   const titles = new Map(skills.map((skill) => [skill.id, skill.title]))
@@ -255,7 +261,7 @@ export function reapplyPath(base: PathWork, mine: PathWork, current: PathWork): 
   const mineCards = byId(mine.editor.cards)
   const currentCards = new Set(current.editor.cards.map((card) => card.id))
   const cards = [
-    ...current.editor.cards.map((card) => {
+    ...current.editor.cards.filter((card) => !deleted.has(card.id)).map((card) => {
       const own = mineCards.get(card.id), from = baseCards.get(card.id)
       return { id: card.id, title: titles.get(card.id) ?? card.title, position: own && from ? pick(from.position, own.position, card.position) : own?.position ?? card.position }
     }),
@@ -269,7 +275,7 @@ export function reapplyPath(base: PathWork, mine: PathWork, current: PathWork): 
     // The owner's removals apply; connections added elsewhere stay.
     ...current.editor.connections.filter((c) => !(basePairs.has(pairOf(c)) && !minePairs.has(pairOf(c)))),
     ...mine.editor.connections.filter((c) => !basePairs.has(pairOf(c)) && !current.editor.connections.some((d) => pairOf(d) === pairOf(c))),
-  ].map((c) => ({ from_id: c.from_id, to_id: c.to_id }))
+  ].filter((c) => !deleted.has(c.from_id) && !deleted.has(c.to_id)).map((c) => ({ from_id: c.from_id, to_id: c.to_id }))
 
   return {
     title: pick(base.title, mine.title, current.title),
@@ -308,6 +314,15 @@ export function pathChanges(base: PathWork, mine: PathWork): string[] {
       }
     }
   }
+  const mineSkills = byId(mine.application.skills)
+  const deleted = new Set(base.application.skills.filter((skill) => !mineSkills.has(skill.id)).map((skill) => skill.id))
+  for (const skill of base.application.skills) {
+    if (deleted.has(skill.id)) changes.push(`Deleted the Skill ${quoted(skill.title)}${skill.tasks.length ? ` with ${skill.tasks.length} Task${skill.tasks.length === 1 ? '' : 's'}` : ''}`)
+    else {
+      const kept = new Set(mineSkills.get(skill.id)!.tasks.map((task) => task.id))
+      for (const task of skill.tasks) if (!kept.has(task.id)) changes.push(`Deleted the Task ${quoted(task.title)} of ${quoted(skill.title)}`)
+    }
+  }
   const baseCards = byId(base.editor.cards)
   for (const card of mine.editor.cards) {
     const before = baseCards.get(card.id)
@@ -316,7 +331,8 @@ export function pathChanges(base: PathWork, mine: PathWork): string[] {
   const basePairs = new Set(base.editor.connections.map(pairOf))
   const minePairs = new Set(mine.editor.connections.map(pairOf))
   for (const c of mine.editor.connections) if (!basePairs.has(pairOf(c))) changes.push(`Connected ${name(c.from_id)} → ${name(c.to_id)}`)
-  for (const c of base.editor.connections) if (!minePairs.has(pairOf(c))) changes.push(`Removed the connection ${name(c.from_id)} → ${name(c.to_id)}`)
+  // A deleted Skill's connections went with it.
+  for (const c of base.editor.connections) if (!minePairs.has(pairOf(c)) && !deleted.has(c.from_id) && !deleted.has(c.to_id)) changes.push(`Removed the connection ${name(c.from_id)} → ${name(c.to_id)}`)
   return changes
 }
 

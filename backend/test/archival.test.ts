@@ -68,14 +68,16 @@ it('AC1: a personal Task or Skill with history cannot be deleted by a save; it i
     .toMatchObject({ error: 'task_has_history', detail: 'Task "Borrow checker exercises" has learning history and cannot be deleted; archive it instead' })
   expect(await json(request(`${personal()}/document`, 'learner', 'PUT', edit(doc, withoutSkill(px.skills.skillA.id))), 409)).toMatchObject({ error: 'skill_has_history' })
   expect(await json(request(`${personal()}/document`, 'learner', 'PUT', edit(doc, withoutSkill(px.skills.skillB.id))), 409)).toMatchObject({ error: 'skill_has_history' })
-  // Unused content is not deleted by this slice either; that deletion comes with the editor's delete action.
-  expect(await json(request(`${personal()}/document`, 'learner', 'PUT', edit(doc, withoutTask(px.tasks.taskA2.id))), 422)).toMatchObject({ error: 'task_missing' })
   expect(await json(request(personal(), 'learner'), 200)).toEqual(doc)
+  // Unused content is deleted (T32): the unread chapter Task of the same Skill leaves.
+  const pruned = await json(request(`${personal()}/document`, 'learner', 'PUT', edit(doc, withoutTask(px.tasks.taskA2.id))), 200)
+  expect(pruned.application.skills.flatMap((k: any) => k.tasks.map((t: any) => t.id))).not.toContain(px.tasks.taskA2.id)
 
   // Archiving it keeps its records readable; afterwards its Skill still cannot be deleted.
   const archived = await json(archivePersonal(px.tasks.taskA.id), 200)
   expect(archived.learningState.tasks.find((t: any) => t.taskId === px.tasks.taskA.id)).toMatchObject({ completed: true, xpContribution: 20, archivedAt: expect.any(String) })
   const after: Doc = archived.document
+  expect(after.learningPath.revision).toBe(pruned.learningPath.revision + 1)
   expect(await json(request(`${personal()}/document`, 'learner', 'PUT', edit(after, withoutSkill(px.skills.skillA.id))), 409)).toMatchObject({ error: 'skill_has_history' })
 })
 

@@ -32,6 +32,8 @@ interface SkillDetailPanelProps {
   onAddTask?: () => void
   /** Learning records of the selected Skill (Access, Mastery, XP), shown after its outcome. */
   learning?: React.ReactNode
+  /** Actions on the selected Skill itself (deletion), shown under its title. */
+  skillActions?: React.ReactNode
   /** Learning controls shown inside each Task card. */
   renderTaskExtra?: (taskId: string) => React.ReactNode
 }
@@ -82,6 +84,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
   onUpdateOutcome,
   onAddTask,
   learning,
+  skillActions,
   renderTaskExtra,
 }) => {
   const [selectedTargetId, setSelectedTargetId] = useState<string>('')
@@ -178,6 +181,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
               {selectedSkill.id}
             </code>
           </div>
+          {skillActions && <div className="mt-2 flex flex-col">{skillActions}</div>}
         </div>
 
         {/* Cycle Rejection Alert */}

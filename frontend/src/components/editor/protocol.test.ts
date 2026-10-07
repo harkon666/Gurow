@@ -194,6 +194,14 @@ describe('Editor Protocol Schemas (Matt Pocock SDD)', () => {
       expect(parsed).toEqual(event)
     })
 
+    it('validates DeleteCard and the deletion and restoration events', () => {
+      expect(EditorCommandSchema.parse({ type: 'DeleteCard', id: 'skill-1' })).toEqual({ type: 'DeleteCard', id: 'skill-1' })
+      expect(() => EditorCommandSchema.parse({ type: 'DeleteCard' })).toThrow()
+      expect(EditorEventSchema.parse({ type: 'CardDeleted', card_id: 'skill-1' })).toEqual({ type: 'CardDeleted', card_id: 'skill-1' })
+      expect(EditorEventSchema.parse({ type: 'CardRestored', card_id: 'skill-1' })).toEqual({ type: 'CardRestored', card_id: 'skill-1' })
+      expect(() => EditorEventSchema.parse({ type: 'CardRestored', id: 'skill-1' })).toThrow()
+    })
+
     it('validates SelectionChanged event with id/title, with nulls and for a multiselection', () => {
       const selChanged = EditorEventSchema.parse({
         type: 'SelectionChanged',

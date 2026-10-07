@@ -17,6 +17,8 @@ export interface WebGpuEditorActions {
   createCard: (id: string, title: string, position: Point, size?: Size) => void
   connectSkills: (fromId: string, toId: string) => void
   disconnectSkills: (fromId: string, toId: string) => void
+  /** Deletes a card with its connections as one undo step. */
+  deleteCard: (id: string) => void
   exportSnapshot: () => {
     cards: SkillCard[]
     connections: PrerequisiteConnection[]
@@ -56,6 +58,10 @@ interface WebGpuEditorProps {
    * connection added or removed (a Coach arranging a published Version's shared layout).
    */
   layoutOnly?: boolean
+  /** A card left the document (a deletion, or its redo). */
+  onCardDeleted?: (id: string) => void
+  /** A deleted card came back (an undo). */
+  onCardRestored?: (id: string) => void
 }
 
 export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
@@ -73,6 +79,8 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
   labelStatus,
   readOnly = false,
   layoutOnly = false,
+  onCardDeleted,
+  onCardRestored,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -108,6 +116,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
     createCard,
     connectSkills,
     disconnectSkills,
+    deleteCard,
     exportSnapshot,
     setCamera,
     selectCard,
@@ -132,6 +141,8 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
     onCameraChanged,
     readOnly,
     layoutOnly,
+    onCardDeleted,
+    onCardRestored,
   })
 
   useEffect(() => {
@@ -151,6 +162,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
       createCard,
       connectSkills,
       disconnectSkills,
+      deleteCard,
       exportSnapshot,
       setCamera,
       selectCard,
@@ -161,6 +173,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
     createCard,
     connectSkills,
     disconnectSkills,
+    deleteCard,
     exportSnapshot,
     setCamera,
     selectCard,

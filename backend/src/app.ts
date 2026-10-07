@@ -51,8 +51,6 @@ const SAVE_REFUSAL_STATUS: Record<authoring.SaveRefusal, ContentfulStatusCode> =
   task_owned_elsewhere: 409,
   task_skill_mismatch: 409,
   task_archived: 409,
-  skill_missing: 422,
-  task_missing: 422,
   skill_has_history: 409,
   task_has_history: 409,
 }
@@ -64,8 +62,6 @@ const DRAFT_REFUSAL_STATUS: Record<coaching.DraftRefusal, ContentfulStatusCode> 
   skill_owned_elsewhere: 409,
   task_owned_elsewhere: 409,
   task_skill_mismatch: 409,
-  skill_missing: 422,
-  task_missing: 422,
   skill_has_history: 409,
   task_has_history: 409,
 }
