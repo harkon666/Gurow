@@ -54,6 +54,14 @@ impl Rect {
     pub fn contains(&self, p: Point) -> bool {
         p.x >= self.x && p.x <= self.x + self.width && p.y >= self.y && p.y <= self.y + self.height
     }
+
+    /// Reports whether two rectangles overlap or touch.
+    pub fn intersects(&self, other: &Rect) -> bool {
+        self.x <= other.x + other.width
+            && other.x <= self.x + self.width
+            && self.y <= other.y + other.height
+            && other.y <= self.y + self.height
+    }
 }
 
 pub const MIN_WORLD_COORD: f32 = -1_000_000.0;

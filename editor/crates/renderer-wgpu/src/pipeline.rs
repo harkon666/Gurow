@@ -13,6 +13,9 @@ pub struct Uniforms {
     pub _pad1: [f32; 2],
 }
 
+/// `CardInstanceRaw::selected` value of the selection box instance.
+const SELECTION_BOX_INSTANCE: f32 = 2.0;
+
 #[repr(C)]
 #[derive(Copy, Clone, Debug, Pod, Zeroable)]
 pub struct CardInstanceRaw {
@@ -352,6 +355,8 @@ impl WgpuRenderer {
             );
         }
 
+        // The selection box being drawn is one more instance, drawn last so it
+        // lies over the cards (`selected` 2 marks it for the shader).
         let card_instances: Vec<CardInstanceRaw> = state
             .cards_with_selection()
             .map(|(c, is_selected)| CardInstanceRaw {
@@ -360,6 +365,12 @@ impl WgpuRenderer {
                 selected: if is_selected { 1.0 } else { 0.0 },
                 _pad: 0.0,
             })
+            .chain(state.selection_box().map(|area| CardInstanceRaw {
+                pos: [area.x, area.y],
+                size: [area.width, area.height],
+                selected: SELECTION_BOX_INSTANCE,
+                _pad: 0.0,
+            }))
             .collect();
 
         if card_instances.len() > self.card_buffer_capacity {

@@ -93,6 +93,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
     labels,
     labelCamera,
     benchmarkRevision,
+    selectedIds,
     connections,
     connectionRejection,
     zoom,
@@ -301,6 +302,17 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
           onPointerUp={handlePointerUp}
           className="absolute inset-0 w-full h-full block cursor-pointer touch-none"
         />
+
+        {/* A multiselection opens no single Skill; say what a drag will move. */}
+        {selectedIds.length > 1 && (
+          <div
+            id="canvas-selection-count"
+            data-count={selectedIds.length}
+            className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none text-[11px] text-blue-100 bg-blue-950/80 border border-blue-800/70 px-2.5 py-1 rounded-lg shadow"
+          >
+            {selectedIds.length} Skills selected{readOnly ? '' : ' · drag one to move them together'}
+          </div>
+        )}
 
         {/* HTML Labels Overlay: positioned from engine output */}
         <SkillCardOverlay labels={labels} camera={labelCamera} benchmarkRevision={benchmarkRevision} status={labelStatus} />

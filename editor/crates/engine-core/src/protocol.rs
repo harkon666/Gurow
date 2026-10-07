@@ -5,8 +5,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 /// Selection information emitted across the Rust/TypeScript boundary.
 pub struct SelectionChange {
+    /// The selected card when exactly one is selected.
     pub selected_id: Option<String>,
     pub title: Option<String>,
+    /// Every selected card, in document order.
+    pub selected_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -40,9 +43,13 @@ pub enum EditorCommand {
     SelectCard {
         id: Option<String>,
     },
+    /// With `shift_key` on the empty canvas, the press starts a selection box
+    /// instead of panning.
     PointerDown {
         screen_x: f32,
         screen_y: f32,
+        #[serde(default)]
+        shift_key: bool,
     },
     PointerMove {
         screen_x: f32,
@@ -123,9 +130,12 @@ pub enum EditorEvent {
         card_id: String,
         position: Point,
     },
+    /// `selected_id` names the selected card when exactly one is selected;
+    /// `selected_ids` lists every selected card.
     SelectionChanged {
         selected_id: Option<String>,
         title: Option<String>,
+        selected_ids: Vec<String>,
     },
     LabelsUpdated { labels: Vec<LabelLayout> },
     CameraChanged {

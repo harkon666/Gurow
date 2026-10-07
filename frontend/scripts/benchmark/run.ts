@@ -77,9 +77,9 @@ export function deliveredCount(inputs: Array<{ event_type?: string }>, noOpInput
   return inputs.filter(input => input.event_type !== 'pointerdown').length + noOpInputs
 }
 
-interface Options { size: BenchmarkSize | null; contract: string; out: string; port: number; headless: boolean; diagnostic: boolean; trace: boolean }
+interface Options { size: BenchmarkSize | null; contract: string; out: string; port: number; headless: boolean; diagnostic: boolean; trace: boolean; dragSelection: boolean }
 function args(argv: string[]): Options {
-  const parsed: Options = { size: null, contract: path.join(ROOT, 'docs/benchmarks/p1/protocol-v5.json'), out: path.join(ROOT, '.harness/t06/primary'), port: 3475, headless: false, diagnostic: false, trace: false }
+  const parsed: Options = { size: null, contract: path.join(ROOT, 'docs/benchmarks/p1/protocol-v5.json'), out: path.join(ROOT, '.harness/t06/primary'), port: 3475, headless: false, diagnostic: false, trace: false, dragSelection: false }
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i]
     if (flag === '--size' || flag === '--port' || flag === '--contract' || flag === '--out') {
@@ -92,6 +92,8 @@ function args(argv: string[]): Options {
     } else if (flag === '--headless') { parsed.headless = true; parsed.diagnostic = true }
     else if (flag === '--diagnostic') parsed.diagnostic = true
     else if (flag === '--trace') { parsed.trace = true; parsed.diagnostic = true }
+    // T31 (#32): every drag moves a box selection of the visible cards; never gate evidence.
+    else if (flag === '--drag-selection') { parsed.dragSelection = true; parsed.diagnostic = true }
     else throw new Error(`Unknown option ${flag}`)
   }
   if ((parsed.size !== null && !BENCHMARK_SIZES.includes(parsed.size)) || !Number.isSafeInteger(parsed.port) || parsed.port < 1 || parsed.port > 65535) throw new Error('Unsupported size or port')
@@ -223,6 +225,45 @@ function sendMotion(cdp: CDPSession, scenario: Scenario, point: Motion): Promise
     : cdp.send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: point.x, y: point.y, deltaX: point.delta_x!, deltaY: point.delta_y!, modifiers: point.modifiers ?? 0 })
 }
 
+/** Set by --drag-selection: each drag first box-selects the visible cards, so it moves all of them. */
+let dragSelection = false
+const SHIFT = 8
+
+/**
+ * Shift+drags a box between empty canvas points near opposite corners, through the
+ * same CDP input as the measured motion, so the drag that follows moves every
+ * visible card. Returns how many cards the box selected; the grabbed centre card must be one.
+ */
+async function selectVisibleCards(page: Page, cdp: CDPSession, fixture: BenchmarkFixture): Promise<number> {
+  const corners = await page.evaluate(() => {
+    const canvas = document.getElementById('editor-canvas')!, b = canvas.getBoundingClientRect()
+    const rects = [...document.querySelectorAll('[id^="card-label-"]')].map(el => el.getBoundingClientRect())
+    const empty = (x: number, y: number) => document.elementFromPoint(x, y) === canvas && rects.every(r => x < r.left - 4 || x > r.right + 4 || y < r.top - 4 || y > r.bottom + 4)
+    const find = (xs: number[], ys: number[]) => { for (const y of ys) for (const x of xs) if (empty(x, y)) return { x, y }; return null }
+    const steps = (from: number, to: number) => Array.from({ length: 40 }, (_, i) => from + (to - from) * i / 39)
+    return { from: find(steps(b.left + 2, b.left + 120), steps(b.top + 2, b.top + 120)), to: find(steps(b.right - 2, b.right - 120), steps(b.bottom - 2, b.bottom - 120)) }
+  })
+  if (!corners.from || !corners.to) throw new Error('No empty canvas corner to start a selection box')
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: corners.from.x, y: corners.from.y, modifiers: SHIFT })
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: corners.from.x, y: corners.from.y, button: 'left', buttons: 1, clickCount: 1, modifiers: SHIFT })
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: corners.to.x, y: corners.to.y, button: 'left', buttons: 1, modifiers: SHIFT })
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: corners.to.x, y: corners.to.y, button: 'left', buttons: 0, clickCount: 1, modifiers: SHIFT })
+  const centre = fixture.manifest.geometry.center_card.id
+  // The labels show the engine's selection once React commits it.
+  await page.waitForFunction((id: string) => (document.getElementById(`card-label-${id}`) as HTMLElement | null)?.dataset.selected === 'true', { timeout: 5000 }, centre).catch(() => {})
+  const selected = await page.$$eval('[id^="card-label-"][data-selected="true"]', els => els.length)
+  const centreSelected = await page.$eval(`#card-label-${centre}`, el => (el as HTMLElement).dataset.selected === 'true')
+  if (selected < 2 || !centreSelected) throw new Error(`The selection box from ${JSON.stringify(corners.from)} to ${JSON.stringify(corners.to)} selected ${selected} cards, centre card ${centreSelected ? '' : 'not '}included`)
+  return selected
+}
+/** Cards each drag run moved, recorded in the capture manifest. */
+const dragSelectionSizes: number[] = []
+/** Grabs the centre card for a drag, after box-selecting the visible cards under --drag-selection. */
+async function pressForDrag(page: Page, cdp: CDPSession, fixture: BenchmarkFixture, anchor: { x: number; y: number }) {
+  if (dragSelection) dragSelectionSizes.push(await selectVisibleCards(page, cdp, fixture))
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: anchor.x, y: anchor.y, button: 'left', buttons: 1, clickCount: 1 })
+}
+
 interface ScenarioMotion { anchor: { x: number; y: number }; amplitude: number; zoomMin: number; zoomMax: number }
 /** Drag grabs the selected centre card; wheel scenarios act at the canvas centre. */
 async function scenarioMotion(page: Page, scenario: Scenario, fixture: BenchmarkFixture, contract: BenchmarkContract): Promise<ScenarioMotion> {
@@ -259,7 +300,7 @@ async function traceScenario(page: Page, cdp: CDPSession, scenario: Scenario, fi
   await page.evaluate(() => { (window as any).__gurowBenchmarkHooks.trace_stages = true })
   let tracing = false
   try {
-    if (scenario === 'drag') await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: motion.anchor.x, y: motion.anchor.y, button: 'left', buttons: 1, clickCount: 1 })
+    if (scenario === 'drag') await pressForDrag(page, cdp, fixture, motion.anchor)
     await page.tracing.start({ path: file, categories: TRACE_CATEGORIES })
     tracing = true
     const { delivery, requests } = drive(cdp, scenario, motion, performance.now() + 50, TRACE_ACTIVE_MS, hz, errors, 'trace')
@@ -283,7 +324,7 @@ async function warmUp(page: Page, cdp: CDPSession, scenario: Scenario, fixture: 
   try {
     const motion = await scenarioMotion(page, scenario, fixture, contract)
     await hook(page, scenario, 0, 0, settings.refresh_hz)
-    if (scenario === 'drag') await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: motion.anchor.x, y: motion.anchor.y, button: 'left', buttons: 1, clickCount: 1 })
+    if (scenario === 'drag') await pressForDrag(page, cdp, fixture, motion.anchor)
     const { delivery, requests } = drive(cdp, scenario, motion, performance.now() + 50, settings.warmup_ms, settings.hz, errors, 'warmup')
     await delivery
     // Let the warm-up input drain before the next seeded reload; this interval
@@ -332,7 +373,7 @@ async function measured(page: Page, cdp: CDPSession, scenario: Scenario, fixture
     // 2 Hz visibility, including whether the compositor still shows this browser:
     // an occluded Wayland window stops rAF while visibilityState stays visible.
     periodic = setInterval(() => { void sample().then(v => samples.push(v)).catch(e => errors.push(`visibility: ${e}`)) }, 500)
-    if (scenario === 'drag') await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: motion.anchor.x, y: motion.anchor.y, button: 'left', buttons: 1, clickCount: 1 })
+    if (scenario === 'drag') await pressForDrag(page, cdp, fixture, motion.anchor)
     const { delivery: pending, requests } = drive(cdp, scenario, motion, start, config.active_ms, config.hz, errors, 'CDP dispatch')
     const delivery = await pending
     await wait(Math.max(0, start + config.active_ms + config.drain_ms - performance.now()))
@@ -361,7 +402,8 @@ async function measured(page: Page, cdp: CDPSession, scenario: Scenario, fixture
     if (errors.length || delivery.errors.length) reasons.push('page_or_cdp_error')
     if (samples.some(v => !v.focused || !v.visible || v.browser_active === false) || raw.focus_events?.some((e: any) => !e.focused || e.visible !== 'visible')) reasons.push('focus_or_visibility_loss')
     if (samples.some(v => !!v.gpu_error) || raw.device_lost) reasons.push('gpu_device_error')
-    if (samples.some(v => !v.task_panel || v.submitted_cards !== fixture.size || v.visible_labels === 0)) reasons.push('labels_list_or_sidebar_missing')
+    // A multiselection opens no single Skill, so --drag-selection runs have no Task panel to require.
+    if (samples.some(v => (!v.task_panel && !dragSelection) || v.submitted_cards !== fixture.size || v.visible_labels === 0)) reasons.push('labels_list_or_sidebar_missing')
     const visibleMedian = nearestRank(samples.map(s => s.visible_cards), .5)
     if (config.visible_band && (visibleMedian === null || visibleMedian < config.visible_band.min || visibleMedian > config.visible_band.max)) reasons.push('visible_card_median_out_of_band')
     if (!Array.isArray(raw.frames) || raw.frames.length < 2 || !Array.isArray(raw.input_samples) || !raw.input_samples.length) reasons.push('missing_in_app_frame_or_proxy_evidence')
@@ -402,6 +444,7 @@ async function main(): Promise<number> {
   requireRecipe(fixtureContract, options.size)
   if (options.size !== fixtureContract.primary_size) options.diagnostic = true
   const size = options.size
+  dragSelection = options.dragSelection
   const sampling = protocol.sampling
   mkdirSync(options.out, { recursive: true })
   execFileSync('bun', ['run', 'build'], { cwd: FRONTEND, stdio: 'inherit' })
@@ -585,6 +628,7 @@ async function main(): Promise<number> {
         draw_calls: missing('calls', 'Renderer counter not exposed'), upload_bytes: missing('bytes', 'Renderer counter not exposed'),
         json_boundary_calls: missing('calls', 'Boundary counter not exposed'), json_boundary_bytes: missing('bytes', 'Boundary counter not exposed'), json_boundary_duration_ms: missing('ms', 'Boundary counter not exposed'),
         limitations: ['Proxy covers main-thread queueing, application, renderer submission and label commit; not compositor output, scanout or physical pixels.'],
+        ...(dragSelection ? { drag_selection_cards: dragSelectionSizes, drag_selection_limitation: 'Each drag moved a box selection of the visible cards; the sidebar showed no Task (a multiselection opens no Skill), so the Task panel was not required.' } : {}),
       }, artifacts,
     }
     writeFileSync(path.join(options.out, 'capture.json'), JSON.stringify(manifest, null, 2) + '\n')

@@ -102,6 +102,8 @@ export function useWasmEditor({
     labelCamera: CameraState
     benchmarkRevision?: LabelRevision
   }>({ labels: [], labelCamera: ENGINE_INITIAL_CAMERA })
+  // Mirrors the engine's selection for display only; Rust owns it.
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [connections, setConnections] = useState<PrerequisiteConnection[]>([])
   const [connectionRejection, setConnectionRejection] = useState<string | null>(null)
   const [zoom, setZoom] = useState<number>(1.0)
@@ -235,6 +237,7 @@ export function useWasmEditor({
     for (const event of events) {
       switch (event.type) {
         case 'SelectionChanged':
+          setSelectedIds(event.selected_ids)
           if (event.selected_id && event.title) {
             onSelectionChangedRef.current({
               id: event.selected_id,
@@ -583,6 +586,7 @@ export function useWasmEditor({
         type: 'PointerDown',
         screen_x: logicalPt.x,
         screen_y: logicalPt.y,
+        shift_key: e.shiftKey,
       })
     },
     [canvasRef, dispatch, flushPointerMove]
@@ -898,6 +902,7 @@ export function useWasmEditor({
     labels,
     labelCamera,
     benchmarkRevision,
+    selectedIds,
     connections,
     connectionRejection,
     clearConnectionRejection: () => setConnectionRejection(null),

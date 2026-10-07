@@ -66,10 +66,12 @@ export const SelectCardCommandSchema = z.object({
   id: z.string().nullable(),
 })
 
+/** With `shift_key` on the empty canvas, the press draws a selection box instead of panning. */
 export const PointerDownCommandSchema = z.object({
   type: z.literal('PointerDown'),
   screen_x: z.number(),
   screen_y: z.number(),
+  shift_key: z.boolean().optional(),
 })
 
 export const PointerMoveCommandSchema = z.object({
@@ -182,10 +184,12 @@ export const CardMovedEventSchema = z.object({
   position: PointSchema,
 })
 
+/** `selected_id` names the selected Skill when exactly one is selected; `selected_ids` lists every selected Skill. */
 export const SelectionChangedEventSchema = z.object({
   type: z.literal('SelectionChanged'),
   selected_id: z.string().nullable(),
   title: z.string().nullable(),
+  selected_ids: z.array(z.string()),
 })
 
 export const LabelsUpdatedEventSchema = z.object({

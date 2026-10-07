@@ -1,4 +1,4 @@
-use crate::geometry::{Camera, Point, Rect, Size};
+use crate::geometry::{Camera, Point, Rect, Size, MAX_WORLD_COORD, MAX_ZOOM, MIN_WORLD_COORD, MIN_ZOOM};
 use crate::protocol::{EditorCommand, EditorEvent};
 use crate::state::{EditorState, InteractionState};
 use crate::SkillCard;
@@ -120,28 +120,30 @@ fn test_hit_testing_and_selection_with_title() {
     // PointerDown inside card A
     let events = state.apply_command(EditorCommand::PointerDown {
         screen_x: 70.0,
-        screen_y: 70.0,
+        screen_y: 70.0, shift_key: false
     });
-    assert_eq!(state.selected_card_id.as_deref(), Some("card-a"));
+    assert_eq!(state.selected_card_id(), Some("card-a"));
     assert!(events.iter().any(|e| matches!(
         e,
         EditorEvent::SelectionChanged {
             selected_id: Some(id),
-            title: Some(t)
+            title: Some(t),
+        ..
         } if id == "card-a" && t == "Card A"
     )));
 
     // PointerDown outside -> deselects
     let deselect_events = state.apply_command(EditorCommand::PointerDown {
         screen_x: 300.0,
-        screen_y: 300.0,
+        screen_y: 300.0, shift_key: false
     });
-    assert_eq!(state.selected_card_id, None);
+    assert_eq!(state.selected_card_id(), None);
     assert!(deselect_events.iter().any(|e| matches!(
         e,
         EditorEvent::SelectionChanged {
             selected_id: None,
-            title: None
+            title: None,
+        ..
         }
     )));
 }
@@ -198,7 +200,7 @@ fn test_json_protocol_roundtrip() {
         EditorCommand::SelectCard { id: None },
         EditorCommand::PointerDown {
             screen_x: 150.0,
-            screen_y: 250.0,
+            screen_y: 250.0, shift_key: false
         },
         EditorCommand::PointerMove {
             screen_x: 160.0,
@@ -248,10 +250,12 @@ fn test_json_protocol_roundtrip() {
         EditorEvent::SelectionChanged {
             selected_id: Some("card-1".into()),
             title: Some("Title 1".into()),
+            selected_ids: vec!["card-1".into()],
         },
         EditorEvent::SelectionChanged {
             selected_id: None,
             title: None,
+            selected_ids: vec!["card-1".into(), "card-2".into()],
         },
         EditorEvent::LabelsUpdated {
             labels: vec![crate::protocol::LabelLayout {
@@ -339,7 +343,7 @@ fn test_card_drag_preserves_offset_across_zoom_levels() {
         let screen_pointer = state.camera.world_to_screen(world_pointer);
         state.apply_command(EditorCommand::PointerDown {
             screen_x: screen_pointer.x,
-            screen_y: screen_pointer.y,
+            screen_y: screen_pointer.y, shift_key: false
         });
 
         // PointerMove to new screen coordinate corresponding to target world pointer (220.0, 230.0)
@@ -377,13 +381,13 @@ fn test_drag_undo_redo_invariants() {
     });
 
     // 1. Stationary click does NOT create an undo step
-    state.apply_command(EditorCommand::PointerDown { screen_x: 120.0, screen_y: 120.0 });
+    state.apply_command(EditorCommand::PointerDown { screen_x: 120.0, screen_y: 120.0, shift_key: false });
     let up_events = state.apply_command(EditorCommand::PointerUp { screen_x: 120.0, screen_y: 120.0 });
     assert_eq!(state.undo_stack.len(), 0);
     assert!(!up_events.iter().any(|e| matches!(e, EditorEvent::HistoryChanged { .. })));
 
     // 2. Dragging card creates exactly one undo step on PointerUp
-    state.apply_command(EditorCommand::PointerDown { screen_x: 120.0, screen_y: 120.0 });
+    state.apply_command(EditorCommand::PointerDown { screen_x: 120.0, screen_y: 120.0, shift_key: false });
     state.apply_command(EditorCommand::PointerMove { screen_x: 220.0, screen_y: 220.0 });
     state.apply_command(EditorCommand::PointerMove { screen_x: 320.0, screen_y: 320.0 });
     let up_events = state.apply_command(EditorCommand::PointerUp { screen_x: 320.0, screen_y: 320.0 });
@@ -432,7 +436,7 @@ fn test_canvas_pan_and_zoom_commands() {
     });
 
     // Drag on empty canvas space pans camera
-    state.apply_command(EditorCommand::PointerDown { screen_x: 10.0, screen_y: 10.0 });
+    state.apply_command(EditorCommand::PointerDown { screen_x: 10.0, screen_y: 10.0, shift_key: false });
     let pan_events = state.apply_command(EditorCommand::PointerMove { screen_x: 60.0, screen_y: 40.0 });
     assert_eq!(state.camera.offset_x, 50.0);
     assert_eq!(state.camera.offset_y, 30.0);
@@ -468,7 +472,7 @@ fn test_camera_only_commands_move_labels_through_camera_changed() {
         EditorCommand::PanCamera { delta_x: 15.0, delta_y: -5.0 },
         EditorCommand::ZoomAt { screen_x: 50.0, screen_y: 60.0, factor: 1.5 },
         EditorCommand::SetCamera { offset_x: 3.0, offset_y: 4.0, zoom: 0.5 },
-        EditorCommand::PointerDown { screen_x: 500.0, screen_y: 500.0 },
+        EditorCommand::PointerDown { screen_x: 500.0, screen_y: 500.0, shift_key: false },
         EditorCommand::PointerMove { screen_x: 520.0, screen_y: 530.0 },
         EditorCommand::PointerUp { screen_x: 520.0, screen_y: 530.0 },
         EditorCommand::ResizeViewport { width: 640.0, height: 480.0 },
@@ -483,7 +487,7 @@ fn test_camera_only_commands_move_labels_through_camera_changed() {
 
     // Moving a card still re-sends its world bounds.
     let start = state.camera.world_to_screen(Point::new(110.0, 110.0));
-    state.apply_command(EditorCommand::PointerDown { screen_x: start.x, screen_y: start.y });
+    state.apply_command(EditorCommand::PointerDown { screen_x: start.x, screen_y: start.y, shift_key: false });
     let drag = state.apply_command(EditorCommand::PointerMove { screen_x: start.x + 10.0, screen_y: start.y });
     let labels = drag.iter().find_map(|e| match e { EditorEvent::LabelsUpdated { labels } => Some(labels.clone()), _ => None }).expect("drag re-sends labels");
     assert!((labels[0].world_rect.x - (100.0 + 10.0 / state.camera.zoom)).abs() < 1e-3);
@@ -500,7 +504,7 @@ fn test_undo_during_active_drag_preserves_history() {
     });
 
     // Drag 1: Move from 100 to 200 (completed)
-    state.apply_command(EditorCommand::PointerDown { screen_x: 100.0, screen_y: 100.0 });
+    state.apply_command(EditorCommand::PointerDown { screen_x: 100.0, screen_y: 100.0, shift_key: false });
     state.apply_command(EditorCommand::PointerMove { screen_x: 200.0, screen_y: 200.0 });
     state.apply_command(EditorCommand::PointerUp { screen_x: 200.0, screen_y: 200.0 });
 
@@ -509,9 +513,9 @@ fn test_undo_during_active_drag_preserves_history() {
     assert_eq!(state.undo_stack.len(), 1);
 
     // Drag 2 (interrupted): Start dragging towards 300
-    state.apply_command(EditorCommand::PointerDown { screen_x: 200.0, screen_y: 200.0 });
+    state.apply_command(EditorCommand::PointerDown { screen_x: 200.0, screen_y: 200.0, shift_key: false });
     state.apply_command(EditorCommand::PointerMove { screen_x: 250.0, screen_y: 250.0 });
-    assert!(matches!(state.interaction, InteractionState::DraggingCard { .. }));
+    assert!(matches!(state.interaction, InteractionState::DraggingCards { .. }));
 
     // User presses Ctrl+Z (Undo) before releasing pointer
     state.apply_command(EditorCommand::Undo);
@@ -981,7 +985,7 @@ fn test_read_only_canvas_navigates_and_selects_without_changing_the_document() {
     let document = state.document.clone();
 
     // Pressing a card selects it; dragging from it pans the view instead of moving the card.
-    let down = state.apply_command(EditorCommand::PointerDown { screen_x: 120.0, screen_y: 120.0 });
+    let down = state.apply_command(EditorCommand::PointerDown { screen_x: 120.0, screen_y: 120.0, shift_key: false });
     assert!(down.iter().any(|e| matches!(e, EditorEvent::SelectionChanged { selected_id: Some(id), .. } if id == "card-a")));
     let moved = state.apply_command(EditorCommand::PointerMove { screen_x: 220.0, screen_y: 170.0 });
     let up = state.apply_command(EditorCommand::PointerUp { screen_x: 220.0, screen_y: 170.0 });
@@ -989,13 +993,13 @@ fn test_read_only_canvas_navigates_and_selects_without_changing_the_document() {
     assert!(moved.iter().any(|e| matches!(e, EditorEvent::CameraChanged { offset_x, offset_y, .. } if *offset_x == 100.0 && *offset_y == 50.0)));
     assert_eq!(state.document, document);
     assert!(state.undo_stack.is_empty());
-    assert_eq!(state.selected_card_id.as_deref(), Some("card-a"));
+    assert_eq!(state.selected_card_id(), Some("card-a"));
 
     // Empty canvas still pans and clears the selection; zoom and keyboard selection work.
-    state.apply_command(EditorCommand::PointerDown { screen_x: 790.0, screen_y: 590.0 });
+    state.apply_command(EditorCommand::PointerDown { screen_x: 790.0, screen_y: 590.0, shift_key: false });
     state.apply_command(EditorCommand::PointerMove { screen_x: 780.0, screen_y: 580.0 });
     state.apply_command(EditorCommand::PointerUp { screen_x: 780.0, screen_y: 580.0 });
-    assert_eq!(state.selected_card_id, None);
+    assert_eq!(state.selected_card_id(), None);
     assert_eq!((state.camera.offset_x, state.camera.offset_y), (90.0, 40.0));
     state.apply_command(EditorCommand::ZoomAt { screen_x: 400.0, screen_y: 300.0, factor: 1.5 });
     assert_eq!(state.camera.zoom, 1.5);
@@ -1042,7 +1046,7 @@ fn test_entering_read_only_cancels_an_active_drag() {
         position: Point::new(100.0, 100.0),
         size: Some(Size::new(180.0, 80.0)),
     });
-    state.apply_command(EditorCommand::PointerDown { screen_x: 120.0, screen_y: 120.0 });
+    state.apply_command(EditorCommand::PointerDown { screen_x: 120.0, screen_y: 120.0, shift_key: false });
     state.apply_command(EditorCommand::PointerMove { screen_x: 220.0, screen_y: 220.0 });
     let events = state.apply_command(EditorCommand::SetReadOnly { read_only: true });
     assert!(events.iter().any(|e| matches!(e, EditorEvent::CardMoved { position, .. } if *position == Point::new(100.0, 100.0))));
@@ -1069,7 +1073,7 @@ fn test_layout_only_canvas_moves_cards_and_undoes_moves_but_keeps_its_content() 
     let connections = state.document.connections.clone();
 
     // One drag moves the card and is one undo step.
-    state.apply_command(EditorCommand::PointerDown { screen_x: 120.0, screen_y: 120.0 });
+    state.apply_command(EditorCommand::PointerDown { screen_x: 120.0, screen_y: 120.0, shift_key: false });
     state.apply_command(EditorCommand::PointerMove { screen_x: 220.0, screen_y: 170.0 });
     let up = state.apply_command(EditorCommand::PointerUp { screen_x: 220.0, screen_y: 170.0 });
     assert!(up.iter().any(|e| matches!(e, EditorEvent::HistoryChanged { can_undo: true, .. })));
@@ -1104,4 +1108,294 @@ fn test_layout_only_canvas_moves_cards_and_undoes_moves_but_keeps_its_content() 
     state.apply_command(EditorCommand::SetLayoutOnly { layout_only: false });
     let created = state.apply_command(EditorCommand::CreateCard { id: "card-c".into(), title: "C".into(), position: Point::new(0.0, 0.0), size: None });
     assert!(created.iter().any(|e| matches!(e, EditorEvent::CardCreated { .. })));
+}
+
+/// Cards A, B and C near the origin and D far away, each 180×80.
+fn multiselect_state() -> EditorState {
+    let mut state = EditorState::new();
+    for (id, x, y) in [("card-a", 100.0, 100.0), ("card-b", 400.0, 100.0), ("card-c", 100.0, 400.0), ("card-d", 1000.0, 1000.0)] {
+        state.apply_command(EditorCommand::CreateCard {
+            id: id.into(),
+            title: id.to_uppercase(),
+            position: Point::new(x, y),
+            size: Some(Size::new(180.0, 80.0)),
+        });
+    }
+    state.apply_command(EditorCommand::ConnectSkills { from_id: "card-a".into(), to_id: "card-b".into() });
+    state.apply_command(EditorCommand::ConnectSkills { from_id: "card-b".into(), to_id: "card-d".into() });
+    state
+}
+
+fn press(state: &mut EditorState, world: Point, shift_key: bool) -> Vec<EditorEvent> {
+    let s = state.camera.world_to_screen(world);
+    state.apply_command(EditorCommand::PointerDown { screen_x: s.x, screen_y: s.y, shift_key })
+}
+
+fn move_to(state: &mut EditorState, world: Point) -> Vec<EditorEvent> {
+    let s = state.camera.world_to_screen(world);
+    state.apply_command(EditorCommand::PointerMove { screen_x: s.x, screen_y: s.y })
+}
+
+fn release(state: &mut EditorState, world: Point) -> Vec<EditorEvent> {
+    let s = state.camera.world_to_screen(world);
+    state.apply_command(EditorCommand::PointerUp { screen_x: s.x, screen_y: s.y })
+}
+
+fn box_select(state: &mut EditorState, from: Point, to: Point) -> Vec<EditorEvent> {
+    let mut events = press(state, from, true);
+    events.extend(move_to(state, to));
+    events.extend(release(state, to));
+    events
+}
+
+fn position(state: &EditorState, id: &str) -> Point {
+    state.document.find_card(id).unwrap().position
+}
+
+fn selected_labels(state: &EditorState) -> Vec<String> {
+    state.get_label_layouts().into_iter().filter(|l| l.selected).map(|l| l.card_id).collect()
+}
+
+#[test]
+fn test_multiselect_box_selects_the_cards_it_touches_at_any_camera() {
+    let cameras = [
+        Camera::new(0.0, 0.0, 1.0),
+        Camera::new(-300.0, 120.0, 0.5),
+        Camera::new(250.0, -80.0, 2.0),
+        Camera::new(40.0, 30.0, MIN_ZOOM),
+        Camera::new(-200.0, -150.0, MAX_ZOOM),
+    ];
+    for camera in cameras {
+        let mut state = multiselect_state();
+        state.camera = camera;
+
+        // Shift on the empty canvas starts a box; the selection follows the box while it is drawn.
+        let down = press(&mut state, Point::new(50.0, 50.0), true);
+        assert!(!down.iter().any(|e| matches!(e, EditorEvent::CameraChanged { .. })), "zoom {}: {down:?}", camera.zoom);
+        assert!(matches!(state.interaction, InteractionState::SelectingBox { .. }));
+        let partial = move_to(&mut state, Point::new(300.0, 150.0));
+        assert_eq!(state.selected_card_ids, vec!["card-a"], "zoom {}", camera.zoom);
+        assert!(partial.iter().any(|e| matches!(e, EditorEvent::SelectionChanged { selected_id: Some(id), selected_ids, .. } if id == "card-a" && selected_ids == &vec!["card-a".to_string()])));
+        let drawn = state.selection_box().expect("box is drawn");
+        assert!((drawn.x - 50.0).abs() < 1e-3 && (drawn.y - 50.0).abs() < 1e-3);
+        assert!((drawn.width - 250.0).abs() < 1e-2 && (drawn.height - 100.0).abs() < 1e-2, "zoom {}: {drawn:?}", camera.zoom);
+
+        // B's left edge is at x = 400: a box reaching x = 401 touches it, C (y >= 400) and D stay out.
+        let grown = move_to(&mut state, Point::new(401.0, 150.0));
+        assert!(grown.iter().any(|e| matches!(e, EditorEvent::SelectionChanged { selected_id: None, title: None, selected_ids } if selected_ids == &vec!["card-a".to_string(), "card-b".to_string()])));
+        assert!(grown.iter().any(|e| matches!(e, EditorEvent::LabelsUpdated { .. })));
+        assert!(!grown.iter().any(|e| matches!(e, EditorEvent::CardMoved { .. } | EditorEvent::CameraChanged { .. })));
+        let up = release(&mut state, Point::new(401.0, 150.0));
+        assert!(!up.iter().any(|e| matches!(e, EditorEvent::HistoryChanged { .. })), "selecting is not an edit");
+        assert_eq!(state.selected_card_ids, vec!["card-a", "card-b"], "zoom {}", camera.zoom);
+        assert_eq!(state.selected_card_id(), None);
+        assert_eq!(selected_labels(&state), vec!["card-a", "card-b"]);
+        assert_eq!(state.selection_box(), None);
+        assert!(state.undo_stack.is_empty());
+
+        // A box drawn the other way round selects by the same area.
+        box_select(&mut state, Point::new(290.0, 500.0), Point::new(0.0, 0.0));
+        assert_eq!(state.selected_card_ids, vec!["card-a", "card-c"], "zoom {}", camera.zoom);
+
+        // A box that touches no card clears the selection.
+        box_select(&mut state, Point::new(600.0, 600.0), Point::new(700.0, 700.0));
+        assert!(state.selected_card_ids.is_empty());
+    }
+}
+
+#[test]
+fn test_multiselect_plain_presses_keep_single_selection_and_pan() {
+    let mut state = multiselect_state();
+    box_select(&mut state, Point::new(0.0, 0.0), Point::new(700.0, 200.0));
+    assert_eq!(state.selected_card_ids, vec!["card-a", "card-b"]);
+
+    // Without Shift the empty canvas pans and clears the selection.
+    press(&mut state, Point::new(700.0, 700.0), false);
+    assert!(state.selected_card_ids.is_empty());
+    let pan = state.apply_command(EditorCommand::PointerMove { screen_x: 720.0, screen_y: 690.0 });
+    assert!(pan.iter().any(|e| matches!(e, EditorEvent::CameraChanged { .. })));
+    state.apply_command(EditorCommand::PointerUp { screen_x: 720.0, screen_y: 690.0 });
+
+    // Shift on a card does not draw a box: the card alone is selected and dragged.
+    state.camera = Camera::default();
+    box_select(&mut state, Point::new(0.0, 0.0), Point::new(700.0, 200.0));
+    state.apply_command(EditorCommand::SelectCard { id: Some("card-c".into()) });
+    assert_eq!(state.selected_card_ids, vec!["card-c"]);
+    press(&mut state, Point::new(120.0, 420.0), true);
+    move_to(&mut state, Point::new(140.0, 430.0));
+    release(&mut state, Point::new(140.0, 430.0));
+    assert_eq!(position(&state, "card-c"), Point::new(120.0, 410.0));
+    assert_eq!(position(&state, "card-a"), Point::new(100.0, 100.0));
+}
+
+#[test]
+fn test_multiselect_drag_moves_the_selection_as_one_undo_step() {
+    for zoom in [0.5, 1.0, 2.5] {
+        let mut state = multiselect_state();
+        state.camera = Camera::new(30.0, -20.0, zoom);
+        let connections = state.document.connections.clone();
+        box_select(&mut state, Point::new(0.0, 0.0), Point::new(450.0, 450.0));
+        assert_eq!(state.selected_card_ids, vec!["card-a", "card-b", "card-c"]);
+
+        // Pressing a selected card keeps the selection; the move carries all of it.
+        let down = press(&mut state, Point::new(420.0, 130.0), false);
+        assert!(!down.iter().any(|e| matches!(e, EditorEvent::SelectionChanged { .. })), "{down:?}");
+        move_to(&mut state, Point::new(470.0, 160.0));
+        let moved = move_to(&mut state, Point::new(520.0, 190.0));
+        let moved_ids: Vec<&str> = moved.iter().filter_map(|e| match e { EditorEvent::CardMoved { card_id, .. } => Some(card_id.as_str()), _ => None }).collect();
+        assert_eq!(moved_ids, vec!["card-a", "card-b", "card-c"], "zoom {zoom}");
+        let labels = moved.iter().find_map(|e| match e { EditorEvent::LabelsUpdated { labels } => Some(labels.clone()), _ => None }).expect("labels follow the move");
+        for label in &labels {
+            assert_eq!(label.world_rect, state.document.find_card(&label.card_id).unwrap().world_bounds(), "label of {} left its card", label.card_id);
+        }
+        for (id, start) in [("card-a", (100.0, 100.0)), ("card-b", (400.0, 100.0)), ("card-c", (100.0, 400.0))] {
+            let p = position(&state, id);
+            assert!((p.x - (start.0 + 100.0)).abs() < 1e-3 && (p.y - (start.1 + 60.0)).abs() < 1e-3, "zoom {zoom}: {id} at {p:?}");
+        }
+        assert_eq!(position(&state, "card-d"), Point::new(1000.0, 1000.0));
+        assert!(state.undo_stack.is_empty(), "nothing is recorded before the release");
+
+        let up = release(&mut state, Point::new(520.0, 190.0));
+        assert_eq!(up.iter().filter(|e| matches!(e, EditorEvent::HistoryChanged { can_undo: true, can_redo: false })).count(), 1);
+        assert_eq!(state.undo_stack.len(), 1);
+        assert_eq!(state.selected_card_ids, vec!["card-a", "card-b", "card-c"]);
+        assert_eq!(state.document.connections, connections, "connections stay between the same Skills");
+        let after = state.document.clone();
+
+        // One undo restores every card of the drag; one redo moves them all again.
+        let undone = state.apply_command(EditorCommand::Undo);
+        assert_eq!(undone.iter().filter(|e| matches!(e, EditorEvent::CardMoved { .. })).count(), 3);
+        assert!(undone.iter().any(|e| matches!(e, EditorEvent::HistoryChanged { can_undo: false, can_redo: true })));
+        assert_eq!(position(&state, "card-a"), Point::new(100.0, 100.0));
+        assert_eq!(position(&state, "card-b"), Point::new(400.0, 100.0));
+        assert_eq!(position(&state, "card-c"), Point::new(100.0, 400.0));
+        assert!(state.undo_stack.is_empty());
+        let redone = state.apply_command(EditorCommand::Redo);
+        assert!(redone.iter().any(|e| matches!(e, EditorEvent::HistoryChanged { can_undo: true, can_redo: false })));
+        assert_eq!(state.document, after);
+        assert_eq!(state.selected_card_ids, vec!["card-a", "card-b", "card-c"], "undo and redo keep the selection");
+
+        // Pressing a card outside the selection selects and drags that card alone.
+        let down = press(&mut state, Point::new(1010.0, 1010.0), false);
+        assert!(down.iter().any(|e| matches!(e, EditorEvent::SelectionChanged { selected_id: Some(id), .. } if id == "card-d")));
+        move_to(&mut state, Point::new(1030.0, 1010.0));
+        release(&mut state, Point::new(1030.0, 1010.0));
+        assert_eq!(position(&state, "card-d"), Point::new(1020.0, 1000.0));
+        assert_eq!(position(&state, "card-a"), after.find_card("card-a").unwrap().position);
+        assert_eq!(state.undo_stack.len(), 2);
+    }
+}
+
+#[test]
+fn test_multiselect_drag_stays_within_world_limits_keeping_relative_positions() {
+    // Near ±1,000,000 an f32 step is 0.0625, so positions compare within a small tolerance.
+    let near = |p: Point, x: f32, y: f32| (p.x - x).abs() < 0.2 && (p.y - y).abs() < 0.2;
+    let mut state = EditorState::new();
+    for (id, x, y) in [("left", MAX_WORLD_COORD - 500.0, 0.0), ("right", MAX_WORLD_COORD - 100.0, 300.0)] {
+        state.apply_command(EditorCommand::CreateCard { id: id.into(), title: id.into(), position: Point::new(x, y), size: None });
+    }
+    state.camera = Camera::new(0.0, 0.0, MIN_ZOOM);
+    box_select(&mut state, Point::new(MAX_WORLD_COORD - 600.0, -50.0), Point::new(MAX_WORLD_COORD, 500.0));
+    assert_eq!(state.selected_card_ids, vec!["left", "right"]);
+
+    // Drag far to the right: the group stops when the rightmost card reaches the limit.
+    let grab = Point::new(MAX_WORLD_COORD - 490.0, 10.0);
+    press(&mut state, grab, false);
+    move_to(&mut state, Point::new(grab.x + 5000.0, grab.y + 100.0));
+    release(&mut state, Point::new(grab.x + 5000.0, grab.y + 100.0));
+    assert!(near(position(&state, "right"), MAX_WORLD_COORD, 400.0), "{:?}", position(&state, "right"));
+    assert!(near(position(&state, "left"), MAX_WORLD_COORD - 400.0, 100.0), "{:?}", position(&state, "left"));
+
+    // And towards the minimum on both axes: the group stops at the first card that reaches it.
+    let grab = Point::new(MAX_WORLD_COORD - 390.0, 110.0);
+    let s = state.camera.world_to_screen(grab);
+    state.apply_command(EditorCommand::PointerDown { screen_x: s.x, screen_y: s.y, shift_key: false });
+    state.apply_command(EditorCommand::PointerMove { screen_x: -1.0e9, screen_y: -1.0e9 });
+    state.apply_command(EditorCommand::PointerUp { screen_x: -1.0e9, screen_y: -1.0e9 });
+    assert!(near(position(&state, "left"), MIN_WORLD_COORD, MIN_WORLD_COORD), "{:?}", position(&state, "left"));
+    assert!(near(position(&state, "right"), MIN_WORLD_COORD + 400.0, MIN_WORLD_COORD + 300.0), "{:?}", position(&state, "right"));
+
+    // Undo walks back through both limited drags.
+    state.apply_command(EditorCommand::Undo);
+    assert!(near(position(&state, "right"), MAX_WORLD_COORD, 400.0));
+    state.apply_command(EditorCommand::Undo);
+    assert_eq!(position(&state, "left"), Point::new(MAX_WORLD_COORD - 500.0, 0.0));
+    assert_eq!(position(&state, "right"), Point::new(MAX_WORLD_COORD - 100.0, 300.0));
+}
+
+#[test]
+fn test_multiselect_interrupted_gestures_keep_history_and_selection() {
+    let mut state = multiselect_state();
+    box_select(&mut state, Point::new(0.0, 0.0), Point::new(450.0, 150.0));
+
+    // Undo while a selection is being dragged puts every card back and records nothing.
+    press(&mut state, Point::new(120.0, 120.0), false);
+    move_to(&mut state, Point::new(220.0, 220.0));
+    let undo = state.apply_command(EditorCommand::Undo);
+    assert_eq!(undo.iter().filter(|e| matches!(e, EditorEvent::CardMoved { .. })).count(), 2);
+    assert_eq!(state.interaction, InteractionState::Idle);
+    release(&mut state, Point::new(300.0, 300.0));
+    assert_eq!(position(&state, "card-a"), Point::new(100.0, 100.0));
+    assert_eq!(position(&state, "card-b"), Point::new(400.0, 100.0));
+    assert!(state.undo_stack.is_empty());
+
+    // A box interrupted by undo ends with the selection it had reached.
+    press(&mut state, Point::new(50.0, 350.0), true);
+    move_to(&mut state, Point::new(150.0, 450.0));
+    state.apply_command(EditorCommand::Undo);
+    assert_eq!(state.selection_box(), None);
+    assert_eq!(state.selected_card_ids, vec!["card-c"]);
+}
+
+#[test]
+fn test_multiselect_selection_is_session_state_outside_the_document() {
+    let mut state = multiselect_state();
+    box_select(&mut state, Point::new(0.0, 0.0), Point::new(450.0, 450.0));
+    let snapshot = state.apply_command(EditorCommand::ExportSnapshot);
+    let json = serde_json::to_string(&snapshot).unwrap();
+    assert!(!json.contains("selected"), "the saved document carries no selection: {json}");
+
+    // Loading a document keeps the selected cards it still holds, and clears the history.
+    let mut reloaded = state.document.clone();
+    reloaded.cards.retain(|c| c.id != "card-b");
+    let events = state.apply_command(EditorCommand::LoadDocument { document: reloaded });
+    assert!(events.iter().any(|e| matches!(e, EditorEvent::SelectionChanged { selected_ids, .. } if selected_ids == &vec!["card-a".to_string(), "card-c".to_string()])));
+    assert_eq!(state.selected_card_ids, vec!["card-a", "card-c"]);
+    assert!(state.undo_stack.is_empty());
+
+    // A fresh editor (a reload) starts with no selection.
+    assert!(EditorState::new().selected_card_ids.is_empty());
+
+    // An old client's press has no shift_key; it pans as before.
+    let cmd: EditorCommand = serde_json::from_str(r#"{"type":"PointerDown","screen_x":1.0,"screen_y":2.0}"#).unwrap();
+    assert_eq!(cmd, EditorCommand::PointerDown { screen_x: 1.0, screen_y: 2.0, shift_key: false });
+    let cmd: EditorCommand = serde_json::from_str(r#"{"type":"PointerDown","screen_x":1.0,"screen_y":2.0,"shift_key":true}"#).unwrap();
+    assert_eq!(cmd, EditorCommand::PointerDown { screen_x: 1.0, screen_y: 2.0, shift_key: true });
+}
+
+#[test]
+fn test_multiselect_follows_canvas_edit_permissions() {
+    // Read-only: Shift on the empty canvas pans; nothing can be box-selected or moved.
+    let mut state = multiselect_state();
+    let document = state.document.clone();
+    state.apply_command(EditorCommand::SetReadOnly { read_only: true });
+    press(&mut state, Point::new(50.0, 50.0), true);
+    let pan = state.apply_command(EditorCommand::PointerMove { screen_x: 450.0, screen_y: 450.0 });
+    state.apply_command(EditorCommand::PointerUp { screen_x: 450.0, screen_y: 450.0 });
+    assert!(pan.iter().any(|e| matches!(e, EditorEvent::CameraChanged { .. })));
+    assert!(state.selected_card_ids.is_empty());
+    assert_eq!(state.document, document);
+    assert!(state.undo_stack.is_empty());
+
+    // Layout-only: a selection is arranged and undone like on an editable canvas.
+    let mut state = multiselect_state();
+    state.apply_command(EditorCommand::SetLayoutOnly { layout_only: true });
+    box_select(&mut state, Point::new(0.0, 0.0), Point::new(450.0, 150.0));
+    press(&mut state, Point::new(120.0, 120.0), false);
+    move_to(&mut state, Point::new(170.0, 120.0));
+    release(&mut state, Point::new(170.0, 120.0));
+    assert_eq!(position(&state, "card-a"), Point::new(150.0, 100.0));
+    assert_eq!(position(&state, "card-b"), Point::new(450.0, 100.0));
+    state.apply_command(EditorCommand::Undo);
+    assert_eq!(position(&state, "card-b"), Point::new(400.0, 100.0));
 }

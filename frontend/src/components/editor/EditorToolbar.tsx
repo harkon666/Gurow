@@ -103,6 +103,16 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
           </span>
         )}
 
+        {!readOnly && (
+          <span
+            id="editor-multiselect-hint"
+            title="Hold Shift and drag across the empty canvas to select several Skills, then drag one of them to move them together."
+            className="hidden xl:inline text-[11px] text-slate-500 shrink-0 whitespace-nowrap"
+          >
+            Shift+drag selects several
+          </span>
+        )}
+
         {/* History Controls */}
         {!readOnly && <div className="flex items-center gap-1 shrink-0">
           <button

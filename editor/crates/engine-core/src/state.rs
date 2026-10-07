@@ -1,15 +1,25 @@
 use crate::document::{CanvasDocument, ConnectionError, SkillCard};
-use crate::geometry::{clamp_world_point, Camera, Point, Size};
+use crate::geometry::{Camera, Point, Rect, Size, MAX_WORLD_COORD, MIN_WORLD_COORD};
 use crate::protocol::{EditorCommand, EditorEvent, LabelLayout, SelectionChange};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq)]
 /// Transient pointer interaction owned by the Rust editor state machine.
 pub enum InteractionState {
     Idle,
-    DraggingCard {
-        card_id: String,
-        start_position: Point,
+    /// Moves every selected card by the pointer's movement. A press on one card
+    /// drags that card alone; a press on a card of a multiselection drags them all.
+    DraggingCards {
+        /// The pressed card, which keeps its grab offset under the pointer.
+        anchor_id: String,
         grab_offset_world: Point,
+        /// Each dragged card with its position when the drag began.
+        start_positions: Vec<(String, Point)>,
+    },
+    /// A box from the press point to the pointer selects the cards it touches.
+    SelectingBox {
+        origin_world: Point,
+        current_world: Point,
     },
     Panning {
         last_screen_pos: Point,
@@ -17,13 +27,18 @@ pub enum InteractionState {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-/// Undoable editor operation. A completed drag is one history action.
+/// One card's position before and after a move.
+pub struct CardMove {
+    pub card_id: String,
+    pub from: Point,
+    pub to: Point,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+/// Undoable editor operation. A completed drag is one history action, however
+/// many selected cards it moved.
 pub enum HistoryAction {
-    MoveCard {
-        card_id: String,
-        from: Point,
-        to: Point,
-    },
+    MoveCards { moves: Vec<CardMove> },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -34,7 +49,8 @@ pub enum HistoryAction {
 pub struct EditorState {
     pub document: CanvasDocument,
     pub camera: Camera,
-    pub selected_card_id: Option<String>,
+    /// Selected cards in document order; session-only, never saved.
+    pub selected_card_ids: Vec<String>,
     pub viewport_size: Size,
     pub interaction: InteractionState,
     pub undo_stack: Vec<HistoryAction>,
@@ -51,7 +67,7 @@ impl Default for EditorState {
         Self {
             document: CanvasDocument::new(),
             camera: Camera::default(),
-            selected_card_id: None,
+            selected_card_ids: Vec::new(),
             viewport_size: Size::new(800.0, 600.0),
             interaction: InteractionState::Idle,
             undo_stack: Vec::new(),
@@ -84,43 +100,99 @@ impl EditorState {
         None
     }
 
-    /// Changes selection and returns the event payload when it changed.
+    /// The selected card when exactly one is selected: the Skill the application
+    /// opens. A multiselection opens none.
+    pub fn selected_card_id(&self) -> Option<&str> {
+        match self.selected_card_ids.as_slice() {
+            [id] => Some(id),
+            _ => None,
+        }
+    }
+
+    /// Selects one card (or none) and returns the event payload when it changed.
     pub fn select_card(&mut self, id: Option<String>) -> Option<SelectionChange> {
-        if self.selected_card_id != id {
-            self.selected_card_id = id.clone();
-            let title = id
-                .as_deref()
-                .and_then(|cid| self.document.find_card(cid).map(|c| c.title.clone()));
-            Some(SelectionChange {
-                selected_id: id,
-                title,
-            })
-        } else {
-            None
+        self.set_selection(id.into_iter().collect())
+    }
+
+    /// Replaces the selection, kept in document order, and returns the event
+    /// payload when it changed.
+    pub fn set_selection(&mut self, ids: Vec<String>) -> Option<SelectionChange> {
+        let wanted: HashSet<&str> = ids.iter().map(String::as_str).collect();
+        let ordered: Vec<String> = self
+            .document
+            .cards
+            .iter()
+            .filter(|card| wanted.contains(card.id.as_str()))
+            .map(|card| card.id.clone())
+            .collect();
+        if self.selected_card_ids == ordered {
+            return None;
+        }
+        self.selected_card_ids = ordered;
+        let selected_id = self.selected_card_id().map(str::to_string);
+        let title = selected_id
+            .as_deref()
+            .and_then(|cid| self.document.find_card(cid).map(|c| c.title.clone()));
+        Some(SelectionChange {
+            selected_id,
+            title,
+            selected_ids: self.selected_card_ids.clone(),
+        })
+    }
+
+    fn push_selection_change(change: Option<SelectionChange>, events: &mut Vec<EditorEvent>) -> bool {
+        match change {
+            Some(change) => {
+                events.push(EditorEvent::SelectionChanged {
+                    selected_id: change.selected_id,
+                    title: change.title,
+                    selected_ids: change.selected_ids,
+                });
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Cards whose bounds touch a world-space box, in document order.
+    pub fn cards_in_box(&self, a: Point, b: Point) -> Vec<String> {
+        let area = box_between(a, b);
+        self.document
+            .cards
+            .iter()
+            .filter(|card| card.world_bounds().intersects(&area))
+            .map(|card| card.id.clone())
+            .collect()
+    }
+
+    /// The selection box being drawn, in world space, for the renderer.
+    pub fn selection_box(&self) -> Option<Rect> {
+        match &self.interaction {
+            InteractionState::SelectingBox {
+                origin_world,
+                current_world,
+            } => Some(box_between(*origin_world, *current_world)),
+            _ => None,
         }
     }
 
     /// Iterates cards paired with whether each card is currently selected.
     pub fn cards_with_selection(&self) -> impl Iterator<Item = (&SkillCard, bool)> {
-        self.document.cards.iter().map(|card| {
-            let is_selected = self.selected_card_id.as_deref() == Some(&card.id);
-            (card, is_selected)
-        })
+        let selected: HashSet<&str> = self.selected_card_ids.iter().map(String::as_str).collect();
+        self.document
+            .cards
+            .iter()
+            .map(move |card| (card, selected.contains(card.id.as_str())))
     }
 
     /// Computes HTML-label world bounds; the camera reaches the overlay separately.
     pub fn get_label_layouts(&self) -> Vec<LabelLayout> {
-        self.document
-            .cards
-            .iter()
-            .map(|card| {
-                let selected = self.selected_card_id.as_deref() == Some(&card.id);
-                LabelLayout {
-                    card_id: card.id.clone(),
-                    title: card.title.clone(),
-                    world_rect: card.world_bounds(),
-                    selected,
-                }
+        self.cards_with_selection()
+            .map(|(card, selected)| LabelLayout {
+                card_id: card.id.clone(),
+                title: card.title.clone(),
+                world_rect: card.world_bounds(),
+                selected,
             })
             .collect()
     }
@@ -131,62 +203,82 @@ impl EditorState {
     }
 
     /// Cancels an in-progress gesture and emits any compensating card movement.
+    /// A cancelled box keeps the selection it had reached.
     pub fn cancel_active_interaction(&mut self, events: &mut Vec<EditorEvent>) -> bool {
-        let mut labels_changed = false;
         match std::mem::replace(&mut self.interaction, InteractionState::Idle) {
-            InteractionState::DraggingCard {
-                card_id,
-                start_position,
-                ..
-            } => {
-                if let Some(card) = self.document.cards.iter_mut().find(|c| c.id == card_id) {
-                    if (card.position.x - start_position.x).abs() > 1e-5
-                        || (card.position.y - start_position.y).abs() > 1e-5
-                    {
-                        card.position = start_position;
-                        events.push(EditorEvent::CardMoved {
-                            card_id,
-                            position: start_position,
-                        });
-                        labels_changed = true;
-                    }
-                }
-            }
-            InteractionState::Panning { .. } | InteractionState::Idle => {}
+            InteractionState::DraggingCards {
+                start_positions, ..
+            } => self.place_cards(start_positions.iter().map(|(id, from)| (id.as_str(), *from)), events),
+            InteractionState::SelectingBox { .. }
+            | InteractionState::Panning { .. }
+            | InteractionState::Idle => false,
         }
-        labels_changed
     }
 
-    fn update_dragged_card_position(
+    /// Moves cards to the given positions, emitting a CardMoved for each card
+    /// that actually moved. Returns whether any card moved. One pass over the
+    /// document, so dragging a large selection stays linear in the card count.
+    fn place_cards<'a>(
         &mut self,
-        card_id: &str,
+        positions: impl Iterator<Item = (&'a str, Point)>,
+        events: &mut Vec<EditorEvent>,
+    ) -> bool {
+        let positions: HashMap<&str, Point> = positions.collect();
+        let mut moved = false;
+        for card in &mut self.document.cards {
+            let Some(&position) = positions.get(card.id.as_str()) else {
+                continue;
+            };
+            if (card.position.x - position.x).abs() > 1e-5
+                || (card.position.y - position.y).abs() > 1e-5
+            {
+                card.position = position;
+                events.push(EditorEvent::CardMoved {
+                    card_id: card.id.clone(),
+                    position,
+                });
+                moved = true;
+            }
+        }
+        moved
+    }
+
+    /// Moves the dragged cards so the anchor card keeps its grab offset under the
+    /// pointer. The whole group moves by one delta, limited so that every card
+    /// stays within the world bounds: relative positions never change.
+    fn update_dragged_positions(
+        &mut self,
+        anchor_id: &str,
         grab_offset_world: Point,
+        start_positions: &[(String, Point)],
         screen_pt: Point,
         events: &mut Vec<EditorEvent>,
-    ) -> (Option<Point>, bool) {
+    ) -> bool {
+        let Some(anchor_start) = start_positions
+            .iter()
+            .find(|(id, _)| id == anchor_id)
+            .map(|(_, start)| *start)
+        else {
+            return false;
+        };
         let world_pointer = self.camera.screen_to_world(screen_pt);
-        let target_pos = clamp_world_point(Point::new(
-            world_pointer.x - grab_offset_world.x,
-            world_pointer.y - grab_offset_world.y,
-        ));
-        let mut labels_changed = false;
-        let mut actual_pos = None;
-
-        if let Some(card) = self.document.cards.iter_mut().find(|c| c.id == card_id) {
-            if (card.position.x - target_pos.x).abs() > 1e-5
-                || (card.position.y - target_pos.y).abs() > 1e-5
-            {
-                card.position = target_pos;
-                events.push(EditorEvent::CardMoved {
-                    card_id: card_id.to_string(),
-                    position: target_pos,
-                });
-                labels_changed = true;
-            }
-            actual_pos = Some(card.position);
+        let mut delta = Point::new(
+            world_pointer.x - grab_offset_world.x - anchor_start.x,
+            world_pointer.y - grab_offset_world.y - anchor_start.y,
+        );
+        let (mut min, mut max) = (anchor_start, anchor_start);
+        for (_, start) in start_positions {
+            min = Point::new(min.x.min(start.x), min.y.min(start.y));
+            max = Point::new(max.x.max(start.x), max.y.max(start.y));
         }
-
-        (actual_pos, labels_changed)
+        delta.x = delta.x.min(MAX_WORLD_COORD - max.x).max(MIN_WORLD_COORD - min.x);
+        delta.y = delta.y.min(MAX_WORLD_COORD - max.y).max(MIN_WORLD_COORD - min.y);
+        self.place_cards(
+            start_positions
+                .iter()
+                .map(|(id, start)| (id.as_str(), Point::new(start.x + delta.x, start.y + delta.y))),
+            events,
+        )
     }
 
     /// Applies one JSON-protocol command and returns the resulting events.
@@ -216,15 +308,9 @@ impl EditorState {
                 self.undo_stack.clear();
                 self.redo_stack.clear();
                 self.interaction = InteractionState::Idle;
-                if let Some(ref sel) = self.selected_card_id {
-                    if !self.document.cards.iter().any(|c| &c.id == sel) {
-                        self.selected_card_id = None;
-                        events.push(EditorEvent::SelectionChanged {
-                            selected_id: None,
-                            title: None,
-                        });
-                    }
-                }
+                // Selected cards that the loaded document still holds stay selected.
+                let change = self.set_selection(self.selected_card_ids.clone());
+                Self::push_selection_change(change, &mut events);
                 events.push(EditorEvent::DocumentLoaded);
                 events.push(EditorEvent::ConnectionsUpdated {
                     connections: self.document.connections.clone(),
@@ -256,50 +342,67 @@ impl EditorState {
                 if self.cancel_active_interaction(&mut events) {
                     labels_changed = true;
                 }
-                if let Some(change) = self.select_card(id) {
-                    events.push(EditorEvent::SelectionChanged {
-                        selected_id: change.selected_id,
-                        title: change.title,
-                    });
+                let change = self.select_card(id);
+                if Self::push_selection_change(change, &mut events) {
                     labels_changed = true;
                 }
             }
-            EditorCommand::PointerDown { screen_x, screen_y } => {
+            EditorCommand::PointerDown {
+                screen_x,
+                screen_y,
+                shift_key,
+            } => {
                 if self.cancel_active_interaction(&mut events) {
                     labels_changed = true;
                 }
                 let screen_pt = Point::new(screen_x, screen_y);
                 let hit = self.hit_test(screen_pt);
-                if let Some(ref card_id) = hit {
-                    if let Some(change) = self.select_card(hit.clone()) {
-                        events.push(EditorEvent::SelectionChanged {
-                            selected_id: change.selected_id,
-                            title: change.title,
-                        });
-                        labels_changed = true;
+                if let Some(card_id) = hit {
+                    // Pressing a card of the selection keeps it, so the whole selection drags.
+                    let keep_selection = !self.read_only && self.selected_card_ids.contains(&card_id);
+                    if !keep_selection {
+                        let change = self.select_card(Some(card_id.clone()));
+                        if Self::push_selection_change(change, &mut events) {
+                            labels_changed = true;
+                        }
                     }
                     if self.read_only {
                         self.interaction = InteractionState::Panning {
                             last_screen_pos: screen_pt,
                         };
-                    } else if let Some(card) = self.document.find_card(card_id) {
+                    } else if let Some(card) = self.document.find_card(&card_id) {
                         let world_pointer = self.camera.screen_to_world(screen_pt);
                         let grab_offset_world = Point::new(
                             world_pointer.x - card.position.x,
                             world_pointer.y - card.position.y,
                         );
-                        self.interaction = InteractionState::DraggingCard {
-                            card_id: card_id.clone(),
-                            start_position: card.position,
+                        let start_positions = self
+                            .document
+                            .cards
+                            .iter()
+                            .filter(|c| self.selected_card_ids.contains(&c.id))
+                            .map(|c| (c.id.clone(), c.position))
+                            .collect();
+                        self.interaction = InteractionState::DraggingCards {
+                            anchor_id: card_id,
                             grab_offset_world,
+                            start_positions,
                         };
                     }
+                } else if shift_key && !self.read_only {
+                    // Shift on the empty canvas draws a selection box instead of panning.
+                    let origin_world = self.camera.screen_to_world(screen_pt);
+                    self.interaction = InteractionState::SelectingBox {
+                        origin_world,
+                        current_world: origin_world,
+                    };
+                    let change = self.set_selection(self.cards_in_box(origin_world, origin_world));
+                    if Self::push_selection_change(change, &mut events) {
+                        labels_changed = true;
+                    }
                 } else {
-                    if let Some(change) = self.select_card(None) {
-                        events.push(EditorEvent::SelectionChanged {
-                            selected_id: change.selected_id,
-                            title: change.title,
-                        });
+                    let change = self.select_card(None);
+                    if Self::push_selection_change(change, &mut events) {
                         labels_changed = true;
                     }
                     self.interaction = InteractionState::Panning {
@@ -309,21 +412,35 @@ impl EditorState {
             }
             EditorCommand::PointerMove { screen_x, screen_y } => {
                 let screen_pt = Point::new(screen_x, screen_y);
-                match &self.interaction {
-                    InteractionState::DraggingCard {
-                        card_id,
+                match std::mem::replace(&mut self.interaction, InteractionState::Idle) {
+                    InteractionState::DraggingCards {
+                        anchor_id,
                         grab_offset_world,
-                        ..
+                        start_positions,
                     } => {
-                        let card_id = card_id.clone();
-                        let grab_offset = *grab_offset_world;
-                        let (_, moved) = self.update_dragged_card_position(
-                            &card_id,
-                            grab_offset,
+                        if self.update_dragged_positions(
+                            &anchor_id,
+                            grab_offset_world,
+                            &start_positions,
                             screen_pt,
                             &mut events,
-                        );
-                        if moved {
+                        ) {
+                            labels_changed = true;
+                        }
+                        self.interaction = InteractionState::DraggingCards {
+                            anchor_id,
+                            grab_offset_world,
+                            start_positions,
+                        };
+                    }
+                    InteractionState::SelectingBox { origin_world, .. } => {
+                        let current_world = self.camera.screen_to_world(screen_pt);
+                        self.interaction = InteractionState::SelectingBox {
+                            origin_world,
+                            current_world,
+                        };
+                        let change = self.set_selection(self.cards_in_box(origin_world, current_world));
+                        if Self::push_selection_change(change, &mut events) {
                             labels_changed = true;
                         }
                     }
@@ -340,6 +457,8 @@ impl EditorState {
                                 offset_y: self.camera.offset_y,
                                 zoom: self.camera.zoom,
                             });
+                        } else {
+                            self.interaction = InteractionState::Panning { last_screen_pos };
                         }
                     }
                     InteractionState::Idle => {}
@@ -348,35 +467,42 @@ impl EditorState {
             EditorCommand::PointerUp { screen_x, screen_y } => {
                 let screen_pt = Point::new(screen_x, screen_y);
                 match std::mem::replace(&mut self.interaction, InteractionState::Idle) {
-                    InteractionState::DraggingCard {
-                        card_id,
-                        start_position,
+                    InteractionState::DraggingCards {
+                        anchor_id,
                         grab_offset_world,
+                        start_positions,
                     } => {
-                        let (card_pos, moved) = self.update_dragged_card_position(
-                            &card_id,
+                        if self.update_dragged_positions(
+                            &anchor_id,
                             grab_offset_world,
+                            &start_positions,
                             screen_pt,
                             &mut events,
-                        );
-                        if moved {
+                        ) {
                             labels_changed = true;
                         }
-                        if let Some(pos) = card_pos {
-                            if (pos.x - start_position.x).abs() > 1e-4
-                                || (pos.y - start_position.y).abs() > 1e-4
-                            {
-                                self.undo_stack.push(HistoryAction::MoveCard {
-                                    card_id,
-                                    from: start_position,
-                                    to: pos,
-                                });
-                                self.redo_stack.clear();
-                                events.push(EditorEvent::HistoryChanged {
-                                    can_undo: true,
-                                    can_redo: false,
-                                });
-                            }
+                        let moves: Vec<CardMove> = start_positions
+                            .into_iter()
+                            .filter_map(|(card_id, from)| {
+                                let to = self.document.find_card(&card_id)?.position;
+                                let moved = (to.x - from.x).abs() > 1e-4 || (to.y - from.y).abs() > 1e-4;
+                                moved.then_some(CardMove { card_id, from, to })
+                            })
+                            .collect();
+                        if !moves.is_empty() {
+                            self.undo_stack.push(HistoryAction::MoveCards { moves });
+                            self.redo_stack.clear();
+                            events.push(EditorEvent::HistoryChanged {
+                                can_undo: true,
+                                can_redo: false,
+                            });
+                        }
+                    }
+                    InteractionState::SelectingBox { origin_world, .. } => {
+                        let current_world = self.camera.screen_to_world(screen_pt);
+                        let change = self.set_selection(self.cards_in_box(origin_world, current_world));
+                        if Self::push_selection_change(change, &mut events) {
+                            labels_changed = true;
                         }
                     }
                     InteractionState::Panning { .. } | InteractionState::Idle => {}
@@ -407,56 +533,30 @@ impl EditorState {
                 if self.cancel_active_interaction(&mut events) {
                     labels_changed = true;
                 }
-                if let Some(action) = self.undo_stack.pop() {
-                    match action {
-                        HistoryAction::MoveCard { card_id, from, to } => {
-                            if let Some(card) = self.document.cards.iter_mut().find(|c| c.id == card_id) {
-                                card.position = from;
-                                events.push(EditorEvent::CardMoved {
-                                    card_id: card_id.clone(),
-                                    position: from,
-                                });
-                                labels_changed = true;
-                            }
-                            self.redo_stack.push(HistoryAction::MoveCard {
-                                card_id,
-                                from,
-                                to,
-                            });
-                            events.push(EditorEvent::HistoryChanged {
-                                can_undo: !self.undo_stack.is_empty(),
-                                can_redo: true,
-                            });
-                        }
+                if let Some(HistoryAction::MoveCards { moves }) = self.undo_stack.pop() {
+                    if self.place_cards(moves.iter().map(|m| (m.card_id.as_str(), m.from)), &mut events) {
+                        labels_changed = true;
                     }
+                    self.redo_stack.push(HistoryAction::MoveCards { moves });
+                    events.push(EditorEvent::HistoryChanged {
+                        can_undo: !self.undo_stack.is_empty(),
+                        can_redo: true,
+                    });
                 }
             }
             EditorCommand::Redo => {
                 if self.cancel_active_interaction(&mut events) {
                     labels_changed = true;
                 }
-                if let Some(action) = self.redo_stack.pop() {
-                    match action {
-                        HistoryAction::MoveCard { card_id, from, to } => {
-                            if let Some(card) = self.document.cards.iter_mut().find(|c| c.id == card_id) {
-                                card.position = to;
-                                events.push(EditorEvent::CardMoved {
-                                    card_id: card_id.clone(),
-                                    position: to,
-                                });
-                                labels_changed = true;
-                            }
-                            self.undo_stack.push(HistoryAction::MoveCard {
-                                card_id,
-                                from,
-                                to,
-                            });
-                            events.push(EditorEvent::HistoryChanged {
-                                can_undo: true,
-                                can_redo: !self.redo_stack.is_empty(),
-                            });
-                        }
+                if let Some(HistoryAction::MoveCards { moves }) = self.redo_stack.pop() {
+                    if self.place_cards(moves.iter().map(|m| (m.card_id.as_str(), m.to)), &mut events) {
+                        labels_changed = true;
                     }
+                    self.undo_stack.push(HistoryAction::MoveCards { moves });
+                    events.push(EditorEvent::HistoryChanged {
+                        can_undo: true,
+                        can_redo: !self.redo_stack.is_empty(),
+                    });
                 }
             }
             EditorCommand::ResizeViewport { width, height } => {
@@ -581,4 +681,9 @@ impl EditorState {
 
         events
     }
+}
+
+/// The axis-aligned box spanned by two corner points.
+fn box_between(a: Point, b: Point) -> Rect {
+    Rect::new(a.x.min(b.x), a.y.min(b.y), (a.x - b.x).abs(), (a.y - b.y).abs())
 }

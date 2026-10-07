@@ -64,6 +64,7 @@ describe('Editor Seams & Coordinate Transformations (ADR-0015, Matt Pocock SDD)'
       type: 'SelectionChanged',
       selected_id: 'skill-wgpu-pipeline',
       title: 'WebGPU Pipeline',
+      selected_ids: ['skill-wgpu-pipeline'],
     })
 
     expect(selEvent.type).toBe('SelectionChanged')

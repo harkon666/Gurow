@@ -83,6 +83,10 @@ describe('Editor Protocol Schemas (Matt Pocock SDD)', () => {
         screen_x: 120.5,
         screen_y: 340.2,
       })
+      // Shift on the empty canvas draws a selection box instead of panning.
+      const boxStart = EditorCommandSchema.parse({ type: 'PointerDown', screen_x: 1, screen_y: 2, shift_key: true })
+      expect(boxStart).toEqual({ type: 'PointerDown', screen_x: 1, screen_y: 2, shift_key: true })
+      expect(() => EditorCommandSchema.parse({ type: 'PointerDown', screen_x: 1, screen_y: 2, shift_key: 'yes' })).toThrow()
     })
 
     it('validates PointerMove command', () => {
@@ -190,28 +194,42 @@ describe('Editor Protocol Schemas (Matt Pocock SDD)', () => {
       expect(parsed).toEqual(event)
     })
 
-    it('validates SelectionChanged event with id/title and with nulls', () => {
+    it('validates SelectionChanged event with id/title, with nulls and for a multiselection', () => {
       const selChanged = EditorEventSchema.parse({
         type: 'SelectionChanged',
         selected_id: 'skill-1',
         title: 'Skill One',
+        selected_ids: ['skill-1'],
       })
       expect(selChanged).toEqual({
         type: 'SelectionChanged',
         selected_id: 'skill-1',
         title: 'Skill One',
+        selected_ids: ['skill-1'],
       })
 
       const deselected = EditorEventSchema.parse({
         type: 'SelectionChanged',
         selected_id: null,
         title: null,
+        selected_ids: [],
       })
       expect(deselected).toEqual({
         type: 'SelectionChanged',
         selected_id: null,
         title: null,
+        selected_ids: [],
       })
+
+      // Several selected Skills open none of them; the list says which are selected.
+      const several = EditorEventSchema.parse({
+        type: 'SelectionChanged',
+        selected_id: null,
+        title: null,
+        selected_ids: ['skill-1', 'skill-2'],
+      })
+      expect(several.type === 'SelectionChanged' && several.selected_ids).toEqual(['skill-1', 'skill-2'])
+      expect(() => EditorEventSchema.parse({ type: 'SelectionChanged', selected_id: null, title: null })).toThrow()
     })
 
     it('validates LabelsUpdated event', () => {

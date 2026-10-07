@@ -55,6 +55,15 @@ fn vs_card(
 
 @fragment
 fn fs_card(in: CardVertexOutput) -> @location(0) vec4<f32> {
+    // The selection box: a square, translucent area with a thin border.
+    if (in.selected > 1.5) {
+        let edge = min(in.local_uv * in.card_size, (vec2<f32>(1.0, 1.0) - in.local_uv) * in.card_size);
+        if (min(edge.x, edge.y) < 1.0) {
+            return vec4<f32>(0.38, 0.65, 0.98, 0.9);
+        }
+        return vec4<f32>(0.23, 0.51, 0.96, 0.12);
+    }
+
     let p = in.local_uv * in.card_size;
     let half_size = in.card_size * 0.5;
     let pos_from_center = abs(p - half_size);

@@ -12,5 +12,5 @@ pub use geometry::{
     MIN_WORLD_COORD, MIN_ZOOM,
 };
 pub use protocol::{EditorCommand, EditorEvent, LabelLayout, SelectionChange};
-pub use state::{EditorState, HistoryAction, InteractionState};
+pub use state::{CardMove, EditorState, HistoryAction, InteractionState};
 
