@@ -226,6 +226,21 @@ export const publishCoachDraft = (pathId: string, expectedRevision: number) =>
 export const prepareCoachDraft = (pathId: string, expectedRevision: number) =>
   call<CoachPathDocument>(`/coach/learning-paths/${encodeURIComponent(pathId)}/drafts`, { method: 'POST', body: { expectedRevision } })
 
+/**
+ * Where the signed-in Account may copy Skills and Tasks from (ADR 0004): its own
+ * personal Paths and, in the Coach Workspaces it owns, each Path's open Draft and
+ * published Versions. Another Account's content is never listed.
+ */
+export interface ReuseSources {
+  personal: { learningPathId: string; title: string }[]
+  coach: {
+    workspace: { id: string; name: string }
+    learningPaths: { learningPathId: string; title: string; draft: { id: string; versionNumber: number } | null; versions: { id: string; versionNumber: number }[] }[]
+  }[]
+}
+
+export const listReuseSources = () => call<ReuseSources>('/reuse/sources')
+
 /** One published Version of a Path in the signed-in Coach's Workspace, read-only. */
 export const readCoachVersion = (versionId: string) => call<CoachPathDocument>(`/coach/learning-path-versions/${encodeURIComponent(versionId)}`)
 

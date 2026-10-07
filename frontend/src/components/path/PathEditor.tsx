@@ -13,6 +13,8 @@ import { useKeptWork, type SaveAnswer } from './useKeptWork'
 import { LearningRecords, type LearningOutcome } from './learning'
 import { describeAction, LearningStatus, SkillLearning, SkillStatusChips, TaskLearning, type PersonalLearningView } from './LearningPanel'
 import { draftRuleProblem, optionalPrerequisiteProblem, optionalToggleProblem, SkillDraftRules, TaskDraftRules } from './DraftRules'
+import { copySkills, copyTask, type ContentKind, type ReuseContent } from './reuse'
+import { ReusePanel } from './ReusePanel'
 
 const AUTOSAVE_DELAY_MS = 500
 
@@ -115,6 +117,9 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
   /** Why loading the saved version after a conflict failed; the conflict and its choices stay meanwhile. */
   const [loadError, setLoadError] = useState<string | null>(null)
   const [newSkill, setNewSkill] = useState({ title: '', outcome: '' })
+  const [reuseOpen, setReuseOpen] = useState(false)
+  /** What the last copy added, until the next one. */
+  const [reuseNotice, setReuseNotice] = useState<string | null>(null)
   // The engine loads asynchronously; until then there is no document to add a card to.
   const [gpuStatus, setGpuStatus] = useState<GpuStatus>('initializing')
   const editorReady = gpuStatus !== 'initializing'
@@ -244,6 +249,32 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
     actionsRef.current!.createCard(id, skillTitle, position)
     actionsRef.current!.selectCard(id)
     setNewSkill({ title: '', outcome: '' })
+  }
+
+  /**
+   * Adds copies of a source's Skills with new IDs (ADR 0004): their Tasks, their
+   * cards right of this Path's cards, and the Prerequisites among them. Like a new
+   * Skill, each copy is in the application before its card, so the save includes it.
+   */
+  const handleCopySkills = (content: ReuseContent, skillIds: string[], sourceLabel: string) => {
+    const snapshot = actionsRef.current?.exportSnapshot()
+    if (!editorReady || !snapshot) return
+    const copy = copySkills(content, skillIds, mode, snapshot.cards, () => crypto.randomUUID())
+    if (copy.skills.length === 0) return
+    local.current.skills = [...local.current.skills, ...copy.skills]
+    setSkills(local.current.skills)
+    for (const card of copy.cards) actionsRef.current!.createCard(card.id, card.title, card.position)
+    for (const edge of copy.connections) actionsRef.current!.connectSkills(edge.from_id, edge.to_id)
+    actionsRef.current!.selectCard(copy.cards[0].id)
+    const tasks = copy.skills.reduce((count, skill) => count + skill.tasks.length, 0)
+    setReuseNotice(`Copied ${copy.skills.length === 1 ? `“${copy.skills[0].title}”` : `${copy.skills.length} Skills`} with ${tasks === 1 ? '1 Task' : `${tasks} Tasks`} from ${sourceLabel} as new content of this ${personal ? 'Path' : 'Draft'}.`)
+    setReuseOpen(false)
+  }
+
+  /** Adds a copy of one Task, with a new ID, to a Skill of this Path. */
+  const handleCopyTask = (from: ContentKind, task: PathTask, skillId: string) => {
+    const copy = copyTask(task, from, mode, () => crypto.randomUUID())
+    changeSkills((all) => all.map((skill) => (skill.id === skillId ? { ...skill, tasks: [...skill.tasks, copy] } : skill)))
   }
 
   const selectedId = selectedSkill?.id ?? null
@@ -437,6 +468,15 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
             >
               Add Skill
             </button>
+            <button
+              id="open-reuse-btn"
+              type="button"
+              onClick={() => setReuseOpen(true)}
+              className="text-xs text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg py-1.5 cursor-pointer"
+            >
+              Copy from a Path…
+            </button>
+            {reuseNotice && <p id="reuse-notice" role="status" className="text-[11px] text-emerald-300">{reuseNotice}</p>}
           </form>
           <SkillPrerequisiteList
             skills={skills}
@@ -483,6 +523,17 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
               return task && <TaskDraftRules task={task} onReward={(xpReward) => handleTaskReward(taskId, xpReward)} />
             }}
         />
+        {reuseOpen && (
+          <ReusePanel
+            destination={mode.kind}
+            skills={skills}
+            selectedSkillId={selectedId}
+            canCopy={editorReady}
+            onCopySkills={handleCopySkills}
+            onCopyTask={handleCopyTask}
+            onClose={() => setReuseOpen(false)}
+          />
+        )}
       </section>
     </div>
   )

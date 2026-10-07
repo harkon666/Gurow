@@ -12,6 +12,7 @@ import { changeAccessOverride } from './overrides'
 import { changeEnrollmentStatus } from './lifecycle'
 import * as personal from './personal'
 import { listVersionEnrollments, readLearningState, recordReview, revokeApproval, type ReviewContents } from './reviews'
+import { listReuseSources } from './reuse'
 import { readDraft, readSubmission, saveDraft, sendRevision, startTask, type SubmissionContents, type SubmissionRefusal } from './submissions'
 import { enterPersonalWorkspace, readAccount, readPersonalWorkspace } from './workspace'
 
@@ -404,6 +405,10 @@ export function createApp({ db, identity, auth, delivery }: { db: Database; iden
       })
     }
   }
+
+  // Reuse (ADR 0004): the Paths and Versions the Account may copy Skills and Tasks from, its own only.
+  app.use('/reuse/*', authenticate)
+  app.get('/reuse/sources', async (c) => c.json(await listReuseSources(db, c.get('accountId'))))
 
   // Coach mode (ADR 0010, 0011): a Coach Workspace and its Paths answer only to the
   // Workspace's owner; every other Account, learners included, finds nothing.
