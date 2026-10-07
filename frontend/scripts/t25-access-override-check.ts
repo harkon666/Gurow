@@ -23,6 +23,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type BrowserContext, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
+import { openSkillList, readSkillStatus } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -111,6 +112,7 @@ async function openEnrollment(page: Page, enrollmentId: string, gpu: 'ready' | '
 }
 /** Selects a Skill in the keyboard list: focus it, Home, ArrowDown n times, Enter. */
 async function keyboardSelect(page: Page, index: number, id: string) {
+  await openSkillList(page)
   await page.focus('#skill-prerequisite-list')
   await page.keyboard.press('Home')
   for (let i = 0; i < index; i++) await page.keyboard.press('ArrowDown')
@@ -268,8 +270,8 @@ async function main() {
     const skillOf = (s: any, id: string) => s.skills.find((x: any) => x.skillId === id)
     const progress = async (page: Page) => ({
       xp: (await data(page, '#enrollment-xp')).xp,
-      vectors: await data(page, `#skill-status-${la.first}`).then((d) => [d.access, d.mastery]),
-      matrices: await data(page, `#skill-status-${la.second}`).then((d) => [d.access, d.mastery]),
+      vectors: await readSkillStatus(page, `#skill-status-${la.first}`).then((d) => [d.access, d.mastery]),
+      matrices: await readSkillStatus(page, `#skill-status-${la.second}`).then((d) => [d.access, d.mastery]),
     })
     const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
     const lockedMatrices = ['Requires Mastery of “Vectors”', 'Needs 20 more XP: the threshold is 20 XP and this Enrollment has 0 XP']
@@ -384,7 +386,7 @@ async function main() {
     check(otherSend.status === 403 && otherSend.body?.error === 'skill_locked', `Lena's send in her other Enrollment answered ${otherSend.status}`)
     await act(pia)
     await revisit(pia)
-    check((await data(pia, `#skill-status-${la.second}`)).access === 'locked', 'Pia\'s Matrices opened')
+    check((await readSkillStatus(pia, `#skill-status-${la.second}`)).access === 'locked', 'Pia\'s Matrices opened')
     pass('use', 'Lena reads "Open by Coach override", the reason, what it waives and "It changes no XP or Mastery", and the record "granted by carla, Coach of this Workspace · “Matrices” for you"; she sends Matrix drills Revision 1 from the UI and keeps a saved draft; 0 XP, nothing mastered; Pia\'s Enrollment and Lena\'s Statistics Enrollment unchanged (Inference still locked, send 403 skill_locked)')
 
     // 4. An inactive Enrollment cannot start or send work despite the override, and nothing offers it as reactivation.

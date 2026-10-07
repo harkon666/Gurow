@@ -23,6 +23,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type BrowserContext, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
+import { closeEditorPanels, readSkillStatus } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -109,6 +110,7 @@ async function offset(page: Page, a: string, b: string) {
 const settle = (page: Page) => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
 /** A visible canvas point inside the card, so input goes through the engine. */
 async function cardPoint(page: Page, id: string) {
+  await closeEditorPanels(page)
   const point = await page.$eval(`#card-label-${id}`, (el) => {
     const canvas = document.querySelector('#editor-canvas')!, r = el.getBoundingClientRect()
     for (let y = r.top + 8; y < r.bottom - 8; y += 8) for (let x = r.left + 8; x < r.right - 8; x += 8) {
@@ -314,6 +316,7 @@ async function main() {
     pass('Coach layout save', `Carla (zoom ${zoomText(carlaZoom)}) drags Matrices by (150, 90) px → "Saved · layout revision 1"; stored Matrices (${moved.matrices.x.toFixed(1)}, ${moved.matrices.y.toFixed(1)}); still one Version; Path, Version, Skills, Tasks, Prerequisites, Enrollment and records unchanged`)
 
     // 3. Undoing the saved move is a new, validated save; redoing it is another.
+    await closeEditorPanels(carla)
     await carla.click('#editor-undo-btn')
     await carla.waitForSelector('#layout-save-status[data-state="saved"][data-revision="2"]')
     const undone = await storedLayout()
@@ -398,11 +401,13 @@ async function main() {
         return original(input, init)
       }) as typeof fetch
     }, la.versionId)
+    await closeEditorPanels(tabB)
     await tabB.click('#layout-load-accepted-btn')
     await tabB.waitForSelector('#layout-load-error')
     check((await data(tabB, '#layout-save-status')).state === 'conflict' && (await text(tabB, '#layout-load-error')).includes('could not load the saved layout') && await tabB.$('#layout-load-accepted-btn') !== null,
       `after a failed load tab B shows ${(await data(tabB, '#layout-save-status')).state}, Discard ${await tabB.$('#layout-load-accepted-btn') !== null}`)
     check(near((await offset(tabB, la.vectors, la.matrices)).x, tabBKept.x + 30) && JSON.stringify(await storedLayout()) === JSON.stringify(accepted), 'the failed load changed the canvas or the store')
+    await closeEditorPanels(tabB)
     await tabB.click('#layout-load-accepted-btn')
     await tabB.waitForSelector('#layout-save-status[data-state="saved"][data-revision="4"]')
     await settle(tabB)
@@ -421,7 +426,7 @@ async function main() {
     await openVersion(carla, la.versionId, 4)
     check((await text(carla, '#published-skills')).includes('Add and scale vectors in R^n') && (await text(carla, '#published-skills')).includes('Requires Mastery of: Vectors') && await carla.$('#version-link-2') === null, 'the published content changed')
     await openEnrollment(lena, enrollment)
-    check((await data(lena, '#enrollment-xp')).xp === '20' && (await data(lena, `#skill-status-${la.vectors}`)).mastery === 'mastered' && (await data(lena, '#enrolled-version-badge')).versionNumber === '1', 'the learner\'s progress changed')
+    check((await data(lena, '#enrollment-xp')).xp === '20' && (await readSkillStatus(lena, `#skill-status-${la.vectors}`)).mastery === 'mastered' && (await data(lena, '#enrolled-version-badge')).versionNumber === '1', 'the learner\'s progress changed')
     check(await definitions() === definitionsBefore && await history() === historyBefore, 'learning definitions or history changed')
     pass('unchanged learning', 'Path revision, Version 1 content, Enrollment, XP (20), Mastery of Vectors, the approved and pending revisions are identical for both readers after four layout saves and a refused one')
 

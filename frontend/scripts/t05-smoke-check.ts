@@ -1,4 +1,5 @@
 import puppeteer from 'puppeteer-core'
+import { closeEditorPanels, openSkillList } from './editor-navigation'
 import { spawn, execSync, execFileSync } from 'child_process'
 import path from 'path'
 import fs from 'fs'
@@ -247,11 +248,11 @@ async function main() {
     console.log('\n--- Phase 1: Real Rendering Path & Canvas Baseline (AC 1, AC 5) ---')
     await page.waitForSelector('#editor-canvas', { timeout: 10000 })
     await page.waitForSelector('#card-label-skill-rust-basics', { timeout: 10000 })
-    await page.waitForSelector('#skill-prerequisite-list', { timeout: 10000 })
+    await openSkillList(page)
 
-    const gpuStatusText = await page.$eval('#gpu-status-badge', (el: any) => el.textContent?.trim())
-    console.log(`  GPU Status Badge: "${gpuStatusText}"`)
-    if (!gpuStatusText?.includes('WebGPU Rust Editor')) {
+    const gpuStatusText = await page.$eval('#gpu-status-badge', (el: HTMLElement) => el.dataset.status)
+    console.log(`  GPU Status: "${gpuStatusText}"`)
+    if (gpuStatusText !== 'ready') {
       throw new Error(`Expected active WebGPU status, got "${gpuStatusText}"`)
     }
 
@@ -304,6 +305,7 @@ async function main() {
     console.log('\n--- Phase 2: Graph Setup (Edge + Card Move) Before Failure (AC 5) ---')
 
     // Step A: Select "Rust Fundamentals"
+    await closeEditorPanels(page)
     await page.click('#card-label-skill-rust-basics')
     await page.waitForSelector('#selected-skill-title')
 
@@ -324,6 +326,7 @@ async function main() {
     }
 
     // Step C: Drag "Rust Fundamentals" to a distinct coordinate
+    await closeEditorPanels(page)
     await page.evaluate(() => window.scrollTo(0, 0))
     const cardEl = await page.$('#card-label-skill-rust-basics')
     const boxBeforeDrag = await cardEl.boundingBox()
@@ -350,6 +353,7 @@ async function main() {
     console.log('\n--- Phase 3: Keyboard Navigation & Task Edit Setup (AC 1, AC 3) ---')
 
     // Navigate to second skill via keyboard list
+    await openSkillList(page)
     await page.focus('#skill-prerequisite-list')
     await page.keyboard.press('ArrowDown')
     await page.keyboard.press('Enter')
@@ -360,8 +364,10 @@ async function main() {
     const keyboardSelectedSkillId = await page.$eval('#selected-skill-id', (el: any) => el.textContent?.trim())
     console.log(`  Keyboard selected skill: "${keyboardSelectedSkillId}"`)
 
-    // Navigate back to rust-basics
-    await page.keyboard.press('ArrowUp')
+    // Selection closes the list; reopen it before navigating back.
+    await openSkillList(page)
+    await page.focus('#skill-prerequisite-list')
+    await page.keyboard.press('Home')
     await page.keyboard.press('Enter')
     await page.waitForFunction(
       () => document.querySelector('#selected-skill-id')?.textContent?.trim() === 'skill-rust-basics'
@@ -423,6 +429,7 @@ async function main() {
 
     // Navigate with keyboard list and EDIT TASK during failure (Spec 1: verifies no unsafe aliasing)
     console.log('  Testing navigation and task editing while renderer is failed (Spec 1)...')
+    await openSkillList(page)
     await page.focus('#skill-prerequisite-list')
     await page.keyboard.press('ArrowDown')
     await page.keyboard.press('Enter')
@@ -441,8 +448,9 @@ async function main() {
     console.log(`  Second skill task title with edit: "${secondSkillTaskVal}"`)
 
     // Navigate back to rust-basics
+    await openSkillList(page)
     await page.focus('#skill-prerequisite-list')
-    await page.keyboard.press('ArrowUp')
+    await page.keyboard.press('Home')
     await page.keyboard.press('Enter')
     await page.waitForFunction(
       () => document.querySelector('#selected-skill-id')?.textContent?.trim() === 'skill-rust-basics'
@@ -455,7 +463,9 @@ async function main() {
     console.log('\n--- Phase 5: Serialized Automatic Recovery & Failed Adapter Feedback (AC 4, Standards 2) ---')
 
     // Repeated clicks during the automatic attempt must not start other requests.
+    await closeEditorPanels(page)
     await page.click('#btn-retry-renderer')
+    await closeEditorPanels(page)
     await page.click('#btn-retry-renderer')
     await new Promise(resolve => setTimeout(resolve, 100))
     const recoveryRequests = await page.evaluate(() => (window as any).__recoveryRequests)
@@ -495,6 +505,7 @@ async function main() {
     })
 
     // Click standard Retry button again
+    await closeEditorPanels(page)
     await page.click('#btn-retry-renderer')
 
     // Wait for error notice to disappear and badge to indicate ready
@@ -503,7 +514,7 @@ async function main() {
       { timeout: 10000 }
     )
     await page.waitForFunction(
-      () => document.querySelector('#gpu-status-badge')?.textContent?.includes('WebGPU Rust Editor')
+      () => (document.querySelector('#gpu-status-badge') as HTMLElement | null)?.dataset.status === 'ready'
     )
     console.log('  WebGPU Editor successfully recovered and active.')
 
@@ -523,6 +534,7 @@ async function main() {
     console.log('  Verified: Card moved position preserved across device loss and recreation.')
 
     // 2. Verify graph edge connection is preserved after recovery
+    await closeEditorPanels(page)
     await page.click('#card-label-skill-rust-basics')
     await page.waitForSelector('#outgoing-prerequisites-list')
     const postRecoveryOutgoing = await page.$eval(
@@ -535,6 +547,7 @@ async function main() {
     console.log('  Verified: Prerequisite connection edge preserved across recovery.')
 
     // 3. Verify task edit made during recovery is preserved
+    await openSkillList(page)
     await page.focus('#skill-prerequisite-list')
     await page.keyboard.press('ArrowDown')
     await page.keyboard.press('Enter')
@@ -550,8 +563,9 @@ async function main() {
     console.log('  Verified: Task edit made during recovery is preserved after renderer recreation.')
 
     // Select rust-basics again for pixel verification
+    await openSkillList(page)
     await page.focus('#skill-prerequisite-list')
-    await page.keyboard.press('ArrowUp')
+    await page.keyboard.press('Home')
     await page.keyboard.press('Enter')
     await page.waitForFunction(
       () => document.querySelector('#selected-skill-id')?.textContent?.trim() === 'skill-rust-basics'
@@ -561,6 +575,7 @@ async function main() {
     // Phase 7: Real GPU Redraw Pixel Inspection (Standards 1, ENGINE_VALIDATION_PLAN.md)
     // =========================================================================
     console.log('\n--- Phase 7: Real GPU Redraw Pixel Inspection (Standards 1) ---')
+    await closeEditorPanels(page)
 
     await page.evaluate(() => window.scrollTo(0, 0))
     const rustBox = await page.$eval('#card-label-skill-rust-basics', (el: any) => {
@@ -694,6 +709,7 @@ async function main() {
       throw new Error(`Explanation must state positioning remains a canvas operation: got "${explanationText}"`)
     }
 
+    await openSkillList(noGpuPage)
     // Verify positioning note in list footer
     const listPositioningNote = await noGpuPage.$eval(
       '#list-positioning-note',

@@ -18,6 +18,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import path from 'node:path'
 import puppeteer, { type Page } from 'puppeteer-core'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
+import { closeEditorPanels } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -142,6 +143,7 @@ async function labelsMatch(page: Page, positions: Record<string, Point>) {
 
 /** Holds Shift and drags across the canvas from one world point to another: a selection box. */
 async function boxSelect(page: Page, from: Point, to: Point, { release = true } = {}) {
+  await closeEditorPanels(page)
   const a = await toPage(page, from), b = await toPage(page, to)
   await page.keyboard.down('Shift')
   await page.mouse.move(a.x, a.y)
@@ -154,6 +156,7 @@ async function boxSelect(page: Page, from: Point, to: Point, { release = true } 
 }
 /** A canvas point inside the card's label that reaches the canvas, so input goes through the engine. */
 async function cardPoint(page: Page, id: string) {
+  await closeEditorPanels(page)
   const point = await page.$eval(`#card-label-${id}`, (el) => {
     const canvas = document.querySelector('#editor-canvas')!, r = el.getBoundingClientRect()
     for (let y = r.top + 8; y < r.bottom - 8; y += 8) for (let x = r.left + 8; x < r.right - 8; x += 8) {
@@ -344,6 +347,7 @@ async function main() {
     for (const id of Object.keys(start)) check(near(afterDrag[id].x, world(id).x, 0.5) && near(afterDrag[id].y, world(id).y, 0.5), `stored ${id} at ${JSON.stringify(afterDrag[id])}, expected ${JSON.stringify(world(id))}`)
     await labelsMatch(page, afterDrag)
     check(!await page.$eval('#editor-undo-btn', (el) => (el as HTMLButtonElement).disabled), 'the drag left nothing to undo')
+    await closeEditorPanels(page)
     await page.click('#editor-undo-btn')
     await waitForSaved(page, revision + 2)
     check(samePositions(await stored(page, pathId), start), `after one undo the stored positions are ${JSON.stringify(await stored(page, pathId))}`)
@@ -410,6 +414,7 @@ async function main() {
     const limited = await stored(page, far)
     check(limited[edge.f].x === MAX_WORLD && near(limited[edge.f].y, 180, 0.5) && limited[edge.e].x === MAX_WORLD - 200 && near(limited[edge.e].y, 30, 0.5), `stored at the limit: ${JSON.stringify(limited)}`)
     await labelsMatch(page, limited)
+    await closeEditorPanels(page)
     await page.click('#editor-undo-btn')
     await waitForSaved(page, farRevision + 2)
     check(samePositions(await stored(page, far), edgeStart), `undo at the limit stored ${JSON.stringify(await stored(page, far))}`)

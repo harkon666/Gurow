@@ -23,6 +23,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type BrowserContext, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
+import { closeEditorPanels, openSkillList, readSkillStatus } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -103,6 +104,7 @@ async function signUpVerified(page: Page, email: string) {
 
 /** A visible canvas point inside the card, so input goes through the engine. */
 async function cardPoint(page: Page, id: string) {
+  await closeEditorPanels(page)
   const point = await page.$eval(`#card-label-${id}`, (el) => {
     const canvas = document.querySelector('#editor-canvas')!, r = el.getBoundingClientRect()
     for (let y = r.top + 8; y < r.bottom - 8; y += 8) for (let x = r.left + 8; x < r.right - 8; x += 8) {
@@ -131,6 +133,7 @@ async function canvasSelect(page: Page, id: string) {
 }
 /** Selects a Skill in the keyboard list: focus it, Home, ArrowDown n times, Enter. */
 async function keyboardSelect(page: Page, index: number, id: string) {
+  await openSkillList(page)
   await page.focus('#skill-prerequisite-list')
   await page.keyboard.press('Home')
   for (let i = 0; i < index; i++) await page.keyboard.press('ArrowDown')
@@ -281,8 +284,8 @@ async function main() {
     const revisionIds = async (task: string) => (await ok(carla, `${taskRoute(task)}/submission`)).submission.revisions.map((r: any) => r.id) as string[]
     const progress = async (page: Page) => ({
       xp: (await data(page, '#enrollment-xp')).xp,
-      vectors: await data(page, `#skill-status-${la.vectors}`).then((d) => [d.access, d.mastery]),
-      matrices: await data(page, `#skill-status-${la.matrices}`).then((d) => [d.access, d.mastery]),
+      vectors: await readSkillStatus(page, `#skill-status-${la.vectors}`).then((d) => [d.access, d.mastery]),
+      matrices: await readSkillStatus(page, `#skill-status-${la.matrices}`).then((d) => [d.access, d.mastery]),
     })
     const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 
@@ -331,7 +334,7 @@ async function main() {
     await carla.click(`#open-enrollment-${enrollment}`)
     await carla.waitForSelector('#enrolled-version[data-gpu-status="ready"]', { timeout: 20000 })
     await carla.waitForSelector('#awaiting-review[data-count="1"]')
-    check((await text(carla, '#enrolled-learner')).includes('lena@gurow.test') && (await data(carla, `#awaiting-review-${la.drills}`)).revisionNumber === '1' && (await data(carla, `#skill-status-${la.vectors}`)).awaitingReview === '1', 'the Enrollment page does not name Lena or list her revision awaiting Review')
+    check((await text(carla, '#enrolled-learner')).includes('lena@gurow.test') && (await data(carla, `#awaiting-review-${la.drills}`)).revisionNumber === '1' && (await readSkillStatus(carla, `#skill-status-${la.vectors}`)).awaitingReview === '1', 'the Enrollment page does not name Lena or list her revision awaiting Review')
     await canvasSelect(carla, la.vectors)
     let revisions = await history(carla, la.drills, 1)
     check(revisions[0].status === 'pending' && revisions[0].text.includes('Exercise 1: u + v = (3, 1)') && revisions[0].text.includes('https://notes.example/vectors-v1') && revisions[0].note === 'Awaiting your Review.', `Carla's view of Revision 1: ${JSON.stringify(revisions)}`)
@@ -498,7 +501,7 @@ async function main() {
     await act(noGpu)
     await openEnrollment(noGpu, enrollment, 'unsupported')
     await noGpu.waitForSelector('#awaiting-review[data-count="1"]')
-    check(same(await progress(noGpu), { xp: '0', vectors: ['open', 'not-mastered'], matrices: ['locked', 'not-mastered'] }) && (await data(noGpu, `#skill-status-${la.matrices}`)).awaitingReview === '1', `Carla's records after the revocations: ${JSON.stringify(await progress(noGpu))}`)
+    check(same(await progress(noGpu), { xp: '0', vectors: ['open', 'not-mastered'], matrices: ['locked', 'not-mastered'] }) && (await readSkillStatus(noGpu, `#skill-status-${la.matrices}`)).awaitingReview === '1', `Carla's records after the revocations: ${JSON.stringify(await progress(noGpu))}`)
     // Tab from the start of the page until the queued revision has focus, then open it with Enter.
     await noGpu.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
     let reached = false

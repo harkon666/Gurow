@@ -315,10 +315,10 @@ function LearningPathEditorPage() {
               }`}
             />
             <span>
-              {checkpointError
-                ? 'Checkpoint Error (Preserved)'
+              {checkpointError || isCheckpointRejectedRef.current
+                ? 'Not saved · local work preserved'
                 : lastSavedAt
-                ? `Saved locally (rev #${revision})`
+                ? 'Saved locally'
                 : 'Default Fixture'}
             </span>
           </span>
@@ -360,14 +360,13 @@ function LearningPathEditorPage() {
       >
         {mounted ? (
           <>
-            <SkillPrerequisiteList
-              skills={applicationSkills}
-              connections={connections}
-              selectedSkillId={selectedSkill?.id ?? null}
-              onSelectSkill={handleSelectListSkill}
-              className="w-full md:w-64 lg:w-72 shrink-0 md:h-full border-b md:border-b-0 md:border-r border-slate-800/80"
-            />
             <WebGpuEditor
+              navigation={<SkillPrerequisiteList
+                skills={applicationSkills}
+                connections={connections}
+                selectedSkillId={selectedSkill?.id ?? null}
+                onSelectSkill={handleSelectListSkill}
+              />}
               onSelectSkill={setSelectedSkill}
               onConnectionsChange={setConnections}
               onRejection={setConnectionRejection}
@@ -381,6 +380,7 @@ function LearningPathEditorPage() {
             />
             <SkillDetailPanel
               selectedSkill={selectedSkill}
+              onClose={() => handleSelectListSkill(null)}
               allSkills={applicationSkills}
               connections={connections}
               connectionRejection={connectionRejection}

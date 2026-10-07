@@ -1,4 +1,5 @@
 import puppeteer from 'puppeteer-core'
+import { closeEditorPanels } from './editor-navigation'
 import { spawn, execSync, execFileSync } from 'child_process'
 import path from 'path'
 import fs from 'fs'
@@ -200,6 +201,7 @@ async function main() {
     // Phase 1: Skill Selection & Task Display (AC 1)
     // =========================================================================
     console.log('\n--- Phase 1: Skill Selection & Task Display (AC 1) ---')
+    await closeEditorPanels(page)
     await page.click('#card-label-skill-rust-basics')
     await page.waitForSelector('#selected-skill-title')
     const selId = await page.$eval('#selected-skill-id', (el: any) => el.textContent?.trim())
@@ -340,12 +342,13 @@ async function main() {
 
     // Click "+ Skill" button in toolbar
     await page.waitForSelector('#editor-add-card-btn', { timeout: 5000 })
+    await closeEditorPanels(page)
     await page.click('#editor-add-card-btn')
     await new Promise((resolve) => setTimeout(resolve, 400))
 
     // Verify card count incremented to expectedNewCount
     await page.waitForFunction(
-      (count: number) => document.querySelector('#editor-card-count')?.textContent?.includes(`${count} cards`),
+      (count: number) => Number.parseInt(document.querySelector('#editor-card-count')?.textContent ?? '', 10) === count,
       { timeout: 5000 },
       expectedNewCount
     )
@@ -375,6 +378,7 @@ async function main() {
     console.log(`  Verified card overlay DOM element: #card-label-${createdCard.id}`)
 
     // Click on new card to select it and verify task payload display
+    await closeEditorPanels(page)
     await page.click(`#card-label-${createdCard.id}`)
     await page.waitForSelector('#selected-skill-title')
     const selectedCreatedId = await page.$eval(
@@ -390,6 +394,7 @@ async function main() {
     console.log(`  Selected new skill in panel with its Task: "${selectedCreatedId}"`)
 
     // Newly created Skills must participate in the same graph as fixture Skills.
+    await closeEditorPanels(page)
     await page.click('#editor-add-card-btn')
     await page.waitForFunction(
       (count: number) => document.querySelectorAll('[id^="card-label-"]').length === count,
@@ -397,6 +402,9 @@ async function main() {
     )
     const secondCreatedId = await page.$$eval('[id^="card-label-skill-custom-"]',
       (els: Element[], firstId: string) => els.map(el => el.id.replace('card-label-', '')).find(id => id !== firstId), createdCard.id)
+    await closeEditorPanels(page)
+    await page.click(`#card-label-${createdCard.id}`)
+    await page.waitForSelector('#connect-skill-select', { visible: true })
     const availableTargets = await page.$$eval('#connect-skill-select option', (els: HTMLOptionElement[]) => els.map(el => el.value))
     if (!availableTargets.includes(secondCreatedId)) throw new Error('New Skill missing from connection targets')
     await page.select('#connect-skill-select', secondCreatedId)
@@ -408,6 +416,7 @@ async function main() {
     console.log('  Verified: two new Skills can connect using their titles.')
 
     // Connect Rust Fundamentals -> WebGPU Pipeline
+    await closeEditorPanels(page)
     await page.click('#card-label-skill-rust-basics')
     await page.waitForSelector('#connect-skill-select')
     await page.select('#connect-skill-select', 'skill-wgpu-pipeline')
@@ -438,6 +447,7 @@ async function main() {
     console.log('  Card position before drag:', boxBefore)
 
     // Drag card by (+90, +60)
+    await closeEditorPanels(page)
     await page.mouse.move(boxBefore.x + 30, boxBefore.y + 30)
     await page.mouse.down()
     await page.mouse.move(boxBefore.x + 120, boxBefore.y + 90, { steps: 10 })
@@ -459,6 +469,7 @@ async function main() {
     console.log('  Verified: Undo button enabled after drag')
 
     // EXECUTE UNDO OPERATION (Spec AC 5)
+    await closeEditorPanels(page)
     await page.click('#editor-undo-btn')
     await new Promise((resolve) => setTimeout(resolve, 300))
 
@@ -577,6 +588,7 @@ async function main() {
     console.log(`  Verified: all ${cardsBeforeReload.length} live card labels, geometry, camera zoom and connections restored.`)
 
     // Select Rust Fundamentals and verify semantic restoration of Tasks, required status, and Connections
+    await closeEditorPanels(page)
     await page.click('#card-label-skill-rust-basics')
     await page.waitForSelector('#selected-skill-title')
 
@@ -660,6 +672,7 @@ async function main() {
 
     // Sub-phase 7B: Guard Invariant - Editing Task MUST NOT overwrite rejected checkpoint
     console.log('  [7B] Verifying Task edit does NOT overwrite rejected checkpoint (ADR-0016 preservation)...')
+    await closeEditorPanels(page)
     await page.click('#card-label-skill-rust-basics')
     await page.waitForSelector('#selected-skill-title')
 
@@ -732,6 +745,7 @@ async function main() {
     console.log('  Verified: Mismatched associations cannot be silently restored (rejected safely).')
 
     // While orphan alert is visible, type in task edit again to ensure save is blocked
+    await closeEditorPanels(page)
     await page.click('#card-label-skill-rust-basics')
     await page.waitForSelector('#selected-skill-title')
     await page.evaluate(() => {
@@ -767,6 +781,7 @@ async function main() {
     console.log('\n--- Phase 8: Scene Reset, Visual Evidence Screenshot & Report ---')
     // Exercise the actual recovery action and ensure another Path is untouched.
     await page.evaluate(() => localStorage.setItem('gurow:checkpoint:fixture-user:other-path', 'preserve-me'))
+    await closeEditorPanels(page)
     await Promise.all([
       page.waitForNavigation({ waitUntil: 'networkidle0' }),
       page.click('#btn-reset-scene'),
@@ -788,6 +803,7 @@ async function main() {
     }
 
     // Set up clean demonstration scene: select skill
+    await closeEditorPanels(page)
     await page.click('#card-label-skill-rust-basics')
     await page.waitForSelector('#selected-skill-title')
 

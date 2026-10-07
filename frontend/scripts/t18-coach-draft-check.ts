@@ -14,6 +14,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import path from 'node:path'
 import puppeteer, { type Page } from 'puppeteer-core'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
+import { closeEditorPanels, openNewSkill } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -80,6 +81,7 @@ async function authenticate(page: Page, mode: 'sign-in' | 'sign-up', email: stri
   await page.waitForSelector('#personal-workspace')
 }
 async function signOut(page: Page) {
+  await closeEditorPanels(page)
   await page.click('#sign-out-btn')
   await page.waitForSelector('#sign-in-form')
 }
@@ -93,6 +95,7 @@ async function openEditor(page: Page, cards: number) {
 const labelIds = (page: Page) => page.$$eval('[id^="card-label-"]', (els) => els.map((el) => el.id.replace('card-label-', '')))
 async function addSkill(page: Page, title: string, outcome: string) {
   const before = await labelIds(page)
+  await openNewSkill(page)
   await setValue(page, '#new-skill-title', title)
   await setValue(page, '#new-skill-outcome', outcome)
   await page.click('#add-skill-btn')
@@ -102,6 +105,7 @@ async function addSkill(page: Page, title: string, outcome: string) {
   return id
 }
 async function select(page: Page, id: string) {
+  await closeEditorPanels(page)
   const point = await page.$eval(`#card-label-${id}`, (el) => {
     const canvas = document.querySelector('#editor-canvas')!, r = el.getBoundingClientRect()
     for (let y = r.top + 8; y < r.bottom - 8; y += 8) for (let x = r.left + 8; x < r.right - 8; x += 8) {
@@ -249,6 +253,7 @@ async function main() {
     // 4. The backend refuses the same edits sent directly, and connections to another Path.
     const base = { expectedRevision: doc.learningPath.revision, title: doc.learningPath.title, goal: doc.learningPath.goal, editor: doc.editor, application: doc.application }
     const withEdge = (from: string, to: string) => ({ ...base, editor: { ...base.editor, connections: [...base.editor.connections, { from_id: from, to_id: to }] } })
+    await closeEditorPanels(page)
     await page.click('#back-to-coach-workspace')
     await page.waitForSelector('#coach-workspace')
     await setValue(page, '#new-coach-path-title', 'Linear Algebra for Engineers')
@@ -271,6 +276,7 @@ async function main() {
     // 5. Two Paths on the same subject keep their own outcomes and Tasks.
     const docB = await readDraft(page, pathB)
     check(JSON.stringify(rules(docB)) === JSON.stringify([['Vectors', 'Resolve forces into components', false, 0, [['Model forces with vectors', true, 30]]]]) && engVectors !== vectors, `second Path: ${JSON.stringify(rules(docB))}`)
+    await closeEditorPanels(page)
     await page.click('#back-to-coach-workspace')
     await page.waitForSelector('#coach-workspace')
     const listed = await page.$$eval('#coach-paths [data-learning-path-id]', (els) => els.map((el) => (el as HTMLElement).dataset.learningPathId))

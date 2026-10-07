@@ -22,6 +22,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type BrowserContext, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
+import { closeEditorPanels, openSkillList, readSkillStatus } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -110,6 +111,7 @@ async function openEnrollment(page: Page, enrollmentId: string, gpu: 'ready' | '
 }
 /** Selects a Skill in the keyboard list: focus it, Home, ArrowDown n times, Enter. */
 async function keyboardSelect(page: Page, index: number, id: string) {
+  await openSkillList(page)
   await page.focus('#skill-prerequisite-list')
   await page.keyboard.press('Home')
   for (let i = 0; i < index; i++) await page.keyboard.press('ArrowDown')
@@ -207,6 +209,7 @@ async function waitParticipation(page: Page, kind: string, extra = '') {
 }
 /** The lifecycle records as listed on the page, opening the list first. */
 async function lifecycleLines(page: Page) {
+  await closeEditorPanels(page)
   if (await page.$('#lifecycle-history') === null) await page.click('#participation-history-toggle')
   await page.waitForSelector('#lifecycle-history')
   return page.$$eval('#lifecycle-history li', (els) => els.map((el) => ({ action: (el as HTMLElement).dataset.action, text: el.textContent?.trim() ?? '' })))
@@ -272,8 +275,8 @@ async function main() {
     const progress = async (page: Page) => ({
       status: (await data(page, '#enrollment-status')).status,
       xp: (await data(page, '#enrollment-xp')).xp,
-      vectors: await data(page, `#skill-status-${la.vectors}`).then((d) => [d.access, d.mastery]),
-      matrices: await data(page, `#skill-status-${la.matrices}`).then((d) => [d.access, d.mastery]),
+      vectors: await readSkillStatus(page, `#skill-status-${la.vectors}`).then((d) => [d.access, d.mastery]),
+      matrices: await readSkillStatus(page, `#skill-status-${la.matrices}`).then((d) => [d.access, d.mastery]),
     })
     const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
     const INACTIVE_REASON = 'This Enrollment is inactive: no Skill can be worked on until the Coach reactivates it'
@@ -317,6 +320,7 @@ async function main() {
     pass('active work', 'Lena sends Vector drills Revision 1 from the UI and saves a private draft "Private notes for the drills"; the untouched Vector extension is editable; her page offers "Stop participating…"')
 
     // 2. Lena stops participating without a reason; nothing is shown as done before the backend confirms it.
+    await closeEditorPanels(lena)
     await lena.click('#participation-open')
     await lena.waitForFunction(() => document.activeElement?.id === 'participation-reason')
     const learnerOutlook = await text(lena, '#participation-outlook')
@@ -377,6 +381,7 @@ async function main() {
     check((await text(carla, '#participation-inactive')).includes('lena cannot start Tasks or send work. You can still review work sent while it was active; only you can reactivate it.')
       && (await text(carla, '#awaiting-review-inactive')).includes('does not reactivate the Enrollment'), `Carla's inactive page: ${await text(carla, PARTICIPATION)}`)
     await carla.waitForSelector(`#awaiting-review-${la.drills}[data-revision-number="1"]`)
+    await closeEditorPanels(carla)
     await carla.click(`#awaiting-review-${la.drills}`)
     await carla.waitForSelector(`#task-review-${la.drills}[data-target-revision="1"]`)
     await carla.click(`#task-review-approve-${la.drills}`)
@@ -417,6 +422,7 @@ async function main() {
     await act(carla)
     await revisit(carla)
     check((await text(carla, '#participation-open')) === 'Reactivate Enrollment…', `Carla's control: ${await text(carla, PARTICIPATION)}`)
+    await closeEditorPanels(carla)
     await carla.click('#participation-open')
     await carla.waitForFunction(() => document.activeElement?.id === 'participation-reason')
     const resumeOutlook = await text(carla, '#participation-outlook')
@@ -458,6 +464,7 @@ async function main() {
     // 8. Carla deactivates it herself with a reason, and still decides the work sent before.
     await act(carla)
     await revisit(carla)
+    await closeEditorPanels(carla)
     await carla.click('#participation-open')
     await carla.waitForFunction(() => document.activeElement?.id === 'participation-reason')
     const coachOutlook = await text(carla, '#participation-outlook')
@@ -474,6 +481,7 @@ async function main() {
     const noReasonCoach = await api(carla, lifecycleRoute('reactivate'), 'POST', {})
     check(blankCoach.status === 422 && noReasonCoach.status === 422 && (await storedLifecycle()).length === 3, `reasonless Coach reactivation answered ${blankCoach.status}/${noReasonCoach.status}`)
     await carla.waitForSelector(`#awaiting-review-${la.extension}[data-revision-number="1"]`)
+    await closeEditorPanels(carla)
     await carla.click(`#awaiting-review-${la.extension}`)
     await carla.waitForSelector(`#task-review-${la.extension}[data-target-revision="1"]`)
     await carla.click(`#task-review-approve-${la.extension}`)
@@ -523,7 +531,8 @@ async function main() {
       lines = await lifecycleLines(page)
       check(lines.length === 23, `records on the short window: ${lines.length}`)
       if (page === carla) {
-        await carla.click('#participation-open')
+        await closeEditorPanels(carla)
+    await carla.click('#participation-open')
         await carla.waitForSelector('#participation-confirm')
       }
       const block = await page.$eval(PARTICIPATION, (el) => ({ height: el.getBoundingClientRect().height, viewport: window.innerHeight }))

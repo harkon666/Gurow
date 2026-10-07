@@ -15,6 +15,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import path from 'node:path'
 import puppeteer, { type Page } from 'puppeteer-core'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
+import { closeEditorPanels, openNewSkill } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -79,6 +80,7 @@ async function authenticate(page: Page, mode: 'sign-in' | 'sign-up', email: stri
   await page.waitForSelector('#personal-workspace')
 }
 async function signOut(page: Page) {
+  await closeEditorPanels(page)
   await page.click('#sign-out-btn')
   await page.waitForSelector('#sign-in-form')
 }
@@ -92,6 +94,7 @@ async function openEditor(page: Page, cards: number) {
 const labelIds = (page: Page) => page.$$eval('[id^="card-label-"]', (els) => els.map((el) => el.id.replace('card-label-', '')))
 async function addSkill(page: Page, title: string, outcome: string) {
   const before = await labelIds(page)
+  await openNewSkill(page)
   await setValue(page, '#new-skill-title', title)
   await setValue(page, '#new-skill-outcome', outcome)
   await page.click('#add-skill-btn')
@@ -101,6 +104,7 @@ async function addSkill(page: Page, title: string, outcome: string) {
   return id
 }
 async function select(page: Page, id: string) {
+  await closeEditorPanels(page)
   const point = await page.$eval(`#card-label-${id}`, (el) => {
     const canvas = document.querySelector('#editor-canvas')!, r = el.getBoundingClientRect()
     for (let y = r.top + 8; y < r.bottom - 8; y += 8) for (let x = r.left + 8; x < r.right - 8; x += 8) {
@@ -210,6 +214,7 @@ async function main() {
 
     // 2. Publication is refused with the affected Skill and its unmet requirement; nothing is published.
     check(await text(page, '#publish-version-btn') === 'Publish Version 1', `publish button: ${await text(page, '#publish-version-btn')}`)
+    await closeEditorPanels(page)
     await page.click('#publish-version-btn')
     await page.waitForSelector('#publication-problems')
     const blocked = await page.$$eval('#publication-problems [data-blocked-skill-id]', (els) => els.map((el) => ({
@@ -227,6 +232,7 @@ async function main() {
     await setValue(page, '#skill-threshold-input', '60')
     await waitForSaved(page)
     check(await page.$('#publication-problems') === null, 'the old refusal is still shown for a changed Draft')
+    await closeEditorPanels(page)
     await page.click('#publish-version-btn')
     const v1 = await publishedView(page)
     check(v1.versionNumber === 1 && v1.editable === 0 && await page.$('#path-editor') === null, `published view: ${JSON.stringify(v1)}`)
@@ -259,11 +265,13 @@ async function main() {
     await select(page, vectors)
     await setValue(page, '#skill-outcome-input', 'Add and scale vectors')
     await setValue(page, `#task-edit-title-${drills}`, 'Vector drills')
+    await closeEditorPanels(page)
     await setValue(page, '#path-goal-input', 'Solve linear systems by elimination')
     await waitForSaved(page)
     // The Draft's new goal is its own: Version 1 still states the goal it was published with.
     const v1WhileDrafting = await api(page, `/coach/learning-path-versions/${v1.versionId}`)
     check(v1WhileDrafting.body.learningPath.goal === 'Solve linear systems', `Version 1 goal while drafting: ${v1WhileDrafting.body.learningPath.goal}`)
+    await closeEditorPanels(page)
     await page.click('#publish-version-btn')
     const v2 = await publishedView(page)
     check(v2.versionNumber === 2 && v2.versionId !== v1.versionId, `Version 2 view: ${JSON.stringify(v2)}`)

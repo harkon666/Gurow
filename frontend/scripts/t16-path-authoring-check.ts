@@ -13,6 +13,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import path from 'node:path'
 import puppeteer, { type HTTPRequest, type Page } from 'puppeteer-core'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
+import { closeEditorPanels, openNewSkill } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -97,6 +98,7 @@ async function authenticate(page: Page, mode: 'sign-in' | 'sign-up', email: stri
   await page.waitForSelector('#personal-workspace')
 }
 async function signOut(page: Page) {
+  await closeEditorPanels(page)
   await page.click('#sign-out-btn')
   await page.waitForSelector('#sign-in-form')
 }
@@ -118,6 +120,7 @@ async function createPath(page: Page, title: string, goal: string) {
 }
 async function addSkill(page: Page, title: string, outcome: string) {
   const before = (await labels(page)).map((l) => l.id)
+  await openNewSkill(page)
   await setValue(page, '#new-skill-title', title)
   await setValue(page, '#new-skill-outcome', outcome)
   await page.click('#add-skill-btn')
@@ -128,6 +131,7 @@ async function addSkill(page: Page, title: string, outcome: string) {
 }
 /** Clicks a visible canvas point of the card, so selection goes through the engine. */
 async function select(page: Page, id: string) {
+  await closeEditorPanels(page)
   const point = await page.$eval(`#card-label-${id}`, (el) => {
     const canvas = document.querySelector('#editor-canvas')!, r = el.getBoundingClientRect()
     for (let y = r.top + 8; y < r.bottom - 8; y += 8) for (let x = r.left + 8; x < r.right - 8; x += 8) {
@@ -258,6 +262,7 @@ async function main() {
     pass('cycle rejection', `"${(await text(page, '#cycle-rejection-alert')).slice(0, 60)}…"; graph and revision ${revisionBeforeCycle} unchanged`)
 
     // 3. A completed drag autosaves the card position; camera changes stay local.
+    await closeEditorPanels(page)
     const dragFrom = (await labels(page)).find((l) => l.id === lifetimes)!
     const storedBefore = (await readDoc(page, pathA)).editor.cards.find((c) => c.id === lifetimes)!.position
     const overlay = await page.$eval('#labels-overlay', (el) => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y } })
@@ -309,6 +314,7 @@ async function main() {
     pass('coherent reload', `same ${beforeReload.length} card positions under the restored camera; each card opens its own Skill outcome and Task; no selection, undo disabled`)
 
     // 5. A second Path keeps its own content and camera; the first reopens unchanged.
+    await closeEditorPanels(page)
     await page.click('#back-to-workspace')
     await page.waitForSelector('#personal-workspace')
     check((await text(page, '#workspace-paths')).includes('Ship a small allocator'), 'the Workspace does not list the Path goal')
@@ -325,11 +331,14 @@ async function main() {
     }
     await page.setRequestInterception(true)
     page.on('request', holdFirstSave)
+    await closeEditorPanels(page)
     await setValue(page, '#path-goal-input', 'Comp through a minor blues')
     await waitForState(page, 'saving')
     for (let i = 0; i < 50 && held.request === null; i++) await new Promise((r) => setTimeout(r, 50))
     check(held.request, 'the first save never reached the network')
+    await closeEditorPanels(page)
     await setValue(page, '#path-goal-input', 'Comp through a slow blues')
+    await closeEditorPanels(page)
     await page.click('#back-to-workspace')
     await page.waitForSelector('#personal-workspace')
     await held.request.continue()
@@ -352,6 +361,7 @@ async function main() {
 
     // 6. A save based on a stale revision is refused; the accepted state stays and the local work stays on screen.
     // First this tab saves a goal of its own, which it returns to after discarding the conflict.
+    await closeEditorPanels(page)
     await setValue(page, '#path-goal-input', 'Goal A from this tab')
     await waitForSaved(page, revisionAfterDrag + 1)
     const other = await context.newPage()
@@ -376,12 +386,14 @@ async function main() {
     check(accepted.learningPath.revision === revisionAfterDrag + 2 && accepted.learningPath.goal === 'Goal from the second tab' &&
       acceptedTask.tasks[0].title === 'Borrow exercises' && acceptedTask.outcome === 'Explain moves and borrows', `the stale save overwrote accepted state: ${JSON.stringify(accepted.learningPath)} ${JSON.stringify(acceptedTask)}`)
     const conflictText = await text(page, '#save-conflict')
+    await closeEditorPanels(page)
     await page.click('#load-accepted-btn')
     await waitForSaved(page, revisionAfterDrag + 2)
     check(await fieldValue(page, '#path-goal-input') === 'Goal from the second tab', 'loading the saved version kept the stale goal')
     await select(page, ownership)
     check(await fieldValue(page, `#task-edit-title-${ownershipTask}`) === 'Borrow exercises', 'loading the saved version kept the stale Task title')
     // Going back to this tab's earlier accepted goal is a real edit: the backend must hold it, not just the status.
+    await closeEditorPanels(page)
     await setValue(page, '#path-goal-input', 'Goal A from this tab')
     await waitForSaved(page, revisionAfterDrag + 3)
     check((await readDoc(page, pathA)).learningPath.goal === 'Goal A from this tab', 'returning to an earlier goal was shown as saved but not stored')
@@ -401,6 +413,7 @@ async function main() {
     }
     await page.setRequestInterception(true)
     page.on('request', blockSaves)
+    await closeEditorPanels(page)
     await setValue(page, '#path-goal-input', 'Goal written while offline')
     await waitForState(page, 'failed')
     const failure = await text(page, '#save-error')

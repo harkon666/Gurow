@@ -21,6 +21,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
+import { closeEditorPanels, openMoreActions } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -123,6 +124,7 @@ async function openEditor(page: Page, url: string, cards: number) {
 }
 /** Selects a Skill by clicking its card on the WebGPU canvas. */
 async function select(page: Page, id: string) {
+  await closeEditorPanels(page)
   const point = await page.$eval(`#card-label-${id}`, (el) => {
     const canvas = document.querySelector('#editor-canvas')!, r = el.getBoundingClientRect()
     for (let y = r.top + 8; y < r.bottom - 8; y += 8) for (let x = r.left + 8; x < r.right - 8; x += 8) {
@@ -136,6 +138,7 @@ async function select(page: Page, id: string) {
 }
 /** Opens the copy panel and reads the source whose option is labelled `label`; returns every offered label. */
 async function openSource(page: Page, label: string) {
+  await openMoreActions(page)
   await page.click('#open-reuse-btn')
   await page.waitForSelector('#reuse-source')
   const offered = await page.$$eval('#reuse-source option', (els) => els.map((el) => ({ value: (el as HTMLOptionElement).value, label: el.textContent ?? '', group: (el.parentElement as HTMLOptGroupElement).label ?? '' })).filter((o) => o.value !== ''))

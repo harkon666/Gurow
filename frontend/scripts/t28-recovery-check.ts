@@ -28,6 +28,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type BrowserContext, type HTTPRequest, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
+import { closeEditorPanels, clickOutsideDetails } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -105,6 +106,7 @@ async function signOut(page: Page) {
   await page.bringToFront()
   await page.goto(ORIGIN, { waitUntil: 'networkidle0' })
   await page.waitForSelector('#sign-out-btn')
+  await closeEditorPanels(page)
   await page.click('#sign-out-btn')
   await page.waitForSelector('#sign-in-form')
 }
@@ -132,6 +134,7 @@ async function offset(page: Page, a: string, b: string) {
 const zoomOf = async (page: Page) => Number((await text(page, '#editor-zoom-label')).replace('%', '')) / 100
 const settle = (page: Page) => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
 async function cardPoint(page: Page, id: string) {
+  await closeEditorPanels(page)
   const point = await page.$eval(`#card-label-${id}`, (el) => {
     const canvas = document.querySelector('#editor-canvas')!, r = el.getBoundingClientRect()
     for (let y = r.top + 8; y < r.bottom - 8; y += 8) for (let x = r.left + 8; x < r.right - 8; x += 8) {
@@ -328,6 +331,7 @@ async function main() {
     current = patB
     await openPath(patB, pathUrl, 2, r0)
     await patA.bringToFront()
+    await closeEditorPanels(patA)
     await setValue(patA, '#path-goal-input', 'Goal saved in tab A')
     await waitForSaved(patA, r0 + 1)
     const acceptedByA = await storedPath()
@@ -382,6 +386,7 @@ async function main() {
     const beforeRefusal = await storedPath()
     check(same(beforeRefusal.editor.connections, [{ from_id: p.matrices, to_id: p.vectors }]), `tab A's connection: ${JSON.stringify(beforeRefusal.editor.connections)}`)
     await patC.bringToFront()
+    await closeEditorPanels(patC)
     await patC.click(`#kept-work [data-kept-entry="${kept.id}"] [data-action="reapply"]`)
     await waitEntry(patC, kept.id, 'refused')
     const refusal = await text(patC, `#kept-outcome-${kept.id}`)
@@ -398,6 +403,7 @@ async function main() {
     // 4. The owner removes the conflicting connection, then reapplies: one new validated save holding both sides' work.
     await patC.click(`#disconnect-${p.matrices}-${p.vectors}`)
     await waitForSaved(patC, r0 + 3)
+    await closeEditorPanels(patC)
     await patC.click(`#kept-work [data-kept-entry="${kept.id}"] [data-action="reapply"]`)
     await patC.waitForFunction(() => document.querySelector('#kept-work [data-kept-entry]') === null)
     await waitForSaved(patC, r0 + 4)
@@ -467,6 +473,7 @@ async function main() {
     await openPath(carlaB, draftUrl, 2, rd)
     check(await carla.$('#kept-work') === null && await carlaB.$('#kept-work') === null && !(await carlaB.content()).includes('Goal kept for Version 1'), 'work kept for Version 1 is offered in the Draft of Version 2')
     await carla.bringToFront()
+    await closeEditorPanels(carla)
     await setValue(carla, '#path-goal-input', 'Draft goal from tab 1')
     await waitForSaved(carla, rd + 1)
     await drag(carlaB, la.matrices, 60, 70)
@@ -485,10 +492,11 @@ async function main() {
     }
     await carlaB.setRequestInterception(true)
     carlaB.on('request', hold)
+    await closeEditorPanels(carlaB)
     await carlaB.click('#reapply-mine-btn')
     for (let i = 0; i < 100 && held === null; i++) await pause(50)
     check(held !== null, 'the reapplied save was not sent')
-    const locked = await carlaB.evaluate(() => ['#path-goal-input', '#new-skill-title', '#editor-canvas'].map((s) => document.querySelector(s)?.closest('[inert]') !== null))
+    const locked = await carlaB.evaluate(() => ['#path-goal-input', '#editor-add-card-btn', '#editor-canvas'].map((s) => Boolean(document.querySelector(s)?.closest('[inert]'))))
     check((await data(carlaB, '#path-editor')).reapplying === 'true' && locked.every(Boolean) && await carlaB.$eval('#reapply-mine-btn', (el) => (el as HTMLButtonElement).disabled), `the editor is not locked while reapplying: ${locked}`)
     await carlaB.keyboard.down('Control')
     await carlaB.keyboard.press('z')
@@ -563,6 +571,7 @@ async function main() {
     current = patD
     await openPath(patD, pathUrl, 2, r0 + 4)
     await patD.setOfflineMode(true)
+    await closeEditorPanels(patD)
     await setValue(patD, '#path-goal-input', 'Offline goal by Pat')
     await waitForState(patD, 'failed')
     await patD.setOfflineMode(false)
@@ -658,7 +667,7 @@ async function main() {
     check((await data(patA, '#path-xp')).xp === '0' && (await data(patA, `#task-learning-${p.vectorTask}`)).completed === 'false', 'the offline completion was shown as done')
     await patA.setOfflineMode(false)
     check((await ok(patA, `/personal/learning-paths/${p.path}/learning-state`)).learningState.xp === 0, 'the offline completion was stored')
-    await patA.click('#learning-retry-btn')
+    await clickOutsideDetails(patA, '#learning-retry-btn')
     await patA.waitForFunction(() => (document.querySelector('#path-xp') as HTMLElement | null)?.dataset.xp === '10')
     check((await ok(patA, `/personal/learning-paths/${p.path}/learning-state`)).learningState.xp === 10, 'the retried completion is not stored')
     pass('offline learning requests', 'offline Send → "Not sent…", text kept, no revision; online Send stored Revision 1. Offline Approval → unconfirmed with the feedback kept, XP 0 and no Review stored; Check again → not recorded; Approve → recorded, XP 20 after the read. Offline completion → error, XP 0; Retry → XP 10 once confirmed')

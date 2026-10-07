@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { WebGpuEditor, type WebGpuEditorActions } from '../editor/WebGpuEditor'
 import { SkillDetailPanel } from '../editor/SkillDetailPanel'
 import { SkillPrerequisiteList } from '../editor/SkillPrerequisiteList'
+import { TemporaryPanel } from '../editor/TemporaryPanel'
 import { loadCameraState, saveCameraState } from '../editor/checkpoint'
 import type { CameraState } from '../editor/protocol'
 import type { GpuStatus, SelectedSkillInfo } from '../editor/types'
@@ -65,6 +66,8 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
   const actionsRef = useRef<WebGpuEditorActions | null>(null)
   /** The Task whose Review the Coach opened from the queue; its panel takes focus once shown. */
   const [focusTaskId, setFocusTaskId] = useState<string | null>(null)
+  const [reviewOpen, setReviewOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
   const clearFocusTask = useCallback(() => setFocusTaskId(null), [])
   // Reads are numbered as issued; an answer older than the one shown is dropped.
   const reads = useRef({ issued: 0, shown: 0 })
@@ -140,6 +143,7 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
   }, [shown, skills])
   const overrideNames = useMemo<OverrideNames>(() => ({ viewerAccountId: accountId, coach: document.coach, learner: document.learner, skillTitles }), [accountId, document.coach, document.learner, skillTitles])
   const openReview = useCallback((skill: PathSkill, taskId: string) => {
+    setReviewOpen(false)
     handleSelectListSkill({ id: skill.id, title: skill.title })
     setFocusTaskId(taskId)
   }, [handleSelectListSkill])
@@ -185,18 +189,27 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
         onChanged={loadRecords}
       />
       <section className="w-full flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden relative">
-        <div className="w-full md:w-64 lg:w-72 shrink-0 md:h-full flex flex-col border-b md:border-b-0 md:border-r border-slate-800/80 min-h-0">
-          {coach && <AwaitingReviewQueue awaiting={shown?.awaitingReview ?? null} inactive={status === 'inactive'} skills={skills} onOpen={openReview} />}
-          <SkillPrerequisiteList
-            skills={skills}
-            connections={connections}
-            selectedSkillId={selectedSkill?.id ?? null}
-            onSelectSkill={handleSelectListSkill}
-            renderStatus={(id) => <EnrolledSkillChips skill={stateOf(id)} skillId={id} awaiting={coach ? awaitingBySkill.get(id) ?? 0 : 0} />}
-            className="flex-1 min-h-0"
-          />
-        </div>
+        {moreOpen && <TemporaryPanel title="More actions" closeId="btn-close-more-actions" onClose={() => setMoreOpen(false)}>
+          <button id="more-enrollment-records-refresh" disabled={view.reading} onClick={() => { void loadRecords(); setMoreOpen(false) }} className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm disabled:opacity-50">
+            Refresh learning records
+          </button>
+          <p className="mt-3 text-xs text-slate-400">Refresh Access, Mastery, XP and Submission history without changing your published Learning Path Version.</p>
+        </TemporaryPanel>}
+        {coach && reviewOpen && <TemporaryPanel title="Coach Review" closeId="btn-close-coach-review" onClose={() => setReviewOpen(false)}>
+          <AwaitingReviewQueue awaiting={shown?.awaitingReview ?? null} inactive={status === 'inactive'} skills={skills} onOpen={openReview} />
+        </TemporaryPanel>}
         <WebGpuEditor
+          navigation={<>
+            <SkillPrerequisiteList
+              skills={skills}
+              connections={connections}
+              selectedSkillId={selectedSkill?.id ?? null}
+              onSelectSkill={handleSelectListSkill}
+              renderStatus={(id) => <EnrolledSkillChips skill={stateOf(id)} skillId={id} awaiting={coach ? awaitingBySkill.get(id) ?? 0 : 0} />}
+            />
+            <button id="btn-more-actions" aria-haspopup="dialog" aria-expanded={moreOpen} onClick={() => setMoreOpen(true)} className="shrink-0 whitespace-nowrap rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-200 hover:bg-slate-800">More</button>
+            {coach && <button id="btn-coach-review" aria-haspopup="dialog" aria-expanded={reviewOpen} onClick={() => setReviewOpen(true)} className="shrink-0 whitespace-nowrap rounded-lg border border-sky-800 px-3 py-2 text-xs text-sky-200 hover:bg-slate-800">Coach Review</button>}
+          </>}
           readOnly
           onSelectSkill={setSelectedSkill}
           onActionsReady={handleActionsReady}
@@ -209,6 +222,8 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
         />
         <SkillDetailPanel
           selectedSkill={selectedSkill}
+          onClose={() => handleSelectListSkill(null)}
+          feedback={view.error && <p role="alert" className="text-xs text-red-300">Could not refresh learning records: {view.error}. The state shown may be out of date. Close this summary and choose Refresh to try again.</p>}
           allSkills={skills}
           connections={connections}
           tasks={selected?.tasks}

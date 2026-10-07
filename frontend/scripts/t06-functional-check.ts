@@ -12,6 +12,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import path from 'node:path'
 import puppeteer, { type Page } from 'puppeteer-core'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
+import { closeEditorPanels, openSkillList, selectSkillFromList } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const PORT = Number(process.env.PORT ?? 3462)
@@ -53,6 +54,7 @@ const zoomLabel = (page: Page) => page.$eval('#editor-zoom-label', el => el.text
  * The non-scrolling label overlay is separately covered by label-scroll-check.
  */
 async function select(page: Page, id: string) {
+  await closeEditorPanels(page)
   const point = await page.$eval(`#card-label-${id}`, el => {
     const canvas = document.querySelector('#editor-canvas')!, r = el.getBoundingClientRect()
     for (let y = r.top + 8; y < r.bottom - 8; y += 8) for (let x = r.left + 8; x < r.right - 8; x += 8) {
@@ -84,14 +86,7 @@ async function connect(page: Page, from: string, to: string) {
 }
 /** Moves selection through the keyboard listbox only: no pointer, no canvas. */
 async function keyboardSelect(page: Page, id: string) {
-  const count = await page.$$eval('#skill-prerequisite-list [role="option"]', els => els.length)
-  await page.focus('#skill-prerequisite-list')
-  await page.keyboard.press('Home')
-  for (let i = 0; i < count && (await selectedId(page).catch(() => null)) !== id; i++) {
-    await page.keyboard.press('ArrowDown')
-  }
-  await page.keyboard.press('Enter')
-  await page.waitForFunction((want: string) => document.querySelector('#selected-skill-id')?.textContent?.trim() === want, { timeout: 3000 }, id)
+  await selectSkillFromList(page, id)
 }
 /** A canvas point at least 30 px from every label and not under a banner, so a press pans instead of picking. */
 const emptyPoint = (page: Page) => page.evaluate(() => {
@@ -169,13 +164,15 @@ async function main() {
     // Labels and the badge text appear while the renderer is still initializing; "+ Skill"
     // is enabled only once it is ready, and a click before that does nothing.
     await page.waitForSelector('#editor-add-card-btn:not([disabled])')
-    const badge = await page.$eval('#gpu-status-badge', el => el.textContent ?? '')
-    check(badge.includes('WebGPU Rust Editor'), `WebGPU renderer not active: "${badge}"`)
+    const gpuStatus = await page.$eval('#gpu-status-badge', el => (el as HTMLElement).dataset.status)
+    check(gpuStatus === 'ready', `WebGPU renderer not active: "${gpuStatus}"`)
     const fixtureIds = (await labels(page)).map(l => l.id)
 
     console.log('\n--- Create and select ---')
+    await closeEditorPanels(page)
     await page.click('#editor-add-card-btn')
     await page.waitForFunction((n: number) => document.querySelectorAll('[id^="card-label-"]').length === n, {}, fixtureIds.length + 1)
+    await closeEditorPanels(page)
     await page.click('#editor-add-card-btn')
     await page.waitForFunction((n: number) => document.querySelectorAll('[id^="card-label-"]').length === n, {}, fixtureIds.length + 2)
     const [first, second] = (await labels(page)).map(l => l.id).filter(id => !fixtureIds.includes(id)).sort()
@@ -223,6 +220,7 @@ async function main() {
     pass('connection_cycle_rejection', `${graphBefore.length} edges incl. two on new Skills; cycle through them rejected, live and saved graph unchanged`)
 
     console.log('\n--- Pan, zoom and drag ---')
+    await closeEditorPanels(page)
     const start = await emptyPoint(page)
     check(start, 'No empty canvas point for panning')
     let before = await labels(page)
@@ -267,6 +265,7 @@ async function main() {
     pass('pan_zoom_drag', `pointer pan (+60,+40) and wheel pan (0,-50) move all labels; Ctrl+wheel ${zoomBefore}→${zoomed} scales them ×${scale.toFixed(3)}; drag moves ${second} (+90,+60)`)
 
     console.log('\n--- One-step drag undo/redo ---')
+    await closeEditorPanels(page)
     await page.click('#editor-undo-btn')
     await settle(page)
     const undone = await labelBox(page, second)
@@ -318,6 +317,7 @@ async function main() {
     const failureTitle = 'T06 flow: edited while renderer failed'
     await setTaskTitle(page, secondTask, failureTitle)
     await savedTask(page, secondTask, failureTitle)
+    await closeEditorPanels(page)
     await page.click('#btn-retry-renderer')
     await settle(page)
     check(await page.evaluate(() => (window as any).__recoveryRequests) === 1, 'Retry overlapped the pending automatic attempt')
@@ -325,15 +325,17 @@ async function main() {
     await page.waitForSelector('#recovery-error-banner')
     check(await page.$('#btn-retry-renderer'), 'Retry button missing after unsuccessful recovery')
     await page.evaluate(() => { navigator.gpu.requestAdapter = (window as any).__origRequestAdapter })
+    await closeEditorPanels(page)
     await page.click('#btn-retry-renderer')
     await page.waitForFunction(() => !document.querySelector('#editor-gpu-error-notice') &&
-      document.querySelector('#gpu-status-badge')?.textContent?.includes('WebGPU Rust Editor'), { timeout: 15000 })
+      (document.querySelector('#gpu-status-badge') as HTMLElement | null)?.dataset.status === 'ready', { timeout: 15000 })
     await waitForLabels(page, sceneBefore)
     await select(page, first)
     check(JSON.stringify(await graph(page)) === JSON.stringify(graphBefore), 'Graph lost across renderer recovery')
     check(await page.$eval(`#task-edit-title-${firstTask}`, el => (el as HTMLInputElement).value) === firstTitle, 'Task edit lost across renderer recovery')
     await select(page, second)
     check(await page.$eval(`#task-edit-title-${secondTask}`, el => (el as HTMLInputElement).value) === failureTitle, 'Task edited during failure lost')
+    await closeEditorPanels(page)
     const dragTarget = await labelBox(page, second)
     const pixels = await canvasCardPixels(page, dragTarget)
     check(pixels >= 100, `Recovered canvas did not draw the dragged card (${pixels} card pixels)`)
@@ -357,6 +359,7 @@ async function main() {
     })
     await noGpu.goto(`${URL}/editor`, { waitUntil: 'networkidle0' })
     await noGpu.waitForSelector('#editor-gpu-notice')
+    await openSkillList(noGpu)
     const note = await noGpu.$eval('#list-positioning-note', el => el.textContent ?? '')
     check(note.includes('Card positioning remains a canvas operation'), `Positioning note missing: ${note}`)
     const listed = await noGpu.$$eval('#skill-prerequisite-list [role="option"]', els => els.map(el => el.id.replace('skill-list-item-', '')))
@@ -365,8 +368,10 @@ async function main() {
     check(await noGpu.$eval(`#task-edit-title-${firstTask}`, el => (el as HTMLInputElement).value) === firstTitle, 'No-WebGPU path lost the new Skill Task edit')
     await keyboardSelect(noGpu, second)
     check(await noGpu.$eval(`#task-edit-title-${secondTask}`, el => (el as HTMLInputElement).value) === failureTitle, 'No-WebGPU path lost a Task edit')
+    await openSkillList(noGpu)
     const prereqs = await noGpu.$eval(`#skill-list-item-${second}`, el => el.textContent ?? '')
-    check(prereqs.includes(`← ${firstLabel}`), `No-WebGPU list lost the ${first} → ${second} connection: ${prereqs}`)
+    check(prereqs.includes(`Requires: ${firstLabel}`), `No-WebGPU list lost the ${first} → ${second} connection: ${prereqs}`)
+    await keyboardSelect(noGpu, second)
     const noGpuTitle = 'T06 flow: edited without WebGPU'
     await setTaskTitle(noGpu, secondTask, noGpuTitle)
     await savedTask(noGpu, secondTask, noGpuTitle)

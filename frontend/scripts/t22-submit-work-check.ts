@@ -24,6 +24,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type BrowserContext, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
+import { closeEditorPanels, openSkillList } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -94,6 +95,7 @@ async function authenticate(page: Page, mode: 'sign-in' | 'sign-up', email: stri
   await page.waitForSelector('#personal-workspace')
 }
 async function signOut(page: Page) {
+  await closeEditorPanels(page)
   await page.click('#sign-out-btn')
   await page.waitForSelector('#sign-in-form')
 }
@@ -108,6 +110,7 @@ async function signUpVerified(page: Page, email: string) {
 
 /** A visible canvas point inside the card, so input goes through the engine. */
 async function cardPoint(page: Page, id: string) {
+  await closeEditorPanels(page)
   const point = await page.$eval(`#card-label-${id}`, (el) => {
     const canvas = document.querySelector('#editor-canvas')!, r = el.getBoundingClientRect()
     for (let y = r.top + 8; y < r.bottom - 8; y += 8) for (let x = r.left + 8; x < r.right - 8; x += 8) {
@@ -136,6 +139,7 @@ async function canvasSelect(page: Page, id: string) {
 }
 /** Selects a Skill in the keyboard list: focus it, Home, ArrowDown n times, Enter. */
 async function keyboardSelect(page: Page, index: number, id: string) {
+  await openSkillList(page)
   await page.focus('#skill-prerequisite-list')
   await page.keyboard.press('Home')
   for (let i = 0; i < index; i++) await page.keyboard.press('ArrowDown')

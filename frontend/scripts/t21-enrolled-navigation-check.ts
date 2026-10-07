@@ -23,6 +23,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type BrowserContext, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
+import { closeEditorPanels, openSkillList, readSkillStatus, clickOutsideDetails } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -84,6 +85,7 @@ async function authenticate(page: Page, mode: 'sign-in' | 'sign-up', email: stri
   await page.waitForSelector('#personal-workspace')
 }
 async function signOut(page: Page) {
+  await closeEditorPanels(page)
   await page.click('#sign-out-btn')
   await page.waitForSelector('#sign-in-form')
 }
@@ -107,6 +109,7 @@ const labels = (page: Page): Promise<Label[]> => page.$$eval('[id^="card-label-"
 const settle = (page: Page) => page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))
 /** A visible canvas point inside the card, so input goes through the engine. */
 async function cardPoint(page: Page, id: string) {
+  await closeEditorPanels(page)
   const point = await page.$eval(`#card-label-${id}`, (el) => {
     const canvas = document.querySelector('#editor-canvas')!, r = el.getBoundingClientRect()
     for (let y = r.top + 8; y < r.bottom - 8; y += 8) for (let x = r.left + 8; x < r.right - 8; x += 8) {
@@ -131,6 +134,7 @@ async function openEnrollment(page: Page, enrollmentId: string, gpu: 'ready' | '
 }
 /** Selects a Skill in the keyboard list: focus it, Home, ArrowDown n times, Enter. */
 async function keyboardSelect(page: Page, index: number, id: string) {
+  await openSkillList(page)
   await page.focus('#skill-prerequisite-list')
   await page.keyboard.press('Home')
   for (let i = 0; i < index; i++) await page.keyboard.press('ArrowDown')
@@ -253,6 +257,7 @@ async function main() {
     await openEnrollment(lena, lenaEnrollment)
     check(await text(lena, '#enrolled-path-title') === 'Linear Algebra' && (await data(lena, '#enrolled-version-badge')).versionNumber === '1' && (await data(lena, '#enrolled-version')).versionId === la.versionId, 'the page does not show Version 1 of Linear Algebra')
     check((await data(lena, '#active-context')).context === 'learner' && (await text(lena, '#version-pinned-note')).includes('stays on Version 1'), 'the learner context or pinned note is missing')
+    await openSkillList(lena)
     const listed = await lena.$$eval('#skill-prerequisite-list [role="option"]', (els) => els.map((el) => el.id.replace('skill-list-item-', '')))
     check(JSON.stringify(listed) === JSON.stringify([la.vectors, la.matrices]), `listed Skills ${listed}`)
     const vectorsPoint = await cardPoint(lena, la.vectors)
@@ -279,7 +284,7 @@ async function main() {
 
     // 3. Access, Mastery and Enrollment XP are separate; the Locked Skill shows its title, outcome and reasons.
     await openEnrollment(lena, lenaEnrollment)
-    check((await data(lena, `#skill-status-${la.matrices}`)).access === 'locked' && (await data(lena, `#card-status-${la.matrices}`)).locked === 'true', 'Matrices is not shown locked in the list and on its card')
+    check((await readSkillStatus(lena, `#skill-status-${la.matrices}`)).access === 'locked' && (await data(lena, `#card-status-${la.matrices}`)).locked === 'true', 'Matrices is not shown locked in the list and on its card')
     await keyboardSelect(lena, 1, la.matrices)
     let s = await shown(lena)
     check(s.xp === '0' && s.access === 'locked' && s.mastery === 'not-mastered' && s.title === 'Matrices', `initial: ${JSON.stringify(s)}`)
@@ -324,10 +329,10 @@ async function main() {
     }
     const refreshButton = async () => {
       const before = await generation()
-      await lena.click('#enrollment-records-refresh')
+      await clickOutsideDetails(lena, '#enrollment-records-refresh')
       await lena.waitForFunction((n: number) => Number((document.querySelector('#enrollment-records') as HTMLElement | null)?.dataset.generation) > n, {}, before)
     }
-    const chips = async () => ({ vectors: (await data(lena, `#skill-status-${la.vectors}`)).access, matrices: (await data(lena, `#skill-status-${la.matrices}`)).access })
+    const chips = async () => ({ vectors: (await readSkillStatus(lena, `#skill-status-${la.vectors}`)).access, matrices: (await readSkillStatus(lena, `#skill-status-${la.matrices}`)).access })
     const secondWork = (await ok(lena, `${route(la.drills)}/revisions`, 'POST', { text: 'Corrected vector drills' })).revision.id
     await ok(carla, `${route(la.drills)}/revisions/${secondWork}/review`, 'POST', { decision: 'approval' })
     check((await shown(lena)).xp === '0', 'the open page changed before the learner returned to it')
@@ -460,7 +465,10 @@ async function main() {
     check(s.title === 'Matrices' && s.access === 'locked' && s.reasons.length === 2 && s.xp === '0', `list-only Matrices: ${JSON.stringify(s)}`)
     await noGpu.waitForSelector(`#task-history-${la.matrixDrills}[data-state="ready"][data-revisions="1"]`)
     check(await text(noGpu, `#task-title-${la.matrixDrills}`) === 'Matrix drills' && (await text(noGpu, `#task-history-${la.matrixDrills}`)).includes('Matrix drill answers'), 'the list-only view does not reach the Task details')
-    await noGpu.keyboard.press('ArrowUp')
+    await openSkillList(noGpu)
+    await noGpu.focus('#skill-prerequisite-list')
+    await noGpu.keyboard.press('Home')
+    await noGpu.keyboard.press('Enter')
     await waitSelected(noGpu, la.vectors)
     check(await text(noGpu, `#task-title-${la.drills}`) === 'Vector drills' && (await shown(noGpu)).mastery === 'not-mastered', 'ArrowUp did not reach Vectors and its Task')
     check((await readOnlyControls(noGpu)).panelInputs === 0, 'the list-only view offers editing')

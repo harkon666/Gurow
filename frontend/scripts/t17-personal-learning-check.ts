@@ -15,6 +15,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import path from 'node:path'
 import puppeteer, { type HTTPRequest, type Page } from 'puppeteer-core'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
+import { closeEditorPanels, openSkillList, openNewSkill, readSkillStatus, clickOutsideDetails } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -75,6 +76,7 @@ async function authenticate(page: Page, mode: 'sign-in' | 'sign-up', email: stri
   await page.waitForSelector('#personal-workspace')
 }
 async function signOut(page: Page) {
+  await closeEditorPanels(page)
   await page.click('#sign-out-btn')
   await page.waitForSelector('#sign-in-form')
 }
@@ -94,6 +96,7 @@ async function createPath(page: Page, title: string, goal: string) {
 const labelIds = (page: Page) => page.$$eval('[id^="card-label-"]', (els) => els.map((el) => el.id.replace('card-label-', '')))
 async function addSkill(page: Page, title: string, outcome: string) {
   const before = await labelIds(page)
+  await openNewSkill(page)
   await setValue(page, '#new-skill-title', title)
   await setValue(page, '#new-skill-outcome', outcome)
   await page.click('#add-skill-btn')
@@ -104,6 +107,7 @@ async function addSkill(page: Page, title: string, outcome: string) {
 }
 /** Clicks a visible canvas point of the card, so selection goes through the engine. */
 async function select(page: Page, id: string) {
+  await closeEditorPanels(page)
   const point = await page.$eval(`#card-label-${id}`, (el) => {
     const canvas = document.querySelector('#editor-canvas')!, r = el.getBoundingClientRect()
     for (let y = r.top + 8; y < r.bottom - 8; y += 8) for (let x = r.left + 8; x < r.right - 8; x += 8) {
@@ -170,6 +174,7 @@ async function tabTo(page: Page, selector: string, limit = 200) {
 }
 /** Selects a Skill in the keyboard list: focus it, Home, ArrowDown n times, Enter. */
 async function keyboardSelect(page: Page, index: number, id: string) {
+  await openSkillList(page)
   await page.focus('#skill-prerequisite-list')
   await page.keyboard.press('Home')
   for (let i = 0; i < index; i++) await page.keyboard.press('ArrowDown')
@@ -231,7 +236,7 @@ async function main() {
     let authoredRevision = (await saveState(page)).revision
     await page.waitForSelector(`#task-learning-${borrow}[data-tracked="true"]`)
     await waitShown(page, { xp: 0, access: 'open', mastery: 'unclaimed' })
-    check(await attr(page, `#skill-status-${lifetimes}`, 'data-access') === 'locked', 'the list does not show Lifetimes as locked')
+    check((await readSkillStatus(page, `#skill-status-${lifetimes}`)).access === 'locked', 'the list does not show Lifetimes as locked')
     check(await attr(page, `#card-status-${lifetimes}`, 'data-locked') === 'true', 'the canvas label does not show Lifetimes as locked')
     await select(page, lifetimes)
     await waitShown(page, { access: 'locked', mastery: 'unclaimed' })
@@ -292,7 +297,9 @@ async function main() {
     await page.click('#mastery-btn')
     for (let i = 0; i < 50 && heldMastery.request === null; i++) await new Promise((r) => setTimeout(r, 50))
     check(heldMastery.request, 'the Mastery declaration never reached the network')
+    await closeEditorPanels(page)
     await setValue(page, '#path-goal-input', 'Ship a small allocator, then a GC')
+    await keyboardSelect(page, 0, ownership)
     await waitForState(page, 'saved')
     authoredRevision = (await saveState(page)).revision
     await new Promise((r) => setTimeout(r, 300))
@@ -304,7 +311,7 @@ async function main() {
     await new Promise((r) => setTimeout(r, 600))
     page.off('request', holdMastery)
     await page.setRequestInterception(false)
-    check((await shown(page)).mastery === 'declared' && await attr(page, `#skill-status-${ownership}`, 'data-mastery') === 'declared', `a read during the held declaration hid it: ${JSON.stringify(await shown(page))}`)
+    check((await shown(page)).mastery === 'declared' && (await readSkillStatus(page, `#skill-status-${ownership}`)).mastery === 'declared', `a read during the held declaration hid it: ${JSON.stringify(await shown(page))}`)
     check(!reads.includes('during') && reads.includes('after'), `records read while the declaration was in flight, or never after it: ${reads}`)
     await select(page, lifetimes)
     await waitShown(page, { access: 'open' })
@@ -375,7 +382,7 @@ async function main() {
     view = await shown(page)
     check(view.xp === '10' && await contribution(page, chapter) === 'Not complete · contributes 0 XP', `an unconfirmed completion was shown: ${JSON.stringify(view)}`)
     check((await stored(page, pathA)).xp === 25, 'the lost completion did not reach the backend')
-    await page.click('#learning-retry-btn')
+    await clickOutsideDetails(page, '#learning-retry-btn')
     await waitShown(page, { xp: 25 })
     s = await stored(page, pathA)
     check(s.xp === 25 && s.xpHistory.filter((e: any) => e.taskId === chapter).length === 1, `the retry multiplied the reward: ${JSON.stringify(s.xpHistory.filter((e: any) => e.taskId === chapter))}`)
@@ -403,7 +410,7 @@ async function main() {
     page.off('request', blockRewards)
     await page.setRequestInterception(false)
     check(!(await page.evaluate(() => (window as any).__xpSeen as string[])).includes('35'), 'the failed write was shown as XP')
-    await page.click('#learning-retry-btn')
+    await clickOutsideDetails(page, '#learning-retry-btn')
     await waitShown(page, { xp: 35 })
     s = await stored(page, pathA)
     check(storedTask(s, chapter).xpReward === 25 && s.xpHistory.at(-1).amount === 10 && s.xpHistory.at(-1).cause === 'reward_change', 'the retried reward edit was not recorded as a +10 correction')
@@ -418,7 +425,9 @@ async function main() {
     await page.keyboard.press('Enter')
     await waitShown(page, { access: 'locked' })
     await page.waitForFunction(() => document.querySelector('#lock-reasons')?.textContent?.includes('Needs 965 more XP'))
-    check(await attr(page, `#skill-status-${lifetimes}`, 'data-access') === 'locked' && (await text(page, `#skill-list-item-${lifetimes}`)).includes('Lifetimes'), 'the list lost the locked Skill')
+    await openSkillList(page)
+    check((await readSkillStatus(page, `#skill-status-${lifetimes}`)).access === 'locked' && (await text(page, `#skill-list-item-${lifetimes}`)).includes('Lifetimes'), 'the list lost the locked Skill')
+    await keyboardSelect(page, 1, lifetimes)
     await tabTo(page, '#access-override-btn')
     await page.keyboard.press('Enter')
     await waitShown(page, { access: 'override' })
@@ -435,6 +444,7 @@ async function main() {
 
     // 9. Another Path's XP never counts here.
     const recordBefore = (await shown(page)).history
+    await closeEditorPanels(page)
     await page.click('#back-to-workspace')
     await page.waitForSelector('#personal-workspace')
     const pathB = await createPath(page, 'Jazz Guitar', 'Comp through a blues')
@@ -445,6 +455,7 @@ async function main() {
     await setNumber(page, `task-reward-${voicingTask}`, 2000)
     await page.click(`#task-completion-btn-${voicingTask}`)
     await waitShown(page, { xp: 2000 })
+    await closeEditorPanels(page)
     await page.click('#back-to-workspace')
     await page.waitForSelector(`[data-learning-path-id="${pathA}"] a`)
     await page.click(`[data-learning-path-id="${pathA}"] a`)
@@ -482,6 +493,7 @@ async function main() {
     await noGpu.setViewport({ width: 1400, height: 900, deviceScaleFactor: 1 })
     await noGpu.goto(`${ORIGIN}/paths/${pathA}`, { waitUntil: 'networkidle0' })
     await openEditor(noGpu, 2, 'unsupported')
+    await openSkillList(noGpu)
     await noGpu.waitForSelector(`#skill-status-${lifetimes}[data-access="locked"]`)
     await keyboardSelect(noGpu, 1, lifetimes)
     await waitShown(noGpu, { xp: 25, access: 'locked', mastery: 'declared' })

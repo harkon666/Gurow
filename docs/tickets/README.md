@@ -52,6 +52,14 @@ T01–T32 are stable local ticket identifiers. The table maps them to actual Git
 | [T31](31-arrange-selected-skills.md) | [#32](https://github.com/harkon666/Gurow/issues/32) | MVP | Arrange several selected Skills in one editor operation | T16 | Box multiselection dan drag beberapa Skill tersimpan sebagai satu operasi yang bisa di-undo. |
 | [T32](32-delete-unused-editor-content.md) | [#33](https://github.com/harkon666/Gurow/issues/33) | MVP | Delete unused Skills and connections without erasing learning history | T30 | Hapus konten yang belum berhistori dan koneksi editable dengan aman; undo tetap tunduk pada validasi domain. |
 
+## Canvas-first UX slices
+
+Parent: [Canvas-first UI and per-Skill Kanban #46](https://github.com/harkon666/Gurow/issues/46). Navigation replaces the permanent-sidebar presentation, not the existing learning or ownership rules. Board-specific acceptance remains in UX03–UX05.
+
+| Ticket source | GitHub issue | Stage | Title | Blocked by | What it delivers |
+| --- | --- | --- | --- | --- | --- |
+| [UX01](canvas-kanban/01-canvas-navigation.md) | [#47](https://github.com/harkon666/Gurow/issues/47) | UX | Navigate a clean canvas without permanent sidebars or technical chrome | None | On-demand keyboard-accessible navigation, retained learning actions and truthful recovery; no Task Board claim. |
+
 ## Dependency overview
 
 T06 / #7 has a prepared [benchmark contract and L3 execution breakdown](t06-l3/README.md). These seven approved packets are published as native sub-issues #34–#40 with verified blockers and `ready-for-agent`; they do not replace the original T06 criteria or establish P1 acceptance.

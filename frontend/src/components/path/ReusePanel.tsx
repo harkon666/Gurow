@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { TemporaryPanel } from '../editor/TemporaryPanel'
 import { listReuseSources, readCoachPath, readCoachVersion, readLearningPath, type ApiResult, type EditablePathDocument, type PathSkill, type PathTask, type ReuseSources } from '../../lib/api'
 import { prerequisitesOf, type ContentKind, type ReuseContent } from './reuse'
 
@@ -129,8 +130,8 @@ export function ReusePanel({ destination, skills, selectedSkillId, canCopy, onCo
   }
 
   return (
-    <div className="absolute inset-0 z-30 bg-slate-950/75 flex items-start justify-center p-4 md:p-8 overflow-y-auto" onKeyDown={(event) => { if (event.key === 'Escape') onClose() }}>
-      <div id="reuse-panel" role="dialog" aria-modal="true" aria-labelledby="reuse-title" className="w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-xl shadow-xl flex flex-col gap-3 p-4">
+    <TemporaryPanel title="Copy from a Path" closeId="reuse-close-btn" onClose={onClose}>
+      <div id="reuse-panel" className="flex flex-col gap-3 p-4">
         <div className="flex items-start justify-between gap-3">
           <div>
             <h2 id="reuse-title" className="text-sm font-semibold text-slate-100">Copy from a Path</h2>
@@ -138,7 +139,7 @@ export function ReusePanel({ destination, skills, selectedSkillId, canCopy, onCo
               Copies are new content of this Path with their own IDs. Later edits to the copy or the source stay apart, and no completion, Submission, Review, XP or Mastery comes along.
             </p>
           </div>
-          <button id="reuse-close-btn" onClick={onClose} autoFocus className="text-xs text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-1 rounded-lg cursor-pointer">Close</button>
+
         </div>
 
         {sources.state === 'loading' && <p className="text-xs text-slate-500">Loading the Paths you can copy from…</p>}
@@ -241,6 +242,6 @@ export function ReusePanel({ destination, skills, selectedSkillId, canCopy, onCo
           </>
         )}
       </div>
-    </div>
+    </TemporaryPanel>
   )
 }

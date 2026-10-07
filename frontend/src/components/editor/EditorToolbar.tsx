@@ -13,7 +13,7 @@ interface EditorToolbarProps {
   onZoomOut?: () => void
   onResetZoom?: () => void
   onCreateSkill?: () => void
-  onSimulateFailure?: () => void
+  navigation?: React.ReactNode
   /** A navigation-only canvas: no history controls, and a note on who arranges the cards. */
   readOnly?: boolean
   /** A positions-only canvas: history controls stay, with a note that content stays as published. */
@@ -32,20 +32,23 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   onZoomOut,
   onResetZoom,
   onCreateSkill,
-  onSimulateFailure,
+  navigation,
   readOnly = false,
   layoutOnly = false,
 }) => {
   return (
-    <div className="@container h-12 shrink-0 border-b border-slate-800/80 bg-slate-900/60 px-4 flex items-center justify-between gap-3 backdrop-blur-sm z-20">
+    <div className="@container min-h-12 shrink-0 border-b border-slate-800/80 bg-slate-900/60 px-3 py-2 flex items-center justify-between gap-3 backdrop-blur-sm z-20">
       {/*
         Controls keep their intrinsic width (shrink-0 + whitespace-nowrap) so a
         narrow editor column scrolls the group instead of squeezing every label
         into a one-character-per-line sliver.
       */}
-      <div className="flex items-center gap-2 min-w-0 flex-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
+        {navigation}
         <span
           id="gpu-status-badge"
+          data-status={gpuStatus}
+          aria-label={`Canvas ${gpuStatus === 'ready' ? 'ready' : gpuStatus === 'initializing' ? 'loading' : 'unavailable'}`}
           className="text-xs font-semibold text-slate-300 tracking-wide flex items-center gap-2 shrink-0 whitespace-nowrap"
         >
           <span
@@ -57,27 +60,27 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
                 : 'bg-red-400'
             }`}
           />
-          WebGPU Rust Editor
+          Canvas
         </span>
         <span
           id="editor-card-count"
           className="text-[11px] text-slate-500 bg-slate-800/60 px-2 py-0.5 rounded font-mono shrink-0 whitespace-nowrap"
         >
-          {cardCount} cards
+          {cardCount} Skills
         </span>
 
         {onCreateSkill && (
           <button
             id="editor-add-card-btn"
             onClick={onCreateSkill}
-            disabled={gpuStatus !== 'ready'}
+            disabled={gpuStatus === 'initializing'}
             title="Create new Skill card"
             className="px-2 py-1 text-xs rounded font-medium bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 hover:text-white border border-emerald-500/30 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40 flex items-center gap-1 shrink-0 whitespace-nowrap transition-colors"
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
             </svg>
-            <span>+ Skill</span>
+            <span>Add Skill</span>
           </button>
         )}
 
@@ -189,28 +192,10 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
           </button>
         </div>
 
-        {onSimulateFailure && gpuStatus === 'ready' && (
-          <button
-            id="btn-simulate-gpu-failure"
-            onClick={onSimulateFailure}
-            title="Simulate WebGPU Device Loss (AC3 / Testing)"
-            className="text-[10px] font-mono px-2 py-1 rounded bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 cursor-pointer transition-colors shrink-0 whitespace-nowrap"
-          >
-            Simulate GPU Failure
-          </button>
-        )}
+
       </div>
 
-      {/*
-        Gated on the toolbar's own width, not the viewport: the editor column is
-        far narrower than the page, so a viewport breakpoint would show this
-        caption and push the real controls out of reach.
-      */}
-      <div className="hidden @4xl:flex items-center gap-2 text-xs text-slate-400 shrink-0">
-        <span className="text-[11px] text-slate-500 font-mono whitespace-nowrap">
-          P1/T05 • Renderer Recovery &amp; Prerequisite List
-        </span>
-      </div>
+
     </div>
   )
 }

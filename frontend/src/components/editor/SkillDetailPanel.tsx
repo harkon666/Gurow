@@ -1,4 +1,6 @@
 import React, { useState } from 'react'
+import { TemporaryPanel } from './TemporaryPanel'
+import { connectionRejectionMessage } from './connectionRejection'
 import { INITIAL_LEARNING_PATH_FIXTURE } from '../../fixtures/learningPath'
 import type { SelectedSkillInfo } from './types'
 import type { PrerequisiteConnection } from './protocol'
@@ -16,6 +18,9 @@ export interface PanelTask {
 
 interface SkillDetailPanelProps {
   selectedSkill: SelectedSkillInfo | null
+  onClose: () => void
+  feedback?: React.ReactNode
+  busy?: boolean
   connections?: PrerequisiteConnection[]
   allSkills?: Array<{ id: string; title: string }>
   onConnect?: (fromId: string, toId: string) => void
@@ -72,6 +77,9 @@ const ConnectionListItem: React.FC<ConnectionListItemProps> = ({
 
 export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
   selectedSkill,
+  onClose,
+  feedback,
+  busy = false,
   connections = [],
   allSkills = INITIAL_LEARNING_PATH_FIXTURE.skills.map((s) => ({ id: s.id, title: s.title })),
   onConnect,
@@ -94,38 +102,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
     setSelectedTargetId('')
   }, [selectedSkill?.id])
 
-  if (!selectedSkill) {
-    return (
-      <aside
-        id="skill-detail-panel"
-        data-connections={JSON.stringify(connections)}
-        data-connections-count={connections.length}
-        className="w-80 shrink-0 h-full border-l border-slate-800 bg-slate-900/60 p-6 flex flex-col justify-center items-center text-center text-slate-400 backdrop-blur-md select-none"
-      >
-        <div className="w-14 h-14 rounded-2xl bg-slate-800/80 flex items-center justify-center mb-4 text-slate-500 border border-slate-700/50 shadow-inner">
-          <svg
-            className="w-7 h-7"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={1.5}
-              d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"
-            />
-          </svg>
-        </div>
-        <h3 className="text-base font-medium text-slate-200 mb-1">
-          No Skill Selected
-        </h3>
-        <p className="text-xs text-slate-500 max-w-[220px]">
-          Click any card on the WebGPU canvas to view its details, prerequisites, and associated tasks.
-        </p>
-      </aside>
-    )
-  }
+  if (!selectedSkill) return <div id="skill-detail-panel" hidden data-connections={JSON.stringify(connections)} data-connections-count={connections.length} />
 
   // Lookup learning metadata from props or application fixture; title is authoritative from engine
   const fixtureSkill = INITIAL_LEARNING_PATH_FIXTURE.skills.find(
@@ -146,11 +123,16 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
     otherSkills.find((s) => s.id === selectedTargetId)?.id ?? (otherSkills[0]?.id ?? '')
 
   return (
-    <aside
+    <TemporaryPanel title="Skill summary" closeId="btn-close-skill-details" onClose={onClose}>
+    {feedback && <div className="px-4 py-3 border-b border-slate-800 space-y-2">{feedback}</div>}
+    <section
+      inert={busy}
+      aria-busy={busy}
       id="skill-detail-panel"
+      data-selected-skill-id={selectedSkill.id}
       data-connections={JSON.stringify(connections)}
       data-connections-count={connections.length}
-      className="w-full md:w-80 shrink-0 md:h-full border-t md:border-t-0 md:border-l border-slate-800 bg-slate-900/80 p-6 flex flex-col gap-6 backdrop-blur-md overflow-y-auto"
+      className="p-4 md:p-6 flex flex-col gap-6"
     >
       <div className="space-y-6">
         {/* Header & Badges */}
@@ -161,7 +143,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
               className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20"
             >
               <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-              Selected in WebGPU
+              Skill
             </span>
           </div>
 
@@ -172,15 +154,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
             {selectedSkill.title}
           </h2>
 
-          <div className="mt-1 flex items-center gap-1.5 text-xs text-slate-500 font-mono">
-            <span>ID:</span>
-            <code
-              id="selected-skill-id"
-              className="bg-slate-800/80 px-1.5 py-0.5 rounded text-blue-300 font-mono text-[11px]"
-            >
-              {selectedSkill.id}
-            </code>
-          </div>
+          <span id="selected-skill-id" hidden>{selectedSkill.id}</span>
           {skillActions && <div className="mt-2 flex flex-col">{skillActions}</div>}
         </div>
 
@@ -203,7 +177,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
                 </button>
               )}
             </div>
-            <p className="text-[11px] leading-relaxed text-amber-300/90">{connectionRejection}</p>
+            <p className="text-[11px] leading-relaxed text-amber-300/90">{connectionRejectionMessage(connectionRejection, allSkills)}</p>
           </div>
         )}
 
@@ -234,8 +208,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
         {/* Prerequisite Connections Section */}
         <div id="skill-prerequisites-section" className="space-y-3">
           <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center justify-between">
-            <span>Prerequisite Graph (DAG)</span>
-            <span className="text-[10px] text-blue-400/90 font-mono">Rust Owned</span>
+            <span>Relationships</span>
           </h4>
 
           {/* Upstream Prerequisites Required for this Skill */}
@@ -252,7 +225,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
                       key={c.from_id}
                       fromId={c.from_id}
                       toId={c.to_id}
-                      title={prereqSkill?.title ?? c.from_id}
+                      title={prereqSkill?.title ?? 'Unavailable Skill'}
                       direction="←"
                       onDisconnect={onDisconnect}
                     />
@@ -280,7 +253,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
                       key={c.to_id}
                       fromId={c.from_id}
                       toId={c.to_id}
-                      title={depSkill?.title ?? c.to_id}
+                      title={depSkill?.title ?? 'Unavailable Skill'}
                       direction="→"
                       onDisconnect={onDisconnect}
                     />
@@ -343,13 +316,6 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
             <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
               Associated Tasks
             </h4>
-            <span className="text-[10px] text-emerald-400/90 font-mono bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
-              React Domain Payload
-            </span>
-          </div>
-
-          <div className="text-[10px] text-slate-500 mb-3 italic">
-            Task contents belong to application state and are not included in engine canvas snapshots.
           </div>
 
           {activeTasks.length > 0 ? (
@@ -467,11 +433,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
         </div>
       </div>
 
-      {/* Footer Info */}
-      <div className="pt-4 border-t border-slate-800/60 text-[11px] text-slate-500 flex justify-between items-center mt-auto shrink-0">
-        <span>Owner: Rust Engine</span>
-        <span>Render: WebGPU</span>
-      </div>
-    </aside>
+    </section>
+    </TemporaryPanel>
   )
 }

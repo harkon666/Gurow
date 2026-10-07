@@ -20,6 +20,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
+import { closeEditorPanels } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -129,6 +130,7 @@ const cardIds = (page: Page) => page.$$eval('[id^="card-label-"]', (els) => els.
 /** Each label's world position: its own left/top, before the camera transform. */
 const labelWorld = (page: Page) => page.$$eval('[id^="card-label-"]', (els) => Object.fromEntries(els.map((el) => [el.id.replace('card-label-', ''), { x: parseFloat((el as HTMLElement).style.left), y: parseFloat((el as HTMLElement).style.top) }])))
 async function cardPoint(page: Page, id: string) {
+  await closeEditorPanels(page)
   const point = await page.$eval(`#card-label-${id}`, (el) => {
     const canvas = document.querySelector('#editor-canvas')!, r = el.getBoundingClientRect()
     for (let y = r.top + 8; y < r.bottom - 8; y += 8) for (let x = r.left + 8; x < r.right - 8; x += 8) {
@@ -152,8 +154,8 @@ async function deleteSkill(page: Page, id: string) {
   await page.click('#delete-skill-btn')
   await page.waitForFunction((want: string) => !document.getElementById(`card-label-${want}`), {}, id)
 }
-async function undo(page: Page) { await page.click('#editor-undo-btn') }
-async function redo(page: Page) { await page.click('#editor-redo-btn') }
+async function undo(page: Page) { await closeEditorPanels(page); await page.click('#editor-undo-btn') }
+async function redo(page: Page) { await closeEditorPanels(page); await page.click('#editor-redo-btn') }
 
 /** The document apart from its revision, independent of order: what an undo must restore. */
 function definitions(doc: Doc) {
@@ -320,6 +322,7 @@ async function main() {
     await tab2.setViewport({ width: 1600, height: 900, deviceScaleFactor: 1 })
     await openEditor(tab2, `${ORIGIN}/paths/${pathId}`, 4)
     await ada.bringToFront()
+    await closeEditorPanels(ada)
     await setValue(ada, '#path-goal-input', 'Ship an allocator and a parser')
     await waitForSaved(ada, ++revision)
     await tab2.bringToFront()
@@ -328,6 +331,7 @@ async function main() {
     const changes = await text(tab2, '#conflict-changes')
     check(changes.includes('Deleted the Skill “Traits” with 1 Task') && !changes.includes('Removed the connection'), `conflict changes: ${changes}`)
     check(definitions(await ok(tab2, route)) !== definitions(seeded) && (await ok(tab2, route)).application.skills.some((s: Skill) => s.id === id.traits), 'the stale deletion reached the backend')
+    await closeEditorPanels(tab2)
     await tab2.click('#reapply-mine-btn')
     await waitForSaved(tab2, ++revision)
     const merged: Doc = await ok(tab2, route)

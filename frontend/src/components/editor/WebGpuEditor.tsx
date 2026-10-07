@@ -11,6 +11,7 @@ import type {
 import { useWasmEditor } from './useWasmEditor'
 import { EditorToolbar } from './EditorToolbar'
 import { WebGpuEnableHint } from './WebGpuEnableHint'
+import { connectionRejectionMessage, isConnectionRejection } from './connectionRejection'
 import { SkillCardOverlay, type LabelStatus } from './SkillCardOverlay'
 
 export interface WebGpuEditorActions {
@@ -35,6 +36,7 @@ interface WebGpuEditorProps {
   onRejection?: (reason: string | null) => void
   onActionsReady?: (actions: WebGpuEditorActions) => void
   onCreateSkill?: () => void
+  navigation?: React.ReactNode
   initialCards?: Array<{
     id: string
     title: string
@@ -70,6 +72,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
   onRejection,
   onActionsReady,
   onCreateSkill,
+  navigation,
   initialCards: customInitialCards,
   initialConnections,
   initialCamera,
@@ -84,6 +87,9 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  // A selection event on pointer-down must not open a modal in the middle of a drag.
+  const gesture = useRef<{ x: number; y: number; moved: boolean; open: boolean } | null>(null)
+  const latestSelection = useRef<SelectedSkillInfo | null>(null)
 
   const defaultInitialCards = useMemo(
     () =>
@@ -133,7 +139,10 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
   } = useWasmEditor({
     canvasRef,
     containerRef,
-    onSelectionChanged: onSelectSkill,
+    onSelectionChanged: (skill) => {
+      latestSelection.current = skill
+      if (!gesture.current) onSelectSkill(skill)
+    },
     initialCards,
     initialConnections,
     initialCamera,
@@ -182,6 +191,19 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
     onActionsReady,
   ])
 
+  useEffect(() => {
+    const testWindow = window as Window & {
+      __GUROW_TESTING__?: boolean
+      __GUROW_EDITOR_TEST__?: { simulateDeviceLoss: () => void }
+    }
+    if (testWindow.__GUROW_TESTING__ !== true && new URLSearchParams(window.location.search).get('editorTest') !== '1') return
+    const hook = { simulateDeviceLoss }
+    testWindow.__GUROW_EDITOR_TEST__ = hook
+    return () => {
+      if (testWindow.__GUROW_EDITOR_TEST__ === hook) delete testWindow.__GUROW_EDITOR_TEST__
+    }
+  }, [simulateDeviceLoss])
+
   return (
     <div className="relative flex-1 min-w-0 min-h-[360px] md:min-h-0 flex flex-col h-full overflow-hidden bg-slate-950">
       {/* Top Action Bar */}
@@ -197,7 +219,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
         onZoomOut={zoomOut}
         onResetZoom={resetZoom}
         onCreateSkill={readOnly || layoutOnly ? undefined : onCreateSkill}
-        onSimulateFailure={simulateDeviceLoss}
+        navigation={navigation}
         readOnly={readOnly}
         layoutOnly={layoutOnly}
       />
@@ -205,7 +227,9 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
       {/* Engine Error Toast Banner */}
       {engineError && (
         <div className="absolute top-14 left-4 right-4 z-40 bg-red-950/90 border border-red-800/80 text-red-200 px-4 py-2 rounded-xl text-xs flex items-center justify-between shadow-lg">
-          <span>{engineError}</span>
+          <span>{engineError === connectionRejection || isConnectionRejection(engineError)
+            ? connectionRejectionMessage(engineError, labels.map((label) => ({ id: label.card_id, title: label.title })))
+            : engineError}</span>
           <button
             onClick={clearEngineError}
             className="text-red-400 hover:text-red-200 ml-4 font-bold cursor-pointer"
@@ -224,7 +248,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
         {gpuStatus === 'unsupported' && (
           <div
             id="editor-gpu-notice"
-            className="absolute inset-0 z-30 flex flex-col items-center justify-center p-8 text-center bg-slate-950/95"
+            className="absolute inset-0 z-30 flex flex-col items-center overflow-y-auto p-4 md:p-8 text-center bg-slate-950/95"
           >
             <div className="max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl">
               <div className="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center mx-auto mb-4">
@@ -255,7 +279,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
         {gpuStatus === 'error' && (
           <div
             id="editor-gpu-error-notice"
-            className="absolute inset-0 z-30 flex flex-col items-center justify-center p-8 text-center bg-slate-950/95 backdrop-blur-sm"
+            className="absolute inset-0 z-30 flex flex-col items-center overflow-y-auto p-4 md:p-8 text-center bg-slate-950/95 backdrop-blur-sm"
           >
             <div className="max-w-md bg-slate-900 border border-red-800/80 rounded-2xl p-6 shadow-2xl">
               <div className="w-12 h-12 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20 flex items-center justify-center mx-auto mb-4">
@@ -310,9 +334,24 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
           data-read-only={readOnly}
           data-layout-only={layoutOnly}
           ref={canvasRef}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
+          tabIndex={0}
+          aria-label="Learning Path canvas. Use Skill list to browse with the keyboard."
+          onPointerDown={(event) => {
+            gesture.current = { x: event.clientX, y: event.clientY, moved: false, open: event.button === 0 && !event.shiftKey }
+            handlePointerDown(event)
+          }}
+          onPointerMove={(event) => {
+            const current = gesture.current
+            if (current && Math.hypot(event.clientX - current.x, event.clientY - current.y) > 3) current.moved = true
+            handlePointerMove(event)
+          }}
+          onPointerUp={(event) => {
+            const current = gesture.current
+            handlePointerUp(event)
+            gesture.current = null
+            if (current?.open && !current.moved) onSelectSkill(latestSelection.current)
+          }}
+          onPointerCancel={(event) => { handlePointerUp(event); gesture.current = null }}
           className="absolute inset-0 w-full h-full block cursor-pointer touch-none"
         />
 

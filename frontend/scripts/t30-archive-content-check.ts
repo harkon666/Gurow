@@ -21,6 +21,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type HTTPRequest, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
+import { closeEditorPanels, readSkillStatus } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -122,6 +123,7 @@ async function openEditor(page: Page, url: string, cards: number) {
 }
 /** A visible canvas point inside the card, so input goes through the engine. */
 async function cardPoint(page: Page, id: string) {
+  await closeEditorPanels(page)
   const point = await page.$eval(`#card-label-${id}`, (el) => {
     const canvas = document.querySelector('#editor-canvas')!, r = el.getBoundingClientRect()
     for (let y = r.top + 8; y < r.bottom - 8; y += 8) for (let x = r.left + 8; x < r.right - 8; x += 8) {
@@ -285,7 +287,7 @@ async function main() {
     for (let i = 0; i < 100 && held === null; i++) await new Promise((r) => setTimeout(r, 50))
     check(held !== null, 'the archival was not sent')
     pat.on('request', record)
-    const locked = await pat.evaluate(() => ['#path-goal-input', '#new-skill-title', '#editor-canvas', '#skill-outcome-input'].map((sel) => document.querySelector(sel)?.closest('[inert]') !== null))
+    const locked = await pat.evaluate(() => ['#path-goal-input', '#editor-add-card-btn', '#editor-canvas', '#skill-outcome-input'].map((sel) => Boolean(document.querySelector(sel)?.closest('[inert]'))))
     check((await data(pat, '#path-editor')).reapplying === 'true' && locked.every(Boolean), `the editor is not locked while archiving: ${locked}`)
     await pat.keyboard.down('Control')
     await pat.keyboard.press('z')
@@ -313,7 +315,7 @@ async function main() {
     await pat.waitForSelector(`#retained-task-${id.borrow}`)
     check(await retainedText(pat, id.borrow) === 'Borrow checker exercises · Completed · 20 XP still counted', `retained: ${await retainedText(pat, id.borrow)}`)
     check((await data(pat, '#path-xp')).xp === '20' && (await data(pat, '#skill-mastery')).mastery === 'declared', 'archiving changed XP or Mastery')
-    check((await data(pat, `#skill-status-${id.lifetimes}`)).access !== 'locked', 'Lifetimes locked after archiving')
+    check((await readSkillStatus(pat, `#skill-status-${id.lifetimes}`)).access !== 'locked', 'Lifetimes locked after archiving')
     pass('personal archival', `"Borrow checker exercises" archived from rev ${savedRevision} (rev ${savedRevision + 1}, started at ${revisionBefore}); it leaves the editable Tasks and is listed as retained, Completed · 20 XP still counted; XP 20, declared Mastery and Lifetimes' Access unchanged; blocked while unsaved, cancel archives nothing; while the request was held the editor was locked, no save was sent, and the Ctrl+Z it still received was kept as "Moved the card “Lifetimes”"`)
 
     // 2. Reload: the archived Task stays out of editing and in the retained history.

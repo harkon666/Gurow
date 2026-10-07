@@ -22,7 +22,7 @@ try {
   await page.setViewport({ width: 1280, height: 800, deviceScaleFactor: 1 })
   await page.goto(`${url}/editor`, { waitUntil: 'networkidle0' })
   await page.waitForSelector('#card-label-skill-rust-basics')
-  assert.match(await page.$eval('#gpu-status-badge', el => el.textContent ?? ''), /WebGPU Rust Editor/)
+  assert.equal(await page.$eval('#gpu-status-badge', el => (el as HTMLElement).dataset.status), 'ready')
   const settle = () => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
   const snapshot = () => page.evaluate(() => {
     const canvas = document.querySelector('#editor-canvas')!.getBoundingClientRect()

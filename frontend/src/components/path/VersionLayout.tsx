@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { WebGpuEditor, type WebGpuEditorActions } from '../editor/WebGpuEditor'
+import { SkillPrerequisiteList } from '../editor/SkillPrerequisiteList'
+import { SkillDetailPanel } from '../editor/SkillDetailPanel'
 import { loadCameraState, saveCameraState } from '../editor/checkpoint'
 import type { CameraState } from '../editor/protocol'
 import type { GpuStatus, SelectedSkillInfo } from '../editor/types'
@@ -185,6 +187,7 @@ export function VersionLayoutEditor({ accountId, document }: { accountId: string
       />
       <div inert={reapplying} aria-busy={reapplying} className={`h-[28rem] flex ${reapplying ? 'pointer-events-none opacity-60' : ''}`}>
         <WebGpuEditor
+          navigation={<SkillPrerequisiteList skills={document.application.skills} connections={connections} selectedSkillId={selected?.id ?? null} onSelectSkill={(skill) => { setSelected(skill); actionsRef.current?.selectCard(skill?.id ?? null) }} />}
           layoutOnly
           onSelectSkill={setSelected}
           onActionsReady={handleActionsReady}
@@ -195,6 +198,7 @@ export function VersionLayoutEditor({ accountId, document }: { accountId: string
           onCameraChanged={handleCameraChanged}
           onGpuStatusChange={setGpuStatus}
         />
+        <SkillDetailPanel selectedSkill={selected} onClose={() => { setSelected(null); actionsRef.current?.selectCard(null) }} allSkills={document.application.skills} connections={connections} outcome={document.application.skills.find((skill) => skill.id === selected?.id)?.outcome ?? ''} tasks={document.application.skills.find((skill) => skill.id === selected?.id)?.tasks ?? []} />
       </div>
     </section>
   )
@@ -203,7 +207,7 @@ export function VersionLayoutEditor({ accountId, document }: { accountId: string
 /** Tells the Coach whether the arrangement on the canvas is saved; only a backend acceptance says so. */
 function LayoutSaveStatus({ state, onRetry }: { state: SaveState; onRetry: () => void }) {
   const text = {
-    saved: `Saved · layout revision ${state.revision}`,
+    saved: 'Saved',
     dirty: 'Unsaved changes',
     saving: 'Saving…',
     conflict: 'Not saved: this layout was changed elsewhere',

@@ -24,7 +24,7 @@ function ReapplyNote({ id, status, noun }: { id: string; status: ReapplyStatus; 
     case 'idle': return null
     case 'working': return <p id={id} role="status" data-outcome="working" className="text-slate-300">Reapplying your changes to the saved {noun}…</p>
     case 'refused': return <p id={id} role="alert" data-outcome="refused" className="text-red-300">Gurow refused the reapplied changes: {status.detail}. Nothing was saved; your changes are still kept here.</p>
-    case 'stale': return <p id={id} role="alert" data-outcome="stale" className="text-red-300">Revision {status.revision} was saved elsewhere meanwhile, so nothing was saved; your changes are still kept here. Reapply them again to build on it.</p>
+    case 'stale': return <p id={id} role="alert" data-outcome="stale" className="text-red-300">A newer version was saved elsewhere meanwhile, so nothing was saved; your changes are still kept here. Reapply them again to build on it.</p>
     case 'failed': return <p id={id} role="alert" data-outcome="failed" className="text-red-300">Not reapplied: {status.detail}. Nothing was saved; your changes are still kept here.</p>
   }
 }
@@ -45,9 +45,9 @@ export function SaveConflict({ prefix, noun, revisionLabel, acceptedRevision, ch
   onDiscard: () => void
 }) {
   return (
-    <section id={`${prefix}save-conflict`} role="alert" data-reapply={status.kind} className="shrink-0 px-4 py-2 text-xs text-amber-100 bg-amber-950/40 border-b border-amber-900/60 space-y-1.5">
+    <section id={`${prefix}save-conflict`} role="alert" data-revision-label={revisionLabel} data-accepted-revision={acceptedRevision} data-reapply={status.kind} className="shrink-0 px-4 py-2 text-xs text-amber-100 bg-amber-950/40 border-b border-amber-900/60 space-y-1.5">
       <p>
-        {revisionLabel} {acceptedRevision} was saved elsewhere (another tab or window). Your changes here are kept but not saved, and nothing was overwritten:
+        This {noun} was changed elsewhere (another tab or window). Your changes here are kept but not saved, and nothing was overwritten:
         they stay on screen and in this browser until you choose what to do with them.
       </p>
       <details id={`${prefix}conflict-changes-details`} open>
@@ -56,7 +56,7 @@ export function SaveConflict({ prefix, noun, revisionLabel, acceptedRevision, ch
       </details>
       <div className="flex flex-wrap gap-2">
         <button id={`${prefix}reapply-mine-btn`} disabled={busy} onClick={onReapply} className={`${buttonClass} text-emerald-100 bg-emerald-900/50 hover:bg-emerald-800/60 border-emerald-700`}>
-          Reapply my changes to {revisionLabel.toLowerCase()} {acceptedRevision} and save
+          Reapply my changes to the saved version and save
         </button>
         <button id={`${prefix}keep-aside-btn`} disabled={busy} onClick={onKeepAside} className={`${buttonClass} text-amber-100 bg-slate-900 hover:bg-slate-800 border-amber-800`}>
           Show the saved version, keep mine aside
@@ -98,8 +98,8 @@ export function KeptWorkList<D>({ prefix, noun, entries, refused, busy, currentR
         return (
           <article key={entry.work.id} data-kept-entry={entry.work.id} data-base-revision={entry.work.baseRevision} data-reapply={entry.status.kind} className="rounded-lg border border-sky-900/70 bg-slate-950/60 p-2 space-y-1.5">
             <p className="text-sky-100">
-              Unsaved changes kept in this browser, based on revision {entry.work.baseRevision} (edited {new Date(entry.work.editedAt).toLocaleString()}).
-              {entry.work.baseRevision === currentRevision ? '' : ` Revision ${currentRevision} is saved now.`} The saved {noun} shown does not include them.
+              Unsaved changes kept in this browser (edited {new Date(entry.work.editedAt).toLocaleString()}).
+              {entry.work.baseRevision === currentRevision ? '' : ' The saved version has changed since.'} The saved {noun} shown does not include them.
             </p>
             <ChangeList id={`${prefix}kept-changes-${entry.work.id}`} changes={entry.changes} />
             <div className="flex flex-wrap items-center gap-2">

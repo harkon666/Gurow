@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { WebGpuEditor, type WebGpuEditorActions } from '../editor/WebGpuEditor'
 import { SkillDetailPanel, type PanelTask } from '../editor/SkillDetailPanel'
 import { SkillPrerequisiteList } from '../editor/SkillPrerequisiteList'
+import { TemporaryPanel } from '../editor/TemporaryPanel'
 import { loadCameraState, saveCameraState } from '../editor/checkpoint'
 import type { CameraState, PrerequisiteConnection } from '../editor/protocol'
 import type { GpuStatus, SelectedSkillInfo } from '../editor/types'
@@ -129,6 +130,8 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
   const [loadError, setLoadError] = useState<string | null>(null)
   const [newSkill, setNewSkill] = useState({ title: '', outcome: '' })
   const [reuseOpen, setReuseOpen] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
   /** What the last copy added, until the next one. */
   const [reuseNotice, setReuseNotice] = useState<string | null>(null)
   /** What the last archival did or why it failed. */
@@ -317,6 +320,7 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
     local.current.skills = [...local.current.skills, mode.newSkill(id, skillTitle, newSkill.outcome)]
     setSkills(local.current.skills)
     actionsRef.current!.createCard(id, skillTitle, position)
+    setAddOpen(false)
     actionsRef.current!.selectCard(id)
     setNewSkill({ title: '', outcome: '' })
   }
@@ -602,6 +606,7 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
         onDiscard={(id) => kept.discard(id)}
         onDismissRefused={() => kept.dismissRefused()}
       />
+      {reuseNotice && <p id="reuse-notice" role="status" className="px-4 py-2 text-xs text-emerald-300">{reuseNotice}</p>}
       {archival && (
         <p id="archive-status" role={archival.kind === 'failed' ? 'alert' : 'status'} data-outcome={archival.kind} className={`shrink-0 px-4 py-1.5 text-xs border-b ${archival.kind === 'failed' ? 'text-red-200 bg-red-950/40 border-red-900/60' : 'text-emerald-200 bg-emerald-950/30 border-emerald-900/50'}`}>
           {archival.text}
@@ -618,7 +623,7 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
         </p>
       )}
       <section inert={reapplying} aria-busy={reapplying} className={`w-full flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden relative ${reapplying ? 'pointer-events-none opacity-60' : ''}`}>
-        <div className="w-full md:w-64 lg:w-72 shrink-0 md:h-full flex flex-col border-b md:border-b-0 md:border-r border-slate-800/80 min-h-0">
+        {addOpen && <TemporaryPanel title="Add Skill" closeId="btn-close-add-skill" onClose={() => setAddOpen(false)} initialFocus="#new-skill-title">
           <form id="new-skill-form" onSubmit={addSkill} className="shrink-0 p-3 border-b border-slate-800/80 flex flex-col gap-2">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400">New Skill</h2>
             <input
@@ -647,26 +652,26 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
             >
               Add Skill
             </button>
-            <button
-              id="open-reuse-btn"
-              type="button"
-              onClick={() => setReuseOpen(true)}
-              className="text-xs text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg py-1.5 cursor-pointer"
-            >
-              Copy from a Path…
-            </button>
-            {reuseNotice && <p id="reuse-notice" role="status" className="text-[11px] text-emerald-300">{reuseNotice}</p>}
           </form>
-          <SkillPrerequisiteList
-            skills={skills}
-            connections={connections}
-            selectedSkillId={selectedId}
-            onSelectSkill={handleSelectListSkill}
-            renderStatus={personal ? (id) => <SkillStatusChips skill={learningSkill(id)} /> : (id) => <DraftStatusChip skill={skills.find((skill) => skill.id === id)} />}
-            className="flex-1 min-h-0"
-          />
-        </div>
+        </TemporaryPanel>}
+        {moreOpen && <TemporaryPanel title="More actions" closeId="btn-close-more-actions" onClose={() => setMoreOpen(false)}>
+          <div className="p-4 space-y-3">
+            <button id="open-reuse-btn" onClick={() => { setMoreOpen(false); setReuseOpen(true) }} className="text-sm text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg p-3">Copy from a Path…</button>
+            <p className="text-xs text-slate-400">Select a Skill to manage its Tasks, relationships, rules and deletion. Archived history stays with that Skill.</p>
+          </div>
+        </TemporaryPanel>}
         <WebGpuEditor
+          onCreateSkill={() => setAddOpen(true)}
+          navigation={<>
+            <SkillPrerequisiteList
+              skills={skills}
+              connections={connections}
+              selectedSkillId={selectedId}
+              onSelectSkill={handleSelectListSkill}
+              renderStatus={personal ? (id) => <SkillStatusChips skill={learningSkill(id)} /> : (id) => <DraftStatusChip skill={skills.find((skill) => skill.id === id)} />}
+            />
+            <button id="btn-more-actions" aria-haspopup="dialog" aria-expanded={moreOpen} onClick={() => setMoreOpen(true)} className="shrink-0 whitespace-nowrap rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-200 hover:bg-slate-800">More actions</button>
+          </>}
           onSelectSkill={setSelectedSkill}
           onConnectionsChange={setConnections}
           onRejection={setConnectionRejection}
@@ -683,6 +688,15 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
         />
         <SkillDetailPanel
           selectedSkill={selectedSkill}
+          onClose={() => handleSelectListSkill(null)}
+          busy={reapplying}
+          feedback={<>
+            <SaveStatus prefix="detail-" state={saveState} onRetry={() => autosaveRef.current?.retry()} />
+            {saveState.kind === 'conflict' && <p role="alert" className="text-xs text-amber-200">Your changes are kept in this browser, not saved. Close this summary to reapply them, keep them aside, or load the saved version.</p>}
+            {ruleProblem && <p role="alert" className="text-xs text-amber-200">{ruleProblem} This Draft cannot be saved until it is fixed.</p>}
+            {archival && <p role={archival.kind === 'failed' ? 'alert' : 'status'} className="text-xs text-amber-200">{archival.text}</p>}
+            {personal && learning.failed && <p role="alert" className="text-xs text-red-300">A learning action failed. Close this summary to see the learning status and retry.</p>}
+          </>}
           allSkills={skills}
           connections={connections}
           connectionRejection={connectionRejection}
@@ -738,9 +752,9 @@ function DraftStatusChip({ skill }: { skill: PathSkill | undefined }) {
 }
 
 /** Tells the owner whether the local document is saved; nothing short of a backend acceptance says so. */
-function SaveStatus({ state, onRetry }: { state: SaveState; onRetry: () => void }) {
+function SaveStatus({ state, onRetry, prefix = '' }: { state: SaveState; onRetry: () => void; prefix?: string }) {
   const text = {
-    saved: `Saved · revision ${state.revision}`,
+    saved: 'Saved',
     dirty: 'Unsaved changes',
     saving: 'Saving…',
     conflict: 'Not saved: this Path was changed elsewhere',
@@ -749,14 +763,14 @@ function SaveStatus({ state, onRetry }: { state: SaveState; onRetry: () => void 
   }[state.kind]
   const tone = state.kind === 'saved' ? 'text-emerald-300 border-emerald-800/60' : state.kind === 'dirty' || state.kind === 'saving' ? 'text-slate-300 border-slate-700' : 'text-red-300 border-red-800/70'
   return (
-    <div className="flex items-center gap-2 text-xs">
-      <span id="save-status" role="status" data-state={state.kind} data-revision={state.revision} className={`px-2 py-1 rounded-lg border bg-slate-950/80 ${tone}`}>
+    <div className="flex flex-wrap items-center gap-2 text-xs">
+      <span id={`${prefix}save-status`} role="status" data-state={state.kind} data-revision={state.revision} className={`px-2 py-1 rounded-lg border bg-slate-950/80 ${tone}`}>
         {text}
       </span>
       {(state.kind === 'rejected' || state.kind === 'failed') && (
         <>
-          <span id="save-error" role="alert" className="text-red-300 max-w-[20rem] truncate" title={state.detail}>{state.detail}</span>
-          <button id="retry-save-btn" onClick={onRetry} className="text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-1 rounded-lg cursor-pointer">Retry</button>
+          <span id={`${prefix}save-error`} role="alert" className="text-red-300 break-words" title={state.detail}>{state.detail}</span>
+          <button id={`${prefix}retry-save-btn`} onClick={onRetry} className="text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-1 rounded-lg cursor-pointer">Retry</button>
         </>
       )}
     </div>

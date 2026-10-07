@@ -88,9 +88,6 @@ export const SkillCardOverlay: React.FC<SkillCardOverlayProps> = ({
             </h3>
           </div>
 
-          <span className="text-[10px] text-slate-500 font-mono truncate">
-            {label.card_id}
-          </span>
         </div>
       )),
     [labels, status]
