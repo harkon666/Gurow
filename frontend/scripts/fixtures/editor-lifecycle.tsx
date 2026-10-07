@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { StrictMode, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { WebGpuEditor, type WebGpuEditorActions } from '../../src/components/editor/WebGpuEditor'
 import '../../src/styles.css'
@@ -30,4 +30,5 @@ function Fixture() {
     </div>
   </>
 }
-createRoot(document.getElementById('root')!).render(<Fixture />)
+// Match TanStack Start's development entry: effects mount/clean up/remount while Wasm is loading.
+createRoot(document.getElementById('root')!).render(<StrictMode><Fixture /></StrictMode>)

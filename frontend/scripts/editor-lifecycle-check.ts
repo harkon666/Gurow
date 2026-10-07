@@ -135,7 +135,7 @@ try {
         assert.deepEqual(errors, [])
         console.log(`PASS ${name}: early input, load identity, camera, remount${backend === 'software-webgpu' ? ', drag/undo and 80ms pre-paint completion' : ''}`)
       } catch (error) {
-        failures.push(`${name}: ${String(error)}`)
+        failures.push(`${name}: ${String(error)}; browser errors: ${JSON.stringify(errors)}`)
         console.error(`FAIL ${failures.at(-1)}`)
       } finally { await page.close() }
     }

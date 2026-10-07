@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import type { WasmEditor } from '../../pkg/editor_wasm'
+import { loadWasmEditor } from './loadWasmEditor'
 import {
   EditorCommandSchema,
   EditorEventsSchema,
@@ -439,8 +440,7 @@ export function useWasmEditor({
     async function init() {
       if (typeof window === 'undefined') return
 
-      const wasmModule = await import('../../pkg/editor_wasm.js')
-      await wasmModule.default()
+      const wasmModule = await loadWasmEditor()
       if (!active) return
 
       if (!('gpu' in navigator) || !(navigator as any).gpu) {
@@ -506,7 +506,12 @@ export function useWasmEditor({
       }
     }
 
-    init()
+    void init().catch((err: unknown) => {
+      if (!active) return
+      // A module/CPU startup failure is not merely a renderer failure: without
+      // an engine, keep editing disabled rather than reporting a usable fallback.
+      setEngineError(`Editor initialization failed: ${err instanceof Error ? err.message : String(err)}`)
+    })
 
     return () => {
       active = false
@@ -872,7 +877,7 @@ export function useWasmEditor({
     setIsRecovering(true)
     setRecoveryError(null)
     try {
-      const wasmModule = await import('../../pkg/editor_wasm.js')
+      const wasmModule = await loadWasmEditor()
       if (editorRef.current !== editor) return false
       // Asynchronously build renderer without borrowing editor (Spec 1: prevents unsafe aliasing)
       const attempt = beginGpuAttempt()
