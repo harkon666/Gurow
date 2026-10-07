@@ -18,6 +18,8 @@ import { copySkills, copyTask, type ContentKind, type ReuseContent } from './reu
 import { ReusePanel } from './ReusePanel'
 import { ArchiveTaskControl, RetainedTasks, type RetainedTask } from './Archival'
 import { DeleteSkillControl } from './Deletion'
+import { TaskBoard } from '../board/TaskBoard'
+import { usePersonalBoards } from './personalBoards'
 
 const AUTOSAVE_DELAY_MS = 500
 
@@ -154,6 +156,23 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
   const local = useRef({ skills, title, goal })
   const actionsRef = useRef<WebGpuEditorActions | null>(null)
   const autosaveRef = useRef<Autosave<LocalDocument> | null>(null)
+  /** Each Skill's Task IDs in the document the backend last accepted from this tab. */
+  const savedTasks = useRef(new Map(initial.application.skills.map((skill) => [skill.id, skill.tasks.map((task) => task.id)])))
+  // Personal Task Boards (ADR 0027): their arrangement is saved apart from the document, against its own revision.
+  const boards = usePersonalBoards({
+    pathId,
+    enabled: personal,
+    tasksOf: (skillId) => local.current.skills.find((skill) => skill.id === skillId)?.tasks.map((task) => task.id) ?? [],
+    savedTasksOf: (skillId) => savedTasks.current.get(skillId) ?? [],
+    // Read again rather than taking the board's answer: a reward change answered meanwhile may be newer.
+    learningChanged: () => void learningRef.current?.refresh(),
+  })
+  const documentAccepted = (document: EditablePathDocument) => {
+    savedTasks.current = new Map(document.application.skills.map((skill) => [skill.id, skill.tasks.map((task) => task.id)]))
+    boards.documentAccepted()
+  }
+  /** The last Task deleted from the open board, with what an undo brings back. */
+  const [boardDeletion, setBoardDeletion] = useState<{ skillId: string; task: PathTask; index: number; columnId: string; columnName: string; columnIndex: number } | null>(null)
 
   // Learning records are the Path's own (ADR 0009), read and changed apart from its document.
   useEffect(() => {
@@ -236,8 +255,11 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
     save: saveDocument,
     revisionOf: (document) => document.learningPath.revision,
     show: (document) => showAccepted(document),
-    // Skills and Tasks a save added can now be tracked.
-    onAccepted: () => void learningRef.current?.refresh(),
+    // Skills and Tasks a save added can now be tracked, and the boards know which Tasks the backend holds.
+    onAccepted: (document) => {
+      documentAccepted(document)
+      void learningRef.current?.refresh()
+    },
   })
 
   useEffect(() => {
@@ -256,7 +278,7 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
   useLayoutEffect(() => () => autosaveRef.current?.close(), [])
 
   // Closing or reloading the page with work the backend has not accepted asks first.
-  const unsaved = saveState.kind !== 'saved'
+  const unsaved = saveState.kind !== 'saved' || boards.pending
   useEffect(() => {
     if (!unsaved) return
     const warn = (event: BeforeUnloadEvent) => event.preventDefault()
@@ -357,10 +379,11 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
    * holds the kept-work session meanwhile: the editor is locked, and an edit that still
    * reaches it is kept for reapplying rather than replaced by the answered document.
    */
-  const handleArchive = async (taskId: string, title: string) => {
-    if (saveState.kind !== 'saved') return
+  const handleArchive = async (taskId: string, title: string): Promise<boolean> => {
+    if (saveState.kind !== 'saved') return false
     setArchival(null)
-    reselect.current = selectedSkill?.id ?? null
+    // From an open board, the board stays in front; the summary is not reopened over it.
+    reselect.current = boards.openId ? null : selectedSkill?.id ?? null
     archivalHold.current = { active: true, edited: false }
     const outcome = await kept.accept(async () => {
       const result = await mode.archiveTask(pathId, taskId, saveState.revision)
@@ -373,12 +396,16 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
     // Shown, the answered document replaced the editor and kept any later edit for reapplying; otherwise the edit is saved now.
     if (outcome.kind !== 'shown' && archivalHold.current.edited) autosaveRef.current?.edit()
     if (outcome.kind !== 'shown') reselect.current = null
-    if (outcome.kind === 'failed') return setArchival({ kind: 'failed', text: `Not archived: ${outcome.detail}.` })
+    if (outcome.kind === 'failed') {
+      setArchival({ kind: 'failed', text: `Not archived: ${outcome.detail}.` })
+      return false
+    }
     if (outcome.kind === 'shown') {
       setArchival({ kind: 'done', text: personal
         ? `Archived “${title}”. Its completion and XP stay in this Path's history.`
         : `Archived “${title}” from this Draft. ${retainedBy(taskId)} and its learners' work keep it.` })
     }
+    return outcome.kind === 'shown'
   }
 
   const selectedId = selectedSkill?.id ?? null
@@ -433,6 +460,7 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
 
   /** Shows an accepted document, replacing whatever the editor showed, and autosaves from its revision. */
   const showAccepted = (document: EditablePathDocument) => {
+    documentAccepted(document)
     setLoadError(null)
     // The new document starts a new editing history: no deletion can be undone any more.
     deletedSkills.current.clear()
@@ -549,6 +577,71 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
   const act = (action: LearningAction) => void learningRef.current?.perform(action)
   // Undo or redo can bring back a connection the Draft rules forbid; it is shown here and refused by the backend.
   const ruleProblem = useMemo(() => (personal ? null : draftRuleProblem(skills, connections)), [personal, skills, connections])
+
+  // The open Task Board follows this tab's Tasks at once, and reads the board again after the
+  // document or a completion changed it on the backend.
+  const boardSkill = skills.find((skill) => skill.id === boards.openId)
+  const boardSync = boards.sync
+  useEffect(() => { boardSync?.kick() }, [skills, boardSync])
+  const boardCompletion = (records?.tasks ?? []).filter((task) => task.skillId === boards.openId && !task.archivedAt).map((task) => `${task.taskId}:${task.completed}`).join(',')
+  useEffect(() => { void boardSync?.refresh() }, [saveState.revision, boardCompletion, boardSync])
+  // A board whose Skill left the document (deleted, or replaced by a reloaded document) closes.
+  useEffect(() => { if (boards.openId && !boardSkill) boards.close() }, [boards, boardSkill])
+  const boardLearningSkill = boards.openId ? learningSkill(boards.openId) : undefined
+  const changeBoardTasks = (skillId: string, change: (tasks: PathTask[]) => PathTask[]) =>
+    changeSkills((all) => all.map((skill) => (skill.id === skillId ? { ...skill, tasks: change(skill.tasks) } : skill)))
+  const addBoardTask = (columnId: string, taskTitle: string, description: string) => {
+    if (!boardSkill || !boardSync) return
+    const id = crypto.randomUUID()
+    changeBoardTasks(boardSkill.id, (tasks) => [...tasks, { ...mode.newTask(id), title: taskTitle, description }])
+    // Placed once the document save added it to the board.
+    boardSync.perform({ kind: 'move', taskId: id, columnId, index: Number.MAX_SAFE_INTEGER, columnName: boards.view?.columns.find((c) => c.id === columnId)?.name })
+  }
+  /** Deletes a Task without history through the ordinary document save; undo is another ordinary save. */
+  const deleteBoardTask = (taskId: string) => {
+    if (!boardSkill || !boards.view) return
+    const index = boardSkill.tasks.findIndex((task) => task.id === taskId)
+    const column = boards.view.columns.find((c) => c.taskIds.includes(taskId))
+    if (index < 0 || !column) return
+    setBoardDeletion({ skillId: boardSkill.id, task: boardSkill.tasks[index], index, columnId: column.id, columnName: column.name, columnIndex: column.taskIds.indexOf(taskId) })
+    changeBoardTasks(boardSkill.id, (tasks) => tasks.filter((task) => task.id !== taskId))
+    // Its pending placements go with it (an undo places it again); other intents stay.
+    boards.sync?.forgetTask(taskId)
+  }
+  const undoBoardDeletion = () => {
+    const deleted = boardDeletion
+    if (!deleted || !boardSync || boards.openId !== deleted.skillId) return
+    setBoardDeletion(null)
+    changeBoardTasks(deleted.skillId, (tasks) => {
+      const restored = [...tasks]
+      restored.splice(Math.min(deleted.index, restored.length), 0, deleted.task)
+      return restored
+    })
+    boardSync.perform({ kind: 'move', taskId: deleted.task.id, columnId: deleted.columnId, index: deleted.columnIndex, columnName: deleted.columnName })
+  }
+  /** Deletion where the Task has no history; otherwise the existing revision-checked archival. */
+  const boardRemoval = (taskId: string) => {
+    if (!records) return { kind: 'unknown' as const }
+    const saved = records.tasks.some((task) => task.taskId === taskId)
+    if (saved && records.historyTaskIds.includes(taskId)) {
+      const task = boardSkill?.tasks.find((t) => t.id === taskId)
+      return {
+        kind: 'archive' as const,
+        control: task && (
+          <ArchiveTaskControl
+            prefix="board-"
+            taskId={taskId}
+            title={task.title}
+            consequence="It leaves the board and this Path's editing; its completion, XP and your Mastery stay as they are."
+            blocked={archiveBlocked}
+            busy={keptView.busy}
+            onArchive={() => void handleArchive(taskId, task.title).then((archived) => { if (archived) boardSync?.forgetTask(taskId) })}
+          />
+        ),
+      }
+    }
+    return { kind: 'delete' as const, onDelete: () => deleteBoardTask(taskId) }
+  }
 
   return (
     <div id="path-editor" data-path-id={pathId} data-gpu-status={gpuStatus} data-reapplying={reapplying} className="flex-1 min-h-0 flex flex-col">
@@ -718,6 +811,12 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
           onUpdateOutcome={handleUpdateOutcome}
           onAddTask={handleAddTask}
           skillActions={selected ? deleteControl(selected) : null}
+          boardAction={personal && selected ? (
+            <button id="open-board-btn" onClick={() => { setBoardDeletion(null); boards.open(selected.id) }}
+              className="w-full rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium py-2">
+              Open board
+            </button>
+          ) : null}
           learning={!selectedId ? null : (
             <>
               {personal
@@ -733,6 +832,37 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
               return task && <><TaskDraftRules task={task} onReward={(xpReward) => handleTaskReward(taskId, xpReward)} />{archiveControl(taskId)}</>
             }}
         />
+        {personal && boardSkill && boards.view && (
+          <TaskBoard
+            skillTitle={boardSkill.title}
+            view={boards.view}
+            tasks={boardSkill.tasks}
+            completed={(taskId) => records?.tasks.find((task) => task.taskId === taskId)?.completed}
+            columnNote={(column) => (column.completion ? 'Moving a Task here completes it; moving it out undoes completion. Mastery stays your own declaration.' : null)}
+            effectText={(taskId, completed) => {
+              const reward = records?.tasks.find((task) => task.taskId === taskId)?.xpReward ?? 0
+              return completed ? `+${reward} XP` : `−${reward} XP (XP Correction)`
+            }}
+            completionBlocked={boardLearningSkill && !boardLearningSkill.access ? 'This Skill is locked, so its Tasks cannot be completed until it opens.' : null}
+            onOp={(op) => boardSync?.perform(op)}
+            onRetry={() => boardSync?.retry()}
+            onDiscard={() => boardSync?.discard()}
+            onReapply={() => boardSync?.reapply()}
+            onRedirect={(op, columnId, columnName) => boardSync?.redirect(op, columnId, columnName)}
+            onDiscardUnapplied={() => boardSync?.discardUnapplied()}
+            onReload={() => void boardSync?.refresh()}
+            onClose={() => { setBoardDeletion(null); boards.close() }}
+            onAddTask={addBoardTask}
+            onEditTask={(taskId, change) => changeBoardTasks(boardSkill.id, (tasks) => tasks.map((task) => (task.id === taskId ? { ...task, ...change } : task)))}
+            removal={boardRemoval}
+            deletion={boardDeletion && boardDeletion.skillId === boardSkill.id ? { title: boardDeletion.task.title, onUndo: undoBoardDeletion } : null}
+            taskExtra={(taskId) => <TaskLearning prefix="board-" view={learning} taskId={taskId} onAction={act} />}
+            statusExtra={<>
+              <span id="board-path-xp" data-xp={records?.xp ?? ''} className="text-xs px-2 py-1 rounded-lg border border-sky-800/60 text-sky-200">{records ? `Path XP ${records.xp}` : 'Path XP …'}</span>
+              <span id="board-document-status" data-state={saveState.kind} className="text-xs text-slate-400">{saveState.kind === 'saved' ? 'Tasks saved' : saveState.kind === 'saving' || saveState.kind === 'dirty' ? 'Saving Tasks…' : 'Tasks not saved: go back to the canvas to resolve it'}</span>
+            </>}
+          />
+        )}
         {reuseOpen && (
           <ReusePanel
             destination={mode.kind}

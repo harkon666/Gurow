@@ -159,6 +159,8 @@ export interface LearningState {
   overrideHistory: { skillId: string; occurredAt: string; action: 'grant' | 'revoke' }[]
   /** Skills with learning history (ADR 0018): a save cannot delete them. */
   historySkillIds: string[]
+  /** Tasks with learning history: a save cannot delete them; they are archived instead. */
+  historyTaskIds: string[]
 }
 
 /** One owner action on the Path's learning records; every one is idempotent, so a retry never multiplies it. */
@@ -185,6 +187,25 @@ export function performLearningAction(pathId: string, action: LearningAction) {
     case 'threshold': return call<Changed>(target('skills', action.skillId, 'xp-threshold'), { method: 'PUT', body: { xpThreshold: action.xpThreshold } })
   }
 }
+
+/** One Task Board Column: its identity and role (never its name) decide what membership means (ADR 0027). */
+export interface TaskBoardColumn { id: string; name: string; completion: boolean; taskIds: string[] }
+/** One Skill's Task Board, saved whole against its own `revision`. */
+export interface TaskBoard { skillId: string; revision: number; columns: TaskBoardColumn[] }
+
+const boardRoute = (pathId: string, skillId: string) => `${learningRoute(pathId)}/skills/${encodeURIComponent(skillId)}/board`
+
+/** Opens a personal Skill's Task Board; its first opening creates it from the existing Tasks. */
+export const readPersonalBoard = (pathId: string, skillId: string) => call<{ board: TaskBoard }>(boardRoute(pathId, skillId))
+
+/**
+ * Saves the whole board based on `expectedRevision`. Cards crossing the Completion
+ * Column complete or uncomplete their Tasks in the same change. A stale save answers
+ * 409 with the accepted board in `body.current`; repeating the accepted arrangement
+ * answers `changed: false`.
+ */
+export const savePersonalBoard = (pathId: string, skillId: string, expectedRevision: number, columns: TaskBoardColumn[]) =>
+  call<{ changed: boolean; board: TaskBoard; learningState: LearningState }>(boardRoute(pathId, skillId), { method: 'PUT', body: { expectedRevision, columns } })
 
 /** A Coach Workspace the signed-in Account owns (ADR 0011). */
 export interface CoachWorkspaceSummary { id: string; name: string; createdAt: string }

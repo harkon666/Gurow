@@ -11,6 +11,8 @@ import * as invitations from './invitations'
 import { changeAccessOverride } from './overrides'
 import { changeEnrollmentStatus } from './lifecycle'
 import * as personal from './personal'
+import { readPersonalBoard, savePersonalBoard, type BoardRefusal } from './personalBoard'
+import { parseBoardInput } from './taskBoards'
 import { listVersionEnrollments, readLearningState, recordReview, revokeApproval, type ReviewContents } from './reviews'
 import { listReuseSources } from './reuse'
 import { readDraft, readSubmission, saveDraft, sendRevision, startTask, type SubmissionContents, type SubmissionRefusal } from './submissions'
@@ -41,6 +43,16 @@ const PERSONAL_REFUSAL_STATUS: Record<personal.PersonalRefusal, ContentfulStatus
   task_not_found: 404,
   skill_not_found: 404,
   task_archived: 409,
+  skill_locked: 403,
+}
+
+const BOARD_REFUSAL_STATUS: Record<BoardRefusal, ContentfulStatusCode> = {
+  learning_path_not_found: 404,
+  skill_not_found: 404,
+  stale_revision: 409,
+  board_task_missing: 422,
+  board_task_unknown: 422,
+  column_owned_elsewhere: 422,
   skill_locked: 403,
 }
 
@@ -430,6 +442,33 @@ export function createApp({ db, identity, auth, delivery }: { db: Database; iden
       })
     }
   }
+
+  // A Skill's Task Board (ADR 0027): opened (and created once) by reading it, saved whole against
+  // its own revision. A stale save answers 409 with the accepted board; a repeat of the accepted
+  // arrangement answers 200 with `changed: false`, so a retry after a lost answer changes nothing again.
+  const boardRoute = `${personalPath}/skills/:skillId/board`
+  app.get(boardRoute, async (c) => {
+    const target = personalTarget(c.req.param('pathId'), c.req.param('skillId'))
+    if (!target) return c.json({ error: 'learning_path_not_found' }, 404)
+    const result = await readPersonalBoard(db, target.pathId, target.targetId, c.get('accountId'))
+    if (!result.ok) return c.json({ error: result.refusal }, 404)
+    return c.json({ board: result.board })
+  })
+
+  app.put(boardRoute, async (c) => {
+    const target = personalTarget(c.req.param('pathId'), c.req.param('skillId'))
+    if (!target) return c.json({ error: 'learning_path_not_found' }, 404)
+    const input = parseBoardInput(await c.req.json().catch(() => null), { completionColumn: true })
+    if (!input.ok) {
+      // An invalid board for someone else's Path or Skill is still reported as not found.
+      const owned = await readPersonalBoard(db, target.pathId, target.targetId, c.get('accountId'))
+      if (!owned.ok) return c.json({ error: owned.refusal }, 404)
+      return c.json({ error: 'invalid_board', detail: input.detail }, 422)
+    }
+    const result = await savePersonalBoard(db, target.pathId, target.targetId, c.get('accountId'), input.value)
+    if (!result.ok) return c.json({ error: result.refusal, detail: result.detail, ...(result.current ? { current: result.current } : {}) }, BOARD_REFUSAL_STATUS[result.refusal])
+    return c.json({ changed: result.changed, board: result.board, learningState: result.learningState })
+  })
 
   // Reuse (ADR 0004): the Paths and Versions the Account may copy Skills and Tasks from, its own only.
   app.use('/reuse/*', authenticate)

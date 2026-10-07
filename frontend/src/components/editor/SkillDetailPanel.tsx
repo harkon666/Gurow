@@ -39,6 +39,8 @@ interface SkillDetailPanelProps {
   learning?: React.ReactNode
   /** Actions on the selected Skill itself (deletion), shown under its title. */
   skillActions?: React.ReactNode
+  /** The way to the Skill's Task Board, shown first under its title. */
+  boardAction?: React.ReactNode
   /** Learning controls shown inside each Task card. */
   renderTaskExtra?: (taskId: string) => React.ReactNode
 }
@@ -94,6 +96,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
   onAddTask,
   learning,
   skillActions,
+  boardAction,
   renderTaskExtra,
 }) => {
   const [selectedTargetId, setSelectedTargetId] = useState<string>('')
@@ -156,6 +159,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
           </h2>
 
           <span id="selected-skill-id" hidden>{selectedSkill.id}</span>
+          {boardAction && <div className="mt-3">{boardAction}</div>}
           {skillActions && <div className="mt-2 flex flex-col">{skillActions}</div>}
         </div>
 

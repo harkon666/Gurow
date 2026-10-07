@@ -2,6 +2,7 @@ import { and, asc, desc, eq, sql, type SQL } from 'drizzle-orm'
 import type { Database } from './db/client'
 import { lockedTimestamp } from './db/clock'
 import { learningPaths, personalMasteryEvents, personalOverrideRecords, personalPrerequisites, personalSkills, personalTasks, personalWorkspaces, personalXpEvents } from './db/schema'
+import { placeForCompletion } from './personalBoardMembership'
 import { personalHistory } from './retention'
 
 export type Tx = Parameters<Parameters<Database['transaction']>[0]>[0]
@@ -53,9 +54,17 @@ async function readState(tx: Tx, learningPathId: string) {
     ...await derivePersonalState(tx, learningPathId),
     xpHistory: await tx.select().from(personalXpEvents).where(eq(personalXpEvents.learningPathId, learningPathId)).orderBy(asc(personalXpEvents.id)),
     masteryHistory: await tx.select().from(personalMasteryEvents).where(eq(personalMasteryEvents.learningPathId, learningPathId)).orderBy(asc(personalMasteryEvents.id)),
-    // The Skills with learning history: a save cannot delete them (ADR 0018), so the editor offers no deletion.
-    historySkillIds: [...(await personalHistory(tx, learningPathId)).skills].sort(),
+    ...await historyIds(tx, learningPathId),
   }
+}
+
+/**
+ * The Skills and Tasks with learning history: a save cannot delete them (ADR 0018), so
+ * the editor offers no deletion of such a Skill, and the board archives such a Task.
+ */
+async function historyIds(tx: Tx, learningPathId: string) {
+  const history = await personalHistory(tx, learningPathId)
+  return { historySkillIds: [...history.skills].sort(), historyTaskIds: [...history.tasks].sort() }
 }
 
 export type PersonalLearningState = Awaited<ReturnType<typeof readState>>
@@ -76,7 +85,7 @@ async function act(db: Database, learningPathId: string, accountId: string, chan
   })
 }
 
-async function activeTask(tx: Tx, learningPathId: string, taskId: string) {
+export async function activeTask(tx: Tx, learningPathId: string, taskId: string) {
   const [task] = await tx.select().from(personalTasks).where(and(eq(personalTasks.learningPathId, learningPathId), eq(personalTasks.taskId, taskId)))
   if (!task) return { ok: false, refusal: 'task_not_found' } as const
   // Archival removes the Task from active use and freezes its retained contribution.
@@ -84,7 +93,7 @@ async function activeTask(tx: Tx, learningPathId: string, taskId: string) {
   return { ok: true, task } as const
 }
 
-async function hasAccess(tx: Tx, learningPathId: string, skillId: string) {
+export async function hasAccess(tx: Tx, learningPathId: string, skillId: string) {
   return (await derivePersonalState(tx, learningPathId)).skills.find((skill) => skill.skillId === skillId)?.access ?? false
 }
 
@@ -95,24 +104,45 @@ async function recordXp(tx: Tx, task: typeof personalTasks.$inferSelect, account
   await tx.insert(personalXpEvents).values({ learningPathId: task.learningPathId, taskId: task.taskId, actorAccountId: accountId, occurredAt, cause, amount, kind: cause === 'completion' && !prior ? 'award' : 'correction' })
 }
 
-/** Marking complete needs current Access but no evidence or review, and never declares Mastery. */
+/**
+ * Completes or uncompletes one active Task and records the change in its contribution:
+ * the first completion is its XP Award, every later change a correction. Callers check
+ * Access before completing (undoing is a correction, allowed while locked) and keep the
+ * Task's board card on the matching side of the Completion Column.
+ */
+export async function recordCompletion(tx: Tx, task: typeof personalTasks.$inferSelect, accountId: string, now: SQL, completed: boolean) {
+  if ((task.completedAt !== null) === completed) return
+  if (completed) {
+    await tx.update(personalTasks).set({ completedAt: now, startedAt: sql`coalesce(${personalTasks.startedAt}, ${now})` }).where(eq(personalTasks.taskId, task.taskId))
+    await recordXp(tx, task, accountId, now, 'completion', task.xpReward)
+  } else {
+    await tx.update(personalTasks).set({ completedAt: null }).where(eq(personalTasks.taskId, task.taskId))
+    await recordXp(tx, task, accountId, now, 'completion_undone', -task.xpReward)
+  }
+}
+
+/**
+ * Marking complete needs current Access but no evidence or review, and never declares
+ * Mastery. It is the same completion a move into the Completion Column records, so an
+ * opened board shows the Task's card in that column (ADR 0027).
+ */
 export const completeTask = (db: Database, learningPathId: string, taskId: string, accountId: string) => act(db, learningPathId, accountId, async (tx, now) => {
   const found = await activeTask(tx, learningPathId, taskId)
   if (!found.ok) return found
   if (found.task.completedAt) return { ok: true, changed: false }
   if (!await hasAccess(tx, learningPathId, found.task.skillId)) return { ok: false, refusal: 'skill_locked' }
-  await tx.update(personalTasks).set({ completedAt: now, startedAt: sql`coalesce(${personalTasks.startedAt}, ${now})` }).where(eq(personalTasks.taskId, taskId))
-  await recordXp(tx, found.task, accountId, now, 'completion', found.task.xpReward)
+  await recordCompletion(tx, found.task, accountId, now, true)
+  await placeForCompletion(tx, learningPathId, found.task.skillId, taskId, true)
   return { ok: true, changed: true }
 })
 
-/** Undoing is a correction, so it is allowed while locked; started work and Mastery stay. */
+/** Undoing is a correction, so it is allowed while locked; started work and Mastery stay. The card leaves the Completion Column. */
 export const undoTaskCompletion = (db: Database, learningPathId: string, taskId: string, accountId: string) => act(db, learningPathId, accountId, async (tx, now) => {
   const found = await activeTask(tx, learningPathId, taskId)
   if (!found.ok) return found
   if (!found.task.completedAt) return { ok: true, changed: false }
-  await tx.update(personalTasks).set({ completedAt: null }).where(eq(personalTasks.taskId, taskId))
-  await recordXp(tx, found.task, accountId, now, 'completion_undone', -found.task.xpReward)
+  await recordCompletion(tx, found.task, accountId, now, false)
+  await placeForCompletion(tx, learningPathId, found.task.skillId, taskId, false)
   return { ok: true, changed: true }
 })
 

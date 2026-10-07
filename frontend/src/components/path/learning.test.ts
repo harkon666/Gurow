@@ -106,4 +106,21 @@ describe('personal learning records', () => {
     await h.settle()
     expect(h.last().records).toBeNull()
   })
+
+  it('a board save accepted while a reward change is pending never hides the newer reward result (UX03 AC3/AC9)', async () => {
+    const h = harness()
+    void h.records.refresh(); h.calls[0].answer(ok(20)); await h.settle()
+    void h.records.perform({ kind: 'reward 35' })
+    // The board save is accepted meanwhile: its records are read again, not taken from its answer.
+    void h.records.refresh()
+    expect(h.calls).toHaveLength(2)
+    h.calls[1].answer(ok(35))
+    await h.settle()
+    expect(h.last().records).toEqual({ xp: 35 })
+    // The read waited for the reward answer, so it sees the state after both changes.
+    expect(h.calls[2].what).toBe('read')
+    h.calls[2].answer(ok(35))
+    await h.settle()
+    expect(h.last()).toMatchObject({ records: { xp: 35 }, pending: null, failed: null })
+  })
 })

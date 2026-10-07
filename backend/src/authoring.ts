@@ -4,6 +4,7 @@ import { lockedTimestamp } from './db/clock'
 import { learningPaths, personalPrerequisites, personalSkillCards, personalSkills, personalTasks, personalWorkspaces } from './db/schema'
 import { lockOwnedPath, readPersonalLearningStateIn, type Tx } from './personal'
 import { claimLogicalIds } from './logicalIds'
+import { addCards, deleteBoards, removeCards } from './personalBoardMembership'
 import { personalHistory } from './retention'
 
 /**
@@ -325,6 +326,8 @@ async function writeDocument(tx: Tx, path: typeof learningPaths.$inferSelect, in
   if (newTasks.length > 0) {
     changed = true
     await tx.insert(personalTasks).values(newTasks.map((task) => ({ taskId: task.id, learningPathId: path.id, skillId: task.skillId, title: task.title, description: task.description, ordinal: task.ordinal })))
+    // A Task added by any entry point (the board, the Skill summary, a copy, an undone deletion) gets its card.
+    await addCards(tx, path.id, newTasks.map((task) => ({ taskId: task.id, skillId: task.skillId })))
   }
 
   // Canvas Layout: one card per Skill, written only where it moved.
@@ -357,11 +360,13 @@ async function writeDocument(tx: Tx, path: typeof learningPaths.$inferSelect, in
   // Its logical IDs stay this Path's, so an editor undo can bring it back.
   if (removedTasks.length > 0) {
     changed = true
+    await removeCards(tx, path.id, removedTasks.map((task) => task.taskId))
     await tx.delete(personalTasks).where(and(eq(personalTasks.learningPathId, path.id), inArray(personalTasks.taskId, removedTasks.map((task) => task.taskId))))
   }
   if (removedSkills.length > 0) {
     changed = true
     const ids = removedSkills.map((skill) => skill.skillId)
+    await deleteBoards(tx, path.id, ids)
     await tx.delete(personalSkillCards).where(and(eq(personalSkillCards.learningPathId, path.id), inArray(personalSkillCards.skillId, ids)))
     await tx.delete(personalSkills).where(and(eq(personalSkills.learningPathId, path.id), inArray(personalSkills.skillId, ids)))
   }
@@ -392,6 +397,8 @@ export async function archivePersonalTask(db: Database, learningPathId: string, 
     let current = path
     if (!task.archivedAt) {
       await tx.update(personalTasks).set({ archivedAt: await lockedTimestamp(tx) }).where(eq(personalTasks.taskId, taskId))
+      // Archived records stay reachable as history, never as an active card.
+      await removeCards(tx, path.id, [taskId])
       ;[current] = await tx.update(learningPaths).set({ revision: sql`${learningPaths.revision} + 1` }).where(eq(learningPaths.id, path.id)).returning()
     }
     return { ok: true, changed: !task.archivedAt, document: await readDocument(tx, current), learningState: await readPersonalLearningStateIn(tx, path.id) } as const

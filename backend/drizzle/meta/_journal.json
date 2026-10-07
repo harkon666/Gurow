@@ -113,6 +113,13 @@
       "when": 1791299542244,
       "tag": "0015_version_layout_revision",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1791374823304,
+      "tag": "0016_personal_task_boards",
+      "breakpoints": true
     }
   ]
 }

@@ -6,8 +6,10 @@ import { useState } from 'react'
  * and says what stays. It is offered only where the owner can edit, and only while
  * the document is saved, because archival is based on the accepted revision.
  */
-export function ArchiveTaskControl({ taskId, title, consequence, blocked, busy, onArchive }: {
+export function ArchiveTaskControl({ taskId, title, consequence, blocked, busy, onArchive, prefix = '' }: {
   taskId: string
+  /** Keeps IDs unique where the control is shown twice. */
+  prefix?: string
   title: string
   /** What archiving keeps, in the context's terms. */
   consequence: string
@@ -20,7 +22,7 @@ export function ArchiveTaskControl({ taskId, title, consequence, blocked, busy, 
   if (!confirming) {
     return (
       <button
-        id={`task-archive-${taskId}`}
+        id={`${prefix}task-archive-${taskId}`}
         onClick={() => setConfirming(true)}
         disabled={blocked !== null || busy}
         title={blocked ?? `Archive “${title}”`}
@@ -31,18 +33,18 @@ export function ArchiveTaskControl({ taskId, title, consequence, blocked, busy, 
     )
   }
   return (
-    <div id={`task-archive-confirm-${taskId}`} role="alertdialog" aria-label={`Archive “${title}”`} className="flex flex-col gap-1.5 rounded border border-amber-900/70 bg-amber-950/30 p-2 text-[11px] text-amber-100">
+    <div id={`${prefix}task-archive-confirm-${taskId}`} role="alertdialog" aria-label={`Archive “${title}”`} className="flex flex-col gap-1.5 rounded border border-amber-900/70 bg-amber-950/30 p-2 text-[11px] text-amber-100">
       <p>Archive “{title}”? {consequence} Archived Tasks cannot be restored.</p>
       <div className="flex gap-2">
         <button
-          id={`task-archive-confirm-btn-${taskId}`}
+          id={`${prefix}task-archive-confirm-btn-${taskId}`}
           onClick={() => { setConfirming(false); onArchive() }}
           disabled={blocked !== null || busy}
           className="text-[10px] font-medium text-white bg-amber-700 hover:bg-amber-600 disabled:opacity-50 px-2 py-0.5 rounded cursor-pointer"
         >
           Archive
         </button>
-        <button id={`task-archive-cancel-${taskId}`} onClick={() => setConfirming(false)} className="text-[10px] text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-0.5 rounded cursor-pointer">
+        <button id={`${prefix}task-archive-cancel-${taskId}`} onClick={() => setConfirming(false)} className="text-[10px] text-slate-300 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-0.5 rounded cursor-pointer">
           Cancel
         </button>
       </div>

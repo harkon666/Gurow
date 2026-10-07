@@ -437,6 +437,62 @@ export const personalSkillCards = pgTable('personal_skill_cards', {
   check('personal_skill_cards_bounds', sql`abs(${t.x}) <= 1000000 AND abs(${t.y}) <= 1000000`),
 ])
 
+/**
+ * A personal Skill's Task Board (ADR 0027): its ordered columns and card membership,
+ * kept apart from the Path document. `revision` is the expected revision of every
+ * board save (ADR 0016), independent of the Path's content revision. A Skill has no
+ * row until its board is first opened; that opening places its existing Tasks once.
+ */
+export const personalTaskBoards = pgTable('personal_task_boards', {
+  learningPathId: uuid('learning_path_id').notNull(),
+  skillId: uuid('skill_id').notNull(),
+  revision: integer('revision').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ name: 'personal_task_boards_pk', columns: [t.learningPathId, t.skillId] }),
+  foreignKey({ name: 'personal_task_boards_skill_fk', columns: [t.learningPathId, t.skillId], foreignColumns: [personalSkills.learningPathId, personalSkills.skillId] }),
+  check('personal_task_boards_revision_nonnegative', sql`${t.revision} >= 0`),
+])
+
+/**
+ * A Task Board Column. Its identity and `completion` role, not its user-chosen name,
+ * decide what membership means: exactly one column per board is the Completion Column.
+ */
+export const personalBoardColumns = pgTable('personal_board_columns', {
+  id: uuid('id').primaryKey(),
+  learningPathId: uuid('learning_path_id').notNull(),
+  skillId: uuid('skill_id').notNull(),
+  name: text('name').notNull(),
+  completion: boolean('completion').notNull().default(false),
+  position: integer('position').notNull(),
+}, (t) => [
+  unique('personal_board_columns_id_board_key').on(t.id, t.learningPathId, t.skillId),
+  unique('personal_board_columns_position_key').on(t.learningPathId, t.skillId, t.position),
+  uniqueIndex('personal_board_columns_one_completion_key').on(t.learningPathId, t.skillId).where(sql`${t.completion}`),
+  foreignKey({ name: 'personal_board_columns_board_fk', columns: [t.learningPathId, t.skillId], foreignColumns: [personalTaskBoards.learningPathId, personalTaskBoards.skillId] }),
+  check('personal_board_columns_name', sql`length(trim(${t.name})) > 0 AND length(${t.name}) <= 60`),
+])
+
+/**
+ * One active Task's card: the column it sits in and its place there. The card refers
+ * to the Task and never copies its learning records; the foreign keys keep it on its
+ * own Skill's board. A deferred trigger (migration 0016) keeps membership of the
+ * Completion Column equal to the Task's completion and keeps archived Tasks off boards.
+ */
+export const personalBoardCards = pgTable('personal_board_cards', {
+  learningPathId: uuid('learning_path_id').notNull(),
+  skillId: uuid('skill_id').notNull(),
+  taskId: uuid('task_id').notNull(),
+  columnId: uuid('column_id').notNull(),
+  position: integer('position').notNull(),
+}, (t) => [
+  primaryKey({ name: 'personal_board_cards_pk', columns: [t.learningPathId, t.taskId] }),
+  unique('personal_board_cards_position_key').on(t.columnId, t.position),
+  foreignKey({ name: 'personal_board_cards_task_fk', columns: [t.learningPathId, t.taskId], foreignColumns: [personalTasks.learningPathId, personalTasks.taskId] }),
+  foreignKey({ name: 'personal_board_cards_task_skill_fk', columns: [t.taskId, t.skillId], foreignColumns: [tasks.id, tasks.skillId] }),
+  foreignKey({ name: 'personal_board_cards_column_fk', columns: [t.columnId, t.learningPathId, t.skillId], foreignColumns: [personalBoardColumns.id, personalBoardColumns.learningPathId, personalBoardColumns.skillId] }),
+])
+
 /** ALL prerequisite edges within one personal Path, satisfied by declared Mastery. */
 export const personalPrerequisites = pgTable('personal_prerequisites', {
   learningPathId: uuid('learning_path_id').notNull(),

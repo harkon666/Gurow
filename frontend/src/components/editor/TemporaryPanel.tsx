@@ -25,7 +25,8 @@ export function TemporaryPanel({ title, closeId, onClose, children, initialFocus
     }
   }, [initialFocus])
   return createPortal(
-    <dialog ref={ref} aria-label={title} onCancel={(event) => { event.preventDefault(); close.current() }}
+    // React propagates the cancel event through portals to enclosing dialogs: only this one closes.
+    <dialog ref={ref} aria-label={title} onCancel={(event) => { event.preventDefault(); event.stopPropagation(); close.current() }}
       // Scroll padding keeps content scrolled into view (focus, find) clear of the sticky header.
       className="fixed inset-0 m-auto scroll-pt-16 w-full h-dvh max-w-none max-h-none md:w-[36rem] md:h-auto md:max-h-[88dvh] md:rounded-2xl border border-slate-700 bg-slate-950 text-slate-200 p-0 shadow-2xl backdrop:bg-black/50">
       <div className="sticky top-0 z-10 flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-800 bg-slate-950">

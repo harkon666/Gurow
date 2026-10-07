@@ -163,24 +163,30 @@ export function SkillLearning({ view, skillId, skillTitles, taskTitles, onAction
 }
 
 /** Completion and reward of one Task, inside its Task card. */
-export function TaskLearning({ view, taskId, onAction }: { view: PersonalLearningView; taskId: string; onAction: (action: LearningAction) => void }) {
+export function TaskLearning({ view, taskId, onAction, prefix = '' }: {
+  view: PersonalLearningView
+  taskId: string
+  onAction: (action: LearningAction) => void
+  /** Keeps IDs unique where the same Task's controls are shown twice (the board's details over the Skill summary). */
+  prefix?: string
+}) {
   const records = view.records
   const task: LearningTask | undefined = records?.tasks.find((t) => t.taskId === taskId)
   if (!records || !task) {
-    return <p id={`task-learning-${taskId}`} data-tracked="false" className="text-[10px] text-slate-500 italic">Completion and reward can be tracked once this Task is saved.</p>
+    return <p id={`${prefix}task-learning-${taskId}`} data-tracked="false" className="text-[10px] text-slate-500 italic">Completion and reward can be tracked once this Task is saved.</p>
   }
   const skill = records.skills.find((s) => s.skillId === task.skillId)
   const locked = !skill?.access
   const busy = view.pending !== null
   return (
-    <div id={`task-learning-${taskId}`} data-tracked="true" data-completed={task.completed} className="pt-2 border-t border-slate-700/40 space-y-1.5">
-      <NumberSetter key={`reward:${task.xpReward}`} id={`task-reward-${taskId}`} label="Reward (XP)" value={task.xpReward} disabled={busy} onSet={(xpReward) => onAction({ kind: 'reward', taskId, xpReward })} />
+    <div id={`${prefix}task-learning-${taskId}`} data-tracked="true" data-completed={task.completed} className="pt-2 border-t border-slate-700/40 space-y-1.5">
+      <NumberSetter key={`reward:${task.xpReward}`} id={`${prefix}task-reward-${taskId}`} label="Reward (XP)" value={task.xpReward} disabled={busy} onSet={(xpReward) => onAction({ kind: 'reward', taskId, xpReward })} />
       <div className="flex items-center justify-between gap-2">
-        <span id={`task-contribution-${taskId}`} className={`text-[11px] ${task.completed ? 'text-emerald-300' : 'text-slate-400'}`}>
+        <span id={`${prefix}task-contribution-${taskId}`} className={`text-[11px] ${task.completed ? 'text-emerald-300' : 'text-slate-400'}`}>
           {task.completed ? `Complete · contributes ${task.xpContribution} XP` : 'Not complete · contributes 0 XP'}
         </span>
         <button
-          id={`task-completion-btn-${taskId}`}
+          id={`${prefix}task-completion-btn-${taskId}`}
           disabled={busy || (!task.completed && locked)}
           onClick={() => onAction({ kind: task.completed ? 'undo-completion' : 'complete', taskId })}
           className="text-[11px] text-emerald-100 bg-emerald-900/40 hover:bg-emerald-800/50 border border-emerald-800/70 rounded px-2 py-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
@@ -188,7 +194,7 @@ export function TaskLearning({ view, taskId, onAction }: { view: PersonalLearnin
           {task.completed ? 'Undo completion' : 'Mark complete'}
         </button>
       </div>
-      {!task.completed && locked && <p id={`task-locked-${taskId}`} className="text-[10px] text-red-300/90">This Skill is locked: completing its Tasks waits for Access. Undoing a completion is always possible.</p>}
+      {!task.completed && locked && <p id={`${prefix}task-locked-${taskId}`} className="text-[10px] text-red-300/90">This Skill is locked: completing its Tasks waits for Access. Undoing a completion is always possible.</p>}
       <p className="text-[10px] text-slate-500">Evidence and review are optional. Completing does not declare Mastery.</p>
     </div>
   )

@@ -91,7 +91,8 @@ async function saved(page: Page, revision: number) {
   await page.waitForSelector(`#save-status[data-state="saved"][data-revision="${revision}"]`)
   await state(page, 'saved')
 }
-async function cleanChrome(page: Page, ids: string[]) {
+/** `board`: the context has a Task Board (personal since UX03 #49); Coach and learner boards arrive with UX04/UX05. */
+async function cleanChrome(page: Page, ids: string[], board = false) {
   const body = await page.evaluate(() => document.body.innerText)
   for (const id of ids) {
     if (body.includes(id)) {
@@ -101,7 +102,8 @@ async function cleanChrome(page: Page, ids: string[]) {
       throw new Error(`technical identity is visible: ${id}; nodes ${JSON.stringify(occurrences)}; context ${body.slice(Math.max(0, body.indexOf(id) - 100), body.indexOf(id) + 150)}`)
     }
   }
-  check(!/Rust Owned|React Domain Payload|Simulate GPU Failure|Open board/i.test(body), 'implementation chrome or a premature board action is visible')
+  check(!/Rust Owned|React Domain Payload|Simulate GPU Failure/i.test(body), 'implementation chrome is visible')
+  if (!board) check(!/Open board/i.test(body) && !await page.$('#open-board-btn'), 'a board action is visible where this context has no Task Board yet')
   check(!await visible(page, '#btn-simulate-gpu-failure'), 'product exposes fault injection')
   for (const selector of ['#save-status', '#detail-save-status', '#layout-save-status']) {
     if (await visible(page, selector)) check(!/revision\s*\d/i.test(await text(page, selector)), 'numeric save revision exposed')
@@ -303,7 +305,7 @@ async function main() {
     await saved(owner, ++revision)
     check(!(await ok(owner, personalRoute)).application.skills.some((s: any) => s.id === scratch.id), 'authorized unused-Skill deletion did not persist')
     await select(owner, 'Vectors', p.ta, 'Add vectors confidently')
-    await cleanChrome(owner, [pathId, p.a, p.b, p.ta, p.tb])
+    await cleanChrome(owner, [pathId, p.a, p.b, p.ta, p.tb], true)
     await select(owner, 'Matrices', p.tb, 'Compose linear maps')
     check((await text(owner, '#incoming-prerequisites-list')).includes('Vectors'), 'selected Matrices has wrong prerequisites')
     // Rejected connections must explain the problem without exposing engine IDs,
@@ -314,12 +316,12 @@ async function main() {
     await owner.waitForFunction(() => document.querySelector('#cycle-rejection-alert')?.textContent?.includes('already'))
     let rejection = await text(owner, '#cycle-rejection-alert')
     check(rejection.includes('Vectors') && rejection.includes('Matrices'), 'duplicate rejection must identify Skills by title')
-    await cleanChrome(owner, [p.a, p.b])
+    await cleanChrome(owner, [p.a, p.b], true)
     await activate(owner, '#btn-add-dependent')
     await owner.waitForFunction(() => document.querySelector('#cycle-rejection-alert')?.textContent?.includes('cycle'))
     rejection = await text(owner, '#cycle-rejection-alert')
     check(rejection.includes('Vectors') && rejection.includes('Matrices'), 'cycle rejection must identify Skills by title')
-    await cleanChrome(owner, [p.a, p.b])
+    await cleanChrome(owner, [p.a, p.b], true)
     check(await owner.$eval('#skill-detail-panel', el => el.getAttribute('data-connections')) === graphBeforeRejection, 'rejected connections changed the CPU graph')
     const afterRejection = await ok(owner, personalRoute)
     check(afterRejection.learningPath.revision === revision && same(afterRejection.editor.connections, p.editor.connections), 'rejected connections changed the persisted graph or revision')
