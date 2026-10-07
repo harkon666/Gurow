@@ -255,7 +255,7 @@ async function main() {
     const revisionBeforeCycle = (await saveState(page)).revision
     const graphBefore = await graph(page)
     await connect(page, lifetimes, ownership)
-    await page.waitForSelector('#cycle-rejection-alert')
+    await page.waitForSelector('#cycle-rejection-alert[data-kind="cycle"]')
     await new Promise((r) => setTimeout(r, 900))
     check(JSON.stringify(await graph(page)) === JSON.stringify(graphBefore), 'the rejected cycle changed the live graph')
     check((await saveState(page)).revision === revisionBeforeCycle && (await saveState(page)).state === 'saved', `the rejected cycle produced a save: ${JSON.stringify(await saveState(page))}`)

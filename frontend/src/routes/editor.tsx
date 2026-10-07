@@ -303,6 +303,7 @@ function LearningPathEditorPage() {
         <div className="flex items-center gap-2.5">
           <span
             id="checkpoint-status-badge"
+            data-state={checkpointError || isCheckpointRejectedRef.current ? 'rejected' : lastSavedAt ? 'saved' : 'fixture'}
             className="text-[11px] font-mono text-slate-400 bg-slate-950/80 px-2.5 py-1 rounded-lg border border-slate-800 flex items-center gap-1.5"
           >
             <span

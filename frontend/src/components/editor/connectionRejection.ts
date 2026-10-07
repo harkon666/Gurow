@@ -10,6 +10,20 @@ export function isConnectionRejection(reason: string): boolean {
   return duplicate.test(reason) || missing.test(reason) || selfCycle.test(reason) || reason.startsWith(cyclePrefix)
 }
 
+export type ConnectionRejectionKind = 'duplicate' | 'cycle' | 'self' | 'missing' | 'other'
+
+/**
+ * The kind of refusal, for the `data-kind` state checks read instead of wording.
+ * 'other' is any refusal that is not an engine connection diagnostic, such as a Draft rule.
+ */
+export function connectionRejectionKind(reason: string): ConnectionRejectionKind {
+  if (duplicate.test(reason)) return 'duplicate'
+  if (reason.startsWith(cyclePrefix)) return 'cycle'
+  if (selfCycle.test(reason)) return 'self'
+  if (missing.test(reason)) return 'missing'
+  return 'other'
+}
+
 /** Presentation only: never mutate or render the engine's raw diagnostic payload. */
 export function connectionRejectionMessage(reason: string, skills: readonly SkillName[]): string {
   const name = (id: string) => {

@@ -379,7 +379,8 @@ async function main() {
     const tabBBefore = await offset(tabB, la.vectors, la.matrices)
     await drag(tabB, la.matrices, 100, -50)
     await tabB.waitForSelector('#layout-save-status[data-state="conflict"]')
-    check(/layout was changed elsewhere/.test(await text(tabB, '#layout-save-conflict')) && !/revision\s*\d/i.test(await text(tabB, '#layout-save-conflict')) && (await text(tabB, '#layout-save-conflict')).includes('kept but not saved'), `conflict text: ${await text(tabB, '#layout-save-conflict')}`)
+    // State, not wording (#52): the conflict names the layout revision tab A saved; UX01 keeps numbers out of its text.
+    check(Number(await tabB.$eval('#layout-save-conflict', (el) => (el as HTMLElement).dataset.acceptedRevision)) === accepted.revision && !/revision\s*\d/i.test(await text(tabB, '#layout-save-conflict')), `conflict: ${await text(tabB, '#layout-save-conflict')}`)
     const tabBKept = await offset(tabB, la.vectors, la.matrices)
     await tabB.screenshot({ path: path.resolve(FRONTEND, '../.harness/t27-layout-conflict.png') })
     check(near(tabBKept.x - tabBBefore.x, 100) && near(tabBKept.y - tabBBefore.y, -50), 'tab B lost its local arrangement')
@@ -420,7 +421,7 @@ async function main() {
     check(await definitions() === definitionsBefore && await history() === historyBefore, 'the conflict changed learning definitions or history')
     await tabB.close()
     current = carla
-    pass('stale layout save', 'tab A moves Vectors → revision 4; tab B (opened at 3) moves Matrices → "Layout revision 4 was saved elsewhere… kept but not saved", its card stays moved, the store keeps revision 4, a further move is not sent; a failed load keeps the conflict and Discard; "Discard mine" then shows revision 4 at tab B\'s own camera')
+    pass('stale layout save', 'tab A moves Vectors → revision 4; tab B (opened at 3) moves Matrices → conflict naming revision 4 as accepted, its card stays moved, the store keeps revision 4, a further move is not sent; a failed load keeps the conflict and Discard; "Discard mine" then shows revision 4 at tab B\'s own camera')
 
     // 7. Learning definitions and history are what they were; the published content reads as before.
     await openVersion(carla, la.versionId, 4)

@@ -169,7 +169,7 @@ async function main() {
       await startupPage.waitForSelector('#card-label-skill-rust-basics')
       await startupPage.click('#card-label-skill-rust-basics')
       await startupPage.type('#task-edit-title-task-rust-toolchain', ' after initialization')
-      await startupPage.waitForFunction(() => document.querySelector('#checkpoint-status-badge')?.textContent?.includes('Saved locally'))
+      await startupPage.waitForFunction(() => (document.querySelector('#checkpoint-status-badge') as HTMLElement | null)?.dataset.state === 'saved')
       if (await startupPage.$('#checkpoint-error-alert')) throw new Error('Initialization click created an orphan Skill')
       console.log('  Verified: initialization click cannot create an orphan; subsequent Task save succeeds.')
     } finally {
@@ -662,13 +662,10 @@ async function main() {
       throw new Error('Expected foreign path error alert, got: ' + foreignErrorText)
     }
 
-    const badgeTextForeign = await page.$eval(
-      '#checkpoint-status-badge',
-      (el: any) => el.textContent?.trim()
-    )
-    // UX01 (#47) states the refusal in user language: not saved, local work kept.
-    if (!/not saved/i.test(badgeTextForeign ?? '') || !/preserved/i.test(badgeTextForeign ?? '') || /saved locally/i.test(badgeTextForeign ?? '')) {
-      throw new Error(`Expected badge to say the checkpoint was not saved and local work preserved, got "${badgeTextForeign}"`)
+    // The badge state, not its wording (#52): a rejected checkpoint never reports a save.
+    const badgeStateForeign = await page.$eval('#checkpoint-status-badge', (el: any) => el.dataset.state)
+    if (badgeStateForeign !== 'rejected') {
+      throw new Error(`Expected the checkpoint badge in state "rejected", got "${badgeStateForeign}"`)
     }
 
     // Sub-phase 7B: Guard Invariant - Editing Task MUST NOT overwrite rejected checkpoint

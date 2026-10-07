@@ -153,7 +153,11 @@ try {
   await page.mouse.move(rect.x + 100, rect.y + 80, { steps: 4 }); await page.mouse.up()
   const moved = await snapshot()
   assert.notDeepEqual(moved.cards[0].position, original.cards[0].position)
-  await page.focus('#skill-prerequisite-list'); await page.keyboard.press('Home'); await page.keyboard.press('Enter')
+  // The Skill list is a temporary panel since UX01 (#47): open it, then use the keyboard.
+  const openList = async () => {
+    await page.click('#btn-skill-list'); await page.waitForSelector('#skill-prerequisite-list'); await page.focus('#skill-prerequisite-list')
+  }
+  await openList(); await page.keyboard.press('Home'); await page.keyboard.press('Enter')
   await page.type('#task-draft', 'unsaved task draft survives GPU failure')
   // No subsequent editor input: genuine uncaptured validation arrives asynchronously.
   // Recovery is forced to fail on its first render with a destroyed canvas texture.
@@ -178,9 +182,9 @@ try {
   await new Promise(resolve => setTimeout(resolve, 700))
   assert.equal(await page.evaluate(() => (window as any).__devices.length), count, 'repeated validation failure must not loop')
   assert.deepEqual(await snapshot(), moved, 'CPU positions and connections survive failed recovery')
-  await page.focus('#skill-prerequisite-list'); await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter')
+  await openList(); await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter')
   assert.equal(await page.$eval('#selected', el => el.textContent), 'skill-ownership')
-  await page.keyboard.press('Home'); await page.keyboard.press('Enter')
+  await openList(); await page.keyboard.press('Home'); await page.keyboard.press('Enter')
   assert.equal(await page.$eval('#task-draft', el => (el as HTMLInputElement).value), 'unsaved task draft survives GPU failure')
   await page.click('#btn-retry-renderer')
   await page.waitForFunction(n => (window as any).__devices.length === n, {}, count + 1)

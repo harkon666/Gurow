@@ -238,7 +238,7 @@ async function main() {
     const revision = doc.learningPath.revision
     const graphBefore = await graph(page)
     await connect(page, history, matrices)
-    await page.waitForSelector('#cycle-rejection-alert')
+    await page.waitForSelector('#cycle-rejection-alert[data-kind="other"]')
     const optionalRefusal = await text(page, '#cycle-rejection-alert')
     check(optionalRefusal.includes('Optional Skill “History of algebra” cannot be a Prerequisite of required Skill “Matrices”'), `optional refusal: ${optionalRefusal}`)
     check(JSON.stringify(await graph(page)) === JSON.stringify(graphBefore), 'the forbidden connection reached the graph')
@@ -247,7 +247,7 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('#cycle-rejection-alert')?.textContent?.includes('“Vectors” cannot be a Prerequisite of required Skill “Matrices”'))
     check(!(await checked(page, '#skill-optional-input')), 'Vectors became Optional although it leads to a required Skill')
     await connect(page, eigen, vectors)
-    await page.waitForFunction(() => /cycle/i.test(document.querySelector('#cycle-rejection-alert')?.textContent ?? ''))
+    await page.waitForSelector('#cycle-rejection-alert[data-kind="cycle"]')
     await new Promise((r) => setTimeout(r, 900))
     doc = await readDraft(page, pathA)
     check(doc.learningPath.revision === revision && JSON.stringify(edges(doc.editor.connections)) === JSON.stringify(graphBefore) && JSON.stringify(rules(doc)) === JSON.stringify(expectedRules), 'a refused edit reached the backend')

@@ -60,7 +60,7 @@ Parent: [Canvas-first UI and per-Skill Kanban #46](https://github.com/harkon666/
 | --- | --- | --- | --- | --- | --- |
 | [UX01](canvas-kanban/01-canvas-navigation.md) | [#47](https://github.com/harkon666/Gurow/issues/47) | UX | Navigate a clean canvas without permanent sidebars or technical chrome | None | On-demand keyboard-accessible navigation, retained learning actions and truthful recovery; no Task Board claim. |
 | [UX02](canvas-kanban/02-drag-prerequisites.md) | [#48](https://github.com/harkon666/Gurow/issues/48) | UX | Drag Prerequisite connections with validation, persistence, and undo | None | Connection points distinct from card-body drag, highlighted valid targets, validated drops, selectable/deletable edges, one-step undo, and the same non-drag detail action. |
-| UX-H (issue body) | [#52](https://github.com/harkon666/Gurow/issues/52) | UX | Audit browser checks and curate one regression profile | None | Keep/adapt/retire each check with cited coverage; one curated `regression` profile for full checks and the combined parent journeys. |
+| [UX-H](https://github.com/harkon666/Gurow/issues/52) | [#52](https://github.com/harkon666/Gurow/issues/52) | UX | Audit browser checks and curate one regression profile | None | Keep/adapt/retire each check with cited coverage; one curated `regression` profile for full checks and the combined parent journeys. |
 
 ## Dependency overview
 

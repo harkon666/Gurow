@@ -5,23 +5,33 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import re
 import tempfile
 import unittest
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from harness import expand  # noqa: E402
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class NativeQualificationConfigTests(unittest.TestCase):
     def test_native_qualification_is_opt_in_not_automatically_appended(self):
-        root = Path(__file__).resolve().parents[1]
+        root = ROOT
         config = json.loads((root / 'harness.json').read_text())
         # The v1 collector qualification is historical (ADR 0019); it stays opt-in.
         native = 't06-l3-01-qualify-v1'
         for profile in ('quick', 'full'):
-            self.assertNotIn(native, config['profiles'][profile])
+            self.assertNotIn(native, expand(config, config['profiles'][profile]))
         for checks in config['tickets'].values():
-            self.assertNotIn(native, checks)
+            self.assertNotIn(native, expand(config, checks))
         for check in ('collector-tests', 'editor-lifecycle'):
-            self.assertIn(check, config['profiles']['full'])
             self.assertIn(check, config['tickets']['T06-L3-01'])
+        # Full checks run the lifecycle check, and the collector tests through frontend-tests.
+        full = expand(config, config['profiles']['full'])
+        self.assertIn('editor-lifecycle', full)
+        self.assertIn('frontend-tests', full)
+        self.assertEqual(config['checks']['frontend-tests']['argv'], ['bun', 'test'])
         package = json.loads((root / 'frontend/package.json').read_text())
         self.assertEqual(package['scripts']['qualify:native:v1'].split(),
                          config['checks'][native]['argv'])
@@ -29,6 +39,71 @@ class NativeQualificationConfigTests(unittest.TestCase):
         for check in config['checks'].values():
             self.assertNotIn('scripts/benchmark/run.ts', check['argv'])
         self.assertIn('scripts/benchmark/run.ts', package['scripts']['capture:p1'])
+
+
+class RegressionProfileConfigTests(unittest.TestCase):
+    """The curated regression profile in the real harness.json and its audit (#52)."""
+
+    def setUp(self):
+        self.config = json.loads((ROOT / 'harness.json').read_text())
+        self.regression = expand(self.config, ['@regression'])
+
+    def audit(self):
+        text = (ROOT / 'docs/validation/regression-audit.md').read_text()
+        return dict(re.findall(r'^\| `([^`]+)` \| (Keep|Adapt|Retire|Support|Out of profile) \|', text, re.M))
+
+    def test_full_checks_are_the_regression_profile(self):
+        self.assertEqual(self.config['profiles']['full'], ['@regression'])
+        self.assertEqual(expand(self.config, self.config['profiles']['full']), self.regression)
+
+    def test_every_ticket_resolves_and_names_its_own_acceptance(self):
+        for ticket, checks in self.config['tickets'].items():
+            with self.subTest(ticket=ticket):
+                direct = [name for name in checks if not name.startswith('@')]
+                self.assertTrue(direct, 'a profile reference alone does not prove a ticket')
+                for name in expand(self.config, checks):
+                    self.assertIn(name, self.config['checks'])
+                if '@regression' in checks:
+                    # The reference replaces repeated regression lists: only the ticket's own checks stay.
+                    self.assertLessEqual(len(direct), 4, checks)
+
+    def test_audit_lists_every_check_once_and_matches_the_profile(self):
+        audit = self.audit()
+        self.assertEqual(set(audit), set(self.config['checks']))
+        for name, decision in audit.items():
+            with self.subTest(check=name):
+                if decision in ('Keep', 'Adapt', 'Support'):
+                    self.assertIn(name, self.regression)
+                else:
+                    self.assertNotIn(name, self.regression)
+
+    def test_retirements_cite_a_covering_check_in_the_profile(self):
+        text = (ROOT / 'docs/validation/regression-audit.md').read_text()
+        for name, cover in re.findall(r'^\| `([^`]+)` \| Retire \| [^|]+ \| `([^`]+)` runs', text, re.M):
+            with self.subTest(check=name):
+                self.assertIn(cover, self.regression)
+        retired = [name for name, decision in self.audit().items() if decision == 'Retire']
+        self.assertEqual(len(retired), len(re.findall(r'^\| `[^`]+` \| Retire \| [^|]+ \| `[^`]+` runs', text, re.M)))
+
+    def test_invariants_without_another_check_stay_in_the_profile(self):
+        # Checkpoint integrity, recovery identity, layout ownership, read-only learner,
+        # permissions, retention/archival and renderer recovery (#52 AC2).
+        for name in ('t04-browser', 't28-recovery', 't27-shared-layout', 't21-enrolled-navigation',
+                     't15-sign-in', 't16-path-authoring', 't18-coach-draft', 't30-archive-content',
+                     't05-browser', 't06-functional', 't43-gpu-errors', 'editor-lifecycle'):
+            self.assertIn(name, self.regression)
+
+    def test_parallel_browser_checks_use_their_own_ports(self):
+        ports = {}
+        for name in self.regression:
+            check = self.config['checks'][name]
+            if not check.get('parallel') or check['argv'][:2] != ['bun', 'run']:
+                continue
+            self.assertIn('build', check.get('requires', []), name)
+            source = (ROOT / check['cwd'] / check['argv'][2]).read_text()
+            for port in re.findall(r'PORT \?\? (\d+)', source):
+                self.assertNotIn(port, ports, f'{name} and {ports.get(port)} share port {port}')
+                ports[port] = name
 
 
 class HarnessTests(unittest.TestCase):
@@ -248,6 +323,37 @@ class HarnessTests(unittest.TestCase):
         self.assertIn('slow timed out', self.cli('check', '--jobs', '2', code=1))
         self.assertEqual(json.loads((self.root / '.harness/full.json').read_text())['status'], 'FAILED')
         self.cli('review', code=1)
+
+    def test_profile_references_resolve_once_in_order(self):
+        (self.root / '.gitignore').write_text('.harness/\nstamps/\n')
+        self.config['checks'].update({'one': self.stamp('one'), 'two': self.stamp('two'), 'own': self.stamp('own')})
+        self.config['profiles'].update({'regression': ['behavior', 'one', 'two'], 'full': ['@regression']})
+        self.config['tickets'] = {'T04': ['own', 'one', '@regression']}
+        self.save_config()
+        self.cli('check')
+        report = json.loads((self.root / '.harness/full.json').read_text())
+        self.assertEqual([c['name'] for c in report['checks']], ['behavior', 'one', 'two', 'own'])
+        self.cli('review')
+        self.assertIn('FOCUSED checks PASSED', self.cli('check', '--only', '@regression'))
+        focused = json.loads((self.root / '.harness/focused.json').read_text())
+        self.assertEqual([c['name'] for c in focused['checks']], ['behavior', 'one', 'two'])
+
+    def test_a_profile_reference_alone_is_not_ticket_acceptance(self):
+        self.config['profiles'].update({'regression': ['behavior'], 'full': ['@regression']})
+        self.config['tickets'] = {'T04': ['@regression']}
+        self.save_config()
+        self.assertIn('No acceptance checks', self.cli('check', code=1))
+        self.assertFalse((self.root / '.harness/full.json').exists())
+
+    def test_unknown_or_cyclic_profile_references_are_refused_before_anything_runs(self):
+        self.config['checks']['probe'] = self.stamp('probe')
+        self.config['profiles']['full'] = ['probe', '@missing']
+        self.save_config()
+        self.assertIn('Unknown profile: @missing', self.cli('check', code=1))
+        self.config['profiles'].update({'full': ['probe', '@a'], 'a': ['@b'], 'b': ['@a']})
+        self.save_config()
+        self.assertIn('Profile references form a cycle: @a -> @b -> @a', self.cli('check', code=1))
+        self.assertIsNone(self.stamps('probe'))
 
 
 if __name__ == '__main__':

@@ -212,9 +212,9 @@ async function main() {
     // second -> rust-basics closes rust-basics -> first -> second -> rust-basics.
     await connect(page, second, 'skill-rust-basics')
     await page.waitForSelector('#cycle-rejection-alert')
-    const rejection = await page.$eval('#cycle-rejection-alert', el => el.textContent ?? '')
-    // UX01 (#47) explains the cycle in user language, by Skill title.
-    check(/would create a cycle/.test(rejection) && rejection.includes('Rust Fundamentals'), `Unexpected rejection text: ${rejection}`)
+    // The refusal's kind, not its wording (#52); connectionRejection.test.ts covers the message.
+    const rejection = await page.$eval('#cycle-rejection-alert', el => (el as HTMLElement).dataset.kind)
+    check(rejection === 'cycle', `Expected a cycle refusal, got kind "${rejection}"`)
     await settle(page)
     check(JSON.stringify(await graph(page)) === JSON.stringify(graphBefore), 'Rejected cycle changed the live graph')
     check(JSON.stringify(await savedEdges()) === JSON.stringify(graphBefore), 'Rejected cycle changed the saved graph')

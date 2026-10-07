@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { connectionRejectionMessage, isConnectionRejection } from './connectionRejection'
+import { connectionRejectionKind, connectionRejectionMessage, isConnectionRejection } from './connectionRejection'
 
 const skills = [{ id: 'private-a', title: 'Vectors' }, { id: 'private-b', title: 'Matrices' }]
 
@@ -45,5 +45,13 @@ describe('connection rejection presentation', () => {
     expect(connectionRejectionMessage(unknown, skills)).not.toContain('private-a')
     expect(connectionRejectionMessage('Cannot connect: creates a cycle (secret-id).', [])).not.toContain('secret-id')
     expect(isConnectionRejection('Renderer unavailable')).toBe(false)
+  })
+
+  it('classifies each refusal for state checks independently of its wording', () => {
+    expect(connectionRejectionKind("Prerequisite connection from 'private-a' to 'private-b' already exists")).toBe('duplicate')
+    expect(connectionRejectionKind('Cannot connect: creates a cycle (Vectors (private-a) -> Matrices (private-b)). Prerequisite graph must remain acyclic (DAG).')).toBe('cycle')
+    expect(connectionRejectionKind("Cannot connect 'private-a' to itself: self-prerequisite creates an immediate cycle")).toBe('self')
+    expect(connectionRejectionKind("Target skill card 'missing-id' not found")).toBe('missing')
+    expect(connectionRejectionKind('Optional Skill “History” cannot be a Prerequisite of required Skill “Matrices”.')).toBe('other')
   })
 })

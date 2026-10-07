@@ -52,6 +52,8 @@ python3 scripts/harness.py review
 
 Check serial (build, database, backend, Rust) berjalan lebih dulu, lalu check bertanda `parallel` (tes browser dan unit test frontend, masing-masing dengan port, database, dan file sendiri) berjalan bersamaan, sebanyak `jobs` sekaligus (default 3; `--jobs 1` untuk menjalankannya satu per satu saat menyelidiki tes yang flaky). Tes browser memakai build dari run itu (`--skip-build` dan `requires: ["build"]`), jadi frontend dibangun sekali per run. Kegagalan pertama menghentikan check yang belum mulai dan mengembalikan exit code bukan nol. Log per perintah tersimpan di `.harness/runs/`; hasil terbaru ada di `.harness/quick.json`, `focused.json`, dan `full.json`. Perubahan source, file baru, konfigurasi, atau peta AC membuat bukti lama `STALE`. Pemeriksaan yang gagal/terputus tidak memakai ulang status lulus sebelumnya. Hanya `full.json` yang bisa dipakai untuk paket review.
 
+Profil `full` adalah `@regression`: satu daftar regresi terkurasi di `harness.json`. Keputusan keep/adapt/retire setiap check beserta invariant dan cakupan penggantinya ada di [audit regresi](validation/regression-audit.md). `--only @regression` menjalankan profil itu saja.
+
 Selama siklus perbaikan review, jalankan `--only` dengan check acceptance tiket dan regresi area yang disentuh; full run cukup sekali setelah perbaikan terakhir, sebelum commit atau merge.
 
 `review` menghasilkan `.harness/review.md` dan `review.diff`. Buka sesi reviewer baru dan kirim:
@@ -77,9 +79,11 @@ Contoh **setelah** script T05 dibuat, tambahkan objek di `checks` dan mapping di
       "timeout": 180
     }
   },
-  "tickets": {"T05": ["t05-browser"]}
+  "tickets": {"T05": ["t05-browser", "@regression"]}
 }
 ```
+
+Entri tiket hanya berisi check acceptance tiket itu sendiri, ditambah `@regression` bila perlu; jangan salin daftar regresi tiket lain. Referensi profil saja tidak dianggap acceptance. Check browser baru yang menjaga invariant penting ditambahkan ke profil `regression` dan ke tabel audit (`harness-tests` memeriksa keduanya sama).
 
 Gabungkan dengan konfigurasi yang sudah ada. Script baru harus benar-benar mendukung mode tersebut, menjalankan browser pada build terbaru, gagal dengan exit code bukan nol, dan menyimpan output tanpa mengubah source yang sedang diuji. Untuk P2 tambahkan setup PostgreSQL dan tes API nyata; profil P1 sekarang tidak membuktikan backend atau benchmark T06.
 

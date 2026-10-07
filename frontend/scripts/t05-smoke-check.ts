@@ -249,6 +249,9 @@ async function main() {
     await page.waitForSelector('#editor-canvas', { timeout: 10000 })
     await page.waitForSelector('#card-label-skill-rust-basics', { timeout: 10000 })
     await openSkillList(page)
+    // Initialization can outlast networkidle when other checks share the machine (#52); it must still end ready.
+    await page.waitForFunction(() => (document.querySelector('#gpu-status-badge') as HTMLElement | null)?.dataset.status !== 'initializing', { timeout: 15000 })
+      .catch(() => undefined)
 
     const gpuStatusText = await page.$eval('#gpu-status-badge', (el: HTMLElement) => el.dataset.status)
     console.log(`  GPU Status: "${gpuStatusText}"`)

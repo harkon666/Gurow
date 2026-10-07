@@ -190,6 +190,26 @@ def run_check(name, argv, cwd, timeout, log, running=None):
     return code
 
 
+def expand(config, names, chain=()):
+    """
+    Resolves `@profile` references in a check list, in order and without duplicates, so
+    ticket entries and profiles can name the curated `regression` profile instead of
+    repeating its checks.
+    """
+    resolved = []
+    for name in names:
+        if not name.startswith('@'):
+            resolved.append(name)
+            continue
+        profile = name[1:]
+        if profile in chain:
+            raise ValueError(f"Profile references form a cycle: {' -> '.join('@' + p for p in chain + (profile,))}")
+        if profile not in config['profiles']:
+            raise ValueError(f'Unknown profile: {name}')
+        resolved.extend(expand(config, config['profiles'][profile], chain + (profile,)))
+    return list(dict.fromkeys(resolved))
+
+
 def plan(config, names):
     """
     Orders the checks to run: each check's `requires` (for example the frontend build a
@@ -222,18 +242,19 @@ def check(args):
     config = read_json(ROOT / 'harness.json')
     if args.only:
         mode = 'focused'
-        names = list(args.only)
+        names = expand(config, args.only)
     else:
         mode = 'quick' if args.quick else 'full'
-        names = list(config['profiles'][mode])
+        names = expand(config, config['profiles'][mode])
     if mode == 'full':
-        acceptance = config['tickets'].get(current['ticket'])
-        if not acceptance:
+        acceptance = config['tickets'].get(current['ticket'], [])
+        # A profile reference alone is regression coverage, not this ticket's own acceptance.
+        if not any(not name.startswith('@') for name in acceptance):
             raise ValueError(f"No acceptance checks configured for {current['ticket']} in harness.json. Prior-ticket regression checks do not prove this ticket.")
         gaps = proof_gaps(current)
         if gaps:
             raise ValueError('\n'.join(gaps))
-        names = list(dict.fromkeys(names + acceptance))
+        names = list(dict.fromkeys(names + expand(config, acceptance)))
     serial, parallel = plan(config, names)
     for name in serial + parallel:
         command = config['checks'][name]
@@ -391,7 +412,7 @@ def main():
     group = checks.add_mutually_exclusive_group()
     group.add_argument('--quick', action='store_true')
     group.add_argument('--only', nargs='+', metavar='CHECK',
-                       help='Run these checks (and what they require) only; never counts as full evidence')
+                       help='Run these checks or @profiles (and what they require) only; never counts as full evidence')
     checks.add_argument('--jobs', type=int, help='Parallel checks at a time (default: harness.json "jobs")')
     commands.add_parser('status', help='Show missing/stale/current command evidence')
     commands.add_parser('review', help='Prepare a review packet after current full checks pass')

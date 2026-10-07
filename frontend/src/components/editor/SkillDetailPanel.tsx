@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { TemporaryPanel } from './TemporaryPanel'
-import { connectionRejectionMessage, isConnectionRejection } from './connectionRejection'
+import { connectionRejectionKind, connectionRejectionMessage, isConnectionRejection } from './connectionRejection'
 import { INITIAL_LEARNING_PATH_FIXTURE } from '../../fixtures/learningPath'
 import type { SelectedSkillInfo } from './types'
 import type { PrerequisiteConnection } from './protocol'
@@ -163,6 +163,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
         {connectionRejection && (
           <div
             id="cycle-rejection-alert"
+            data-kind={connectionRejectionKind(connectionRejection)}
             className="bg-amber-950/60 border border-amber-800/80 rounded-xl p-3 text-xs text-amber-200 flex flex-col gap-1.5 shadow"
           >
             <div className="flex items-center justify-between">

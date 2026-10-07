@@ -96,7 +96,7 @@ export function KeptWorkList<D>({ prefix, noun, entries, refused, busy, currentR
       )}
       {entries.map((entry) => {
         return (
-          <article key={entry.work.id} data-kept-entry={entry.work.id} data-base-revision={entry.work.baseRevision} data-reapply={entry.status.kind} className="rounded-lg border border-sky-900/70 bg-slate-950/60 p-2 space-y-1.5">
+          <article key={entry.work.id} data-kept-entry={entry.work.id} data-base-revision={entry.work.baseRevision} data-base-changed={entry.work.baseRevision !== currentRevision} data-reapply={entry.status.kind} className="rounded-lg border border-sky-900/70 bg-slate-950/60 p-2 space-y-1.5">
             <p className="text-sky-100">
               Unsaved changes kept in this browser (edited {new Date(entry.work.editedAt).toLocaleString()}).
               {entry.work.baseRevision === currentRevision ? '' : ' The saved version has changed since.'} The saved {noun} shown does not include them.
