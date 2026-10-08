@@ -28,8 +28,11 @@ function CoachVersionPage() {
       {document && view.state === 'ready' && (
         <>
           <nav className="shrink-0 px-4 py-1.5 text-xs border-b border-slate-800/80 bg-slate-950 flex items-center gap-4">
-            <Link id="back-to-path" to="/coach/paths/$pathId" params={{ pathId: document.learningPath.id }} className="text-sky-300 hover:text-sky-200">
-              ← Learning Path
+            <Link id="back-to-path" to="/coach/paths/$pathId" params={{ pathId: document.learningPath.id }} className="text-sky-300 hover:text-sky-200 inline-flex items-center gap-1.5">
+              <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              </svg>
+              <span>Learning Path</span>
             </Link>
             <VersionHistory versions={document.versions} currentVersionId={document.version?.id} />
           </nav>

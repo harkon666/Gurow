@@ -55,7 +55,11 @@ export function PublishControl({ pathId, versionNumber, save, onPublished }: {
         <div id="publication-problems" role="alert" className="absolute right-0 top-full mt-2 z-30 w-[26rem] max-w-[90vw] bg-slate-900 border border-red-800/70 rounded-xl p-3 shadow-xl flex flex-col gap-2 text-xs">
           <div className="flex items-start justify-between gap-2">
             <h2 className="font-semibold text-red-200">Version {versionNumber} was not published</h2>
-            <button id="dismiss-publication-problems" onClick={() => setRefusal(null)} aria-label="Dismiss" className="text-slate-400 hover:text-slate-200 cursor-pointer">✕</button>
+            <button id="dismiss-publication-problems" onClick={() => setRefusal(null)} aria-label="Dismiss" className="text-slate-400 hover:text-slate-200 cursor-pointer p-0.5 rounded hover:bg-slate-800 transition-colors inline-flex items-center justify-center">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
           {shown.blockedSkills.length === 0 ? (
             <p id="publication-problem-detail" className="text-slate-300">{shown.detail}</p>

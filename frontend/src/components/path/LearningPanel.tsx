@@ -233,7 +233,11 @@ export function LearningStatus({ view, describe, onRetry, onDismiss, onReload }:
         <div id="learning-error" role="alert" className="flex items-center gap-2 text-red-300">
           <span className="max-w-[24rem] truncate" title={view.failed.detail}>Not recorded: {describe(view.failed.action)} failed ({view.failed.detail}).</span>
           <button id="learning-retry-btn" onClick={onRetry} className="text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-1 rounded-lg cursor-pointer">Retry</button>
-          <button id="learning-dismiss-btn" onClick={onDismiss} aria-label="Dismiss" className="text-slate-400 hover:text-slate-200 cursor-pointer">✕</button>
+          <button id="learning-dismiss-btn" onClick={onDismiss} aria-label="Dismiss" className="text-slate-400 hover:text-slate-200 cursor-pointer p-0.5 rounded hover:bg-slate-800 transition-colors inline-flex items-center justify-center">
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
       )}
       {view.loadError && !view.failed && (

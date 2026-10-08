@@ -42,7 +42,12 @@ function CoachWorkspacePage() {
         {workspace && (
           <div id="coach-workspace" className="max-w-2xl flex flex-col gap-4">
             <div>
-              <Link id="back-to-coaching" to="/coach" className="text-xs text-sky-300 hover:text-sky-200">← Coaching</Link>
+              <Link id="back-to-coaching" to="/coach" className="text-xs text-sky-300 hover:text-sky-200 inline-flex items-center gap-1.5">
+                <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                </svg>
+                <span>Coaching</span>
+              </Link>
               <h1 id="coach-workspace-name" className="text-xl font-semibold text-slate-100 mt-1">{workspace.workspace.name}</h1>
               <p className="text-xs text-slate-400 mt-1">You are this Workspace's one Coach. Each Learning Path defines its own outcomes, Tasks and rules.</p>
             </div>

@@ -179,7 +179,12 @@ export function TaskBoard(props: TaskBoardProps) {
     <BoardSurface title={`${props.boardName ?? 'Task Board'} · ${props.skillTitle}`} onClose={() => { if (!drag) props.onClose() }}>
       <div className="h-full flex flex-col">
         <header className="shrink-0 flex flex-wrap items-center gap-3 px-4 py-3 border-b border-slate-800 bg-slate-900/70">
-          <button id="board-close-btn" onClick={props.onClose} className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm hover:bg-slate-800">← Back to canvas</button>
+          <button id="board-close-btn" onClick={props.onClose} className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm hover:bg-slate-800 inline-flex items-center gap-1.5">
+            <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+            </svg>
+            <span>Back to canvas</span>
+          </button>
           <h2 id="board-title" className="text-base font-semibold text-slate-100">{props.boardName ?? 'Task Board'} · {props.skillTitle}</h2>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {props.statusExtra}
@@ -253,9 +258,13 @@ export function TaskBoard(props: TaskBoardProps) {
                       aria-expanded={menu?.kind === 'column' && menu.id === column.id}
                       aria-label={`Actions for column ${column.name}`}
                       onClick={() => setMenu(menu?.kind === 'column' && menu.id === column.id ? null : { kind: 'column', id: column.id })}
-                      className="shrink-0 rounded border border-slate-700 px-2 py-0.5 text-xs text-slate-300 hover:bg-slate-800"
+                      className="shrink-0 rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800 inline-flex items-center justify-center"
                     >
-                      ⋯
+                      <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <circle cx="5" cy="12" r="2" />
+                        <circle cx="12" cy="12" r="2" />
+                        <circle cx="19" cy="12" r="2" />
+                      </svg>
                     </button>
                   </div>
                   {column.completion && <p className="mt-1 text-[10px] uppercase tracking-wider text-emerald-300">Completion Column</p>}
@@ -338,8 +347,11 @@ export function TaskBoard(props: TaskBoardProps) {
                     />
                   ) : (
                     <button id={`add-card-${column.id}`} onClick={() => setAdding(column.id)} disabled={!view.accepted}
-                      className="w-full text-xs rounded-lg border border-dashed border-slate-700 py-1.5 text-slate-300 hover:bg-slate-800 disabled:opacity-50">
-                      + Add Task
+                      className="w-full text-xs rounded-lg border border-dashed border-slate-700 py-1.5 text-slate-300 hover:bg-slate-800 disabled:opacity-50 inline-flex items-center justify-center gap-1.5">
+                      <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                      <span>Add Task</span>
                     </button>
                   )}
                 </div>}

@@ -67,18 +67,29 @@ const ConnectionListItem: React.FC<ConnectionListItemProps> = ({
   onDisconnect,
 }) => (
   <li className="flex items-center justify-between text-xs bg-slate-900/60 px-2.5 py-1.5 rounded border border-slate-800">
-    <span className="text-slate-200 truncate max-w-[170px]" title={title}>
-      {direction} {title}
+    <span className="text-slate-200 truncate max-w-[170px] inline-flex items-center gap-1.5" title={title}>
+      {direction === '←' ? (
+        <svg className="w-3.5 h-3.5 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+        </svg>
+      ) : (
+        <svg className="w-3.5 h-3.5 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+        </svg>
+      )}
+      <span className="truncate">{title}</span>
     </span>
     {onDisconnect && (
       <button
         id={`disconnect-${fromId}-${toId}`}
         onClick={() => onDisconnect(fromId, toId)}
         aria-label={`Remove connection ${direction === '←' ? 'from' : 'to'} ${title}`}
-        className="text-[10px] text-red-400 hover:text-red-300 ml-2 px-1 py-0.5 rounded bg-red-950/40 hover:bg-red-950/80 transition-colors cursor-pointer"
+        className="text-[10px] text-red-400 hover:text-red-300 ml-2 p-1 rounded bg-red-950/40 hover:bg-red-950/80 transition-colors cursor-pointer inline-flex items-center justify-center shrink-0"
         title="Remove connection"
       >
-        ✕
+        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+        </svg>
       </button>
     )}
   </li>
@@ -197,7 +208,13 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
               {selectedSkill.title}
             </h2>
             {view === 'summary' && skillActions && <div className="relative shrink-0">
-              <button id="skill-actions-btn" aria-label="Skill actions" aria-expanded={actionsOpen} aria-controls={actionsOpen ? 'skill-actions-menu' : undefined} onClick={() => setActionsOpen(!actionsOpen)} className="rounded-lg border border-slate-700 px-3 py-1 text-slate-300 hover:bg-slate-800 focus-visible:outline focus-visible:outline-blue-400">⋯</button>
+              <button id="skill-actions-btn" aria-label="Skill actions" aria-expanded={actionsOpen} aria-controls={actionsOpen ? 'skill-actions-menu' : undefined} onClick={() => setActionsOpen(!actionsOpen)} className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-slate-300 hover:bg-slate-800 focus-visible:outline focus-visible:outline-blue-400 inline-flex items-center justify-center">
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="5" cy="12" r="2" />
+                  <circle cx="12" cy="12" r="2" />
+                  <circle cx="19" cy="12" r="2" />
+                </svg>
+              </button>
               {actionsOpen && <div id="skill-actions-menu" role="group" aria-label="Skill actions" className="absolute right-0 top-full z-10 mt-2 w-56 max-w-[calc(100vw-3rem)] rounded-xl border border-slate-700 bg-slate-900 p-3 shadow-xl flex flex-col gap-2">{skillActions}</div>}
             </div>}
           </div>
@@ -212,15 +229,21 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
             className="bg-amber-950/60 border border-amber-800/80 rounded-xl p-3 text-xs text-amber-200 flex flex-col gap-1.5 shadow"
           >
             <div className="flex items-center justify-between">
-              <span className="font-semibold text-amber-400 flex items-center gap-1">
-                ⚠️ Connection Rejected
+              <span className="font-semibold text-amber-400 flex items-center gap-1.5">
+                <svg className="w-4 h-4 text-amber-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <span>Connection Rejected</span>
               </span>
               {onClearRejection && (
                 <button
                   onClick={onClearRejection}
-                  className="text-amber-400 hover:text-amber-200 cursor-pointer font-bold"
+                  aria-label="Dismiss rejection"
+                  className="text-amber-400 hover:text-amber-200 cursor-pointer p-0.5 rounded hover:bg-amber-900/30 transition-colors inline-flex items-center justify-center"
                 >
-                  ✕
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
                 </button>
               )}
             </div>
@@ -484,9 +507,12 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
             <button
               id="add-task-btn"
               onClick={onAddTask}
-              className="mt-3 w-full px-2 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded-lg text-xs font-medium transition-colors cursor-pointer"
+              className="mt-3 w-full px-2 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 rounded-lg text-xs font-medium transition-colors cursor-pointer flex items-center justify-center gap-1.5"
             >
-              + Add Task
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              <span>Add Task</span>
             </button>
           )}
         </div>}

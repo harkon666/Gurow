@@ -316,9 +316,12 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
             : engineError}</span>
           <button
             onClick={clearEngineError}
-            className="text-red-400 hover:text-red-200 ml-4 font-bold cursor-pointer"
+            aria-label="Dismiss error"
+            className="text-red-400 hover:text-red-200 ml-4 p-1 rounded hover:bg-red-900/40 transition-colors cursor-pointer flex items-center justify-center shrink-0"
           >
-            ✕
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
           </button>
         </div>
       )}
@@ -510,9 +513,11 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
               id="btn-deselect-connection"
               aria-label="Deselect connection"
               onClick={() => selectConnection(null)}
-              className="text-slate-400 hover:text-slate-200 px-1"
+              className="text-slate-400 hover:text-slate-200 p-0.5 rounded hover:bg-slate-800 transition-colors flex items-center justify-center"
             >
-              ✕
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
             </button>
           </div>
         )}

@@ -211,10 +211,19 @@ export function TaskWork({ accountId, enrollmentId, taskId, records, sentRevisio
               className={field}
               placeholder="https://…"
             />
-            <button id={`task-work-remove-url-${taskId}-${index}`} disabled={!editable} onClick={() => edit({ ...edits, urls: edits.urls.filter((_, i) => i !== index) })} aria-label={`Remove link ${index + 1}`} className="px-2 text-slate-400 hover:text-slate-200 cursor-pointer">×</button>
+            <button id={`task-work-remove-url-${taskId}-${index}`} disabled={!editable} onClick={() => edit({ ...edits, urls: edits.urls.filter((_, i) => i !== index) })} aria-label={`Remove link ${index + 1}`} className="p-1 text-slate-400 hover:text-slate-200 cursor-pointer inline-flex items-center justify-center">
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
           </div>
         ))}
-        <button id={`task-work-add-url-${taskId}`} disabled={!editable} onClick={() => edit({ ...edits, urls: [...edits.urls, ''] })} className="text-[10px] text-violet-300 hover:text-violet-200 cursor-pointer">+ Add a link</button>
+        <button id={`task-work-add-url-${taskId}`} disabled={!editable} onClick={() => edit({ ...edits, urls: [...edits.urls, ''] })} className="text-[10px] text-violet-300 hover:text-violet-200 cursor-pointer inline-flex items-center gap-1">
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+          </svg>
+          <span>Add a link</span>
+        </button>
         <p id={`task-work-url-note-${taskId}`} className="text-[10px] text-slate-500">
           Gurow keeps the links you send, not a copy of the pages they lead to: if a page changes or disappears later, your Coach sees it as it is then. Link to a fixed version (a commit, release or dated copy) or paste the important part into the text.
         </p>

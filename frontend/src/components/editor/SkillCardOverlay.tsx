@@ -184,6 +184,32 @@ export const SkillCardOverlay: React.FC<SkillCardOverlayProps> = ({
       // move HTML labels independently of the WebGPU camera.
       className="absolute inset-0 pointer-events-none overflow-clip"
     >
+      {/* Background canvas subtle ornament */}
+      <div
+        id="canvas-bg-ornament"
+        aria-hidden="true"
+        className="absolute inset-0 pointer-events-none overflow-hidden select-none"
+      >
+        {/* Subtle ambient lighting vignette */}
+        <div
+          className="absolute inset-0 pointer-events-none opacity-40"
+          style={{
+            background: `radial-gradient(circle at 50% 40%, rgba(56, 189, 248, 0.08) 0%, transparent 65%), radial-gradient(circle at 85% 85%, rgba(79, 184, 178, 0.06) 0%, transparent 50%), radial-gradient(circle at 15% 85%, rgba(99, 102, 241, 0.05) 0%, transparent 50%)`,
+          }}
+        />
+        {/* Subtle responsive dot-grid that scales and pans with camera */}
+        <div
+          className="absolute inset-0 pointer-events-none opacity-30"
+          style={{
+            backgroundImage: `radial-gradient(circle, rgba(148, 163, 184, 0.4) 1px, transparent 1px)`,
+            backgroundSize: `${Math.max(16, 24 * zoom)}px ${Math.max(16, 24 * zoom)}px`,
+            backgroundPosition: `${camera.offset_x}px ${camera.offset_y}px`,
+            maskImage: `radial-gradient(ellipse 90% 85% at 50% 50%, #000 60%, transparent 100%)`,
+            WebkitMaskImage: `radial-gradient(ellipse 90% 85% at 50% 50%, #000 60%, transparent 100%)`,
+          }}
+        />
+      </div>
+
       <div
         id="labels-camera"
         className="absolute left-0 top-0"
