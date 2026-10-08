@@ -36,9 +36,18 @@ export function optionalToggleProblem(skills: PathSkill[], connections: Prerequi
   return draftRuleProblem(next, touching)
 }
 
-/** A whole-number field that keeps what is typed and reports only valid values. */
+/**
+ * A whole-number field that keeps what is typed and reports only valid values. A value changed
+ * elsewhere (the same Task's reward edited on its preparation board) replaces what it shows, unless
+ * what is typed already means that value; while the value stays, unfinished typing is kept.
+ */
 function DraftNumber({ id, label, value, max, onChange }: { id: string; label: string; value: number; max: number; onChange: (value: number) => void }) {
   const [text, setText] = useState(String(value))
+  const [shown, setShown] = useState(value)
+  if (value !== shown) {
+    setShown(value)
+    if (Number(text) !== value || text.trim() === '') setText(String(value))
+  }
   const parsed = Number(text)
   const valid = text.trim() !== '' && Number.isSafeInteger(parsed) && parsed >= 0 && parsed <= max
   return (
@@ -87,11 +96,27 @@ export function SkillDraftRules({ skill, onOptional, onThreshold }: { skill: Pat
   )
 }
 
-/** The reward of one Task in a Draft; Required/Enrichment is set on the Task card itself. */
-export function TaskDraftRules({ task, onReward }: { task: PathTask; onReward: (xpReward: number) => void }) {
+/**
+ * The reward of one Task in a Draft. Required/Enrichment is set on the Task card itself in the
+ * Skill summary; where there is no such card (a preparation board's Task details), `onRequired`
+ * shows it here too. `prefix` keeps IDs unique where both are shown.
+ */
+export function TaskDraftRules({ task, onReward, onRequired, prefix = '' }: { task: PathTask; onReward: (xpReward: number) => void; onRequired?: (required: boolean) => void; prefix?: string }) {
   return (
-    <div id={`task-draft-rules-${task.id}`} className="pt-2 border-t border-slate-700/40">
-      <DraftNumber key={`reward:${task.id}`} id={`task-xp-reward-${task.id}`} label="Reward (XP)" value={task.xpReward ?? 0} max={1_000_000} onChange={onReward} />
+    <div id={`${prefix}task-draft-rules-${task.id}`} className="pt-2 border-t border-slate-700/40 space-y-2">
+      {onRequired && (
+        <label htmlFor={`${prefix}task-required-${task.id}`} className="flex items-center gap-2 cursor-pointer select-none text-[11px] text-slate-300">
+          <input
+            id={`${prefix}task-required-${task.id}`}
+            type="checkbox"
+            checked={task.required === true}
+            onChange={(e) => onRequired(e.target.checked)}
+            className="rounded border-slate-700 bg-slate-900 cursor-pointer"
+          />
+          <span>Required Task (mandatory evidence for Mastery); otherwise Enrichment</span>
+        </label>
+      )}
+      <DraftNumber key={`reward:${task.id}`} id={`${prefix}task-xp-reward-${task.id}`} label="Reward (XP)" value={task.xpReward ?? 0} max={1_000_000} onChange={onReward} />
     </div>
   )
 }

@@ -403,3 +403,33 @@ describe('board saves (UX03 AC9)', () => {
     expect(h.completionChanged).toHaveLength(3)
   })
 })
+
+describe('Draft preparation boards (UX04 AC3/AC4)', () => {
+  const draft = (): BoardColumn[] => [
+    { id: 'ideas', name: 'Ideas', completion: false, taskIds: ['t1', 't2'] },
+    { id: 'prep', name: 'In preparation', completion: false, taskIds: [] },
+    { id: 'ready', name: 'Ready', completion: false, taskIds: ['t3'] },
+  ]
+
+  it('moving to Ready or removing columns has no completion effect, whatever the names', () => {
+    const moved = applyOp(draft(), { kind: 'move', taskId: 't1', columnId: 'ready', index: 0 })
+    expect(moved.status === 'applied' && arranged(moved.columns)).toEqual(['Ideas:t2', 'In preparation:', 'Ready:t1,t3'])
+    expect(moved.status === 'applied' && completionEffects(draft(), moved.columns)).toEqual([])
+    const renamed = applyOp(draft(), { kind: 'rename-column', columnId: 'ready', name: 'Done' })
+    expect(renamed.status === 'applied' && completionEffects(draft(), renamed.columns)).toEqual([])
+    const removed = applyOp(draft(), { kind: 'remove-column', columnId: 'ready', destinationId: 'ideas' })
+    expect(removed.status === 'applied' && arranged(removed.columns)).toEqual(['Ideas:t1,t2,t3', 'In preparation:'])
+    expect(removed.status === 'applied' && completionEffects(draft(), removed.columns)).toEqual([])
+  })
+
+  it('keeps the last column: one column is enough, none is not', () => {
+    expect(removalChoices(draft(), 'ready')).toMatchObject({ blocked: null, replacements: [] })
+    const one: BoardColumn[] = [{ id: 'ideas', name: 'Ideas', completion: false, taskIds: ['t1'] }]
+    expect(removalChoices(one, 'ideas').blocked).toBe('A board keeps at least one column.')
+    expect(applyOp(one, { kind: 'remove-column', columnId: 'ideas', destinationId: 'ideas' }).status).toBe('obsolete')
+  })
+
+  it('places a Task created here at the end of the first column until its save reaches the board', () => {
+    expect(arranged(localColumns(draft(), [], ['t1', 't2', 't3', 'new'], new Set(['new'])))).toEqual(['Ideas:t1,t2,new', 'In preparation:', 'Ready:t3'])
+  })
+})

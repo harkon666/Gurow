@@ -5,6 +5,7 @@ import { sessionIdentity, type Auth } from './auth'
 import * as authoring from './authoring'
 import * as coaching from './coaching'
 import type { Database } from './db/client'
+import { readDraftBoard, saveDraftBoard, type DraftBoardRefusal } from './draftBoard'
 import { acceptInvitation, listLearnerEnrollments, readEnrolledVersion, readEnrollment, readInvitation, type EnrollmentRefusal } from './enrollments'
 import type { IdentityResolver } from './identity'
 import * as invitations from './invitations'
@@ -54,6 +55,17 @@ const BOARD_REFUSAL_STATUS: Record<BoardRefusal, ContentfulStatusCode> = {
   board_task_unknown: 422,
   column_owned_elsewhere: 422,
   skill_locked: 403,
+}
+
+const DRAFT_BOARD_REFUSAL_STATUS: Record<DraftBoardRefusal, ContentfulStatusCode> = {
+  learning_path_not_found: 404,
+  draft_not_found: 404,
+  skill_not_found: 404,
+  draft_published: 409,
+  stale_revision: 409,
+  board_task_missing: 422,
+  board_task_unknown: 422,
+  column_owned_elsewhere: 422,
 }
 
 const SAVE_REFUSAL_STATUS: Record<authoring.SaveRefusal, ContentfulStatusCode> = {
@@ -542,6 +554,35 @@ export function createApp({ db, identity, auth, delivery }: { db: Database; iden
     const result = await coaching.archiveDraftTask(db, pathId, taskId, c.get('accountId'), expectedRevision)
     if (!result.ok) return c.json({ error: result.refusal, detail: result.detail, ...(result.current ? { current: result.current } : {}) }, ARCHIVE_DRAFT_REFUSAL_STATUS[result.refusal])
     return c.json(result.document)
+  })
+
+  // A Draft Skill's preparation board (ADR 0029): saved whole against its own revision, like a
+  // personal board, but its columns have no role and a save writes nothing but the board. The
+  // route names the Draft, so a board of a Draft published meanwhile is refused, not redirected.
+  const draftBoardRoute = `${coachPath}/drafts/:draftId/skills/:skillId/board`
+  const draftBoardTarget = (pathId: string, draftId: string, skillId: string) =>
+    UUID.test(pathId) ? { learningPathId: pathId, draftId: UUID.test(draftId) ? draftId.toLowerCase() : NIL_UUID, skillId: UUID.test(skillId) ? skillId.toLowerCase() : NIL_UUID } : null
+  app.get(draftBoardRoute, async (c) => {
+    const target = draftBoardTarget(c.req.param('pathId'), c.req.param('draftId'), c.req.param('skillId'))
+    if (!target) return c.json({ error: 'learning_path_not_found' }, 404)
+    const result = await readDraftBoard(db, target, c.get('accountId'))
+    if (!result.ok) return c.json({ error: result.refusal, detail: result.detail }, DRAFT_BOARD_REFUSAL_STATUS[result.refusal])
+    return c.json({ board: result.board })
+  })
+
+  app.put(draftBoardRoute, async (c) => {
+    const target = draftBoardTarget(c.req.param('pathId'), c.req.param('draftId'), c.req.param('skillId'))
+    if (!target) return c.json({ error: 'learning_path_not_found' }, 404)
+    const input = parseBoardInput(await c.req.json().catch(() => null), { completionColumn: false })
+    if (!input.ok) {
+      // An invalid board for someone else's Path, Draft or Skill is still reported as not found.
+      const owned = await readDraftBoard(db, target, c.get('accountId'))
+      if (!owned.ok) return c.json({ error: owned.refusal, detail: owned.detail }, DRAFT_BOARD_REFUSAL_STATUS[owned.refusal])
+      return c.json({ error: 'invalid_board', detail: input.detail }, 422)
+    }
+    const result = await saveDraftBoard(db, target, c.get('accountId'), input.value)
+    if (!result.ok) return c.json({ error: result.refusal, detail: result.detail, ...(result.current ? { current: result.current } : {}) }, DRAFT_BOARD_REFUSAL_STATUS[result.refusal])
+    return c.json({ changed: result.changed, board: result.board })
   })
 
   // Publication (ADR 0005, 0008): both changes are based on the revision the Coach saw.

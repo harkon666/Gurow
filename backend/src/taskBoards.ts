@@ -35,6 +35,16 @@ export const PERSONAL_INITIAL_COLUMNS = [
   { name: 'Done', completion: true },
 ] as const
 
+/**
+ * The columns a Coach's preparation board starts with (ADR 0029): material readiness
+ * only, so none has a role; a Task in Ready is not thereby publishable, approved or done.
+ */
+export const DRAFT_INITIAL_COLUMNS = [
+  { name: 'Ideas', completion: false },
+  { name: 'In preparation', completion: false },
+  { name: 'Ready', completion: false },
+] as const
+
 type Parsed<T> = { ok: true; value: T } | { ok: false; detail: string }
 
 /**

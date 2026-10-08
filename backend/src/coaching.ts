@@ -5,6 +5,7 @@ import { coachWorkspaces, learningPaths, learningPathVersions, versionPrerequisi
 import type { Tx } from './personal'
 import { checkRequiredRoute, type BlockedSkill } from './publication'
 import { claimLogicalIds } from './logicalIds'
+import { addDraftCards, deleteDraftBoards, removeDraftCards } from './draftBoardMembership'
 import { publishedContent } from './retention'
 
 /**
@@ -61,7 +62,7 @@ export async function readCoachWorkspace(db: Database, workspaceId: string, acco
 }
 
 /** Locks a coach-mode Path for the owner of its Workspace; for anyone else there is no Path. */
-async function lockOwnedCoachPath(tx: Tx, learningPathId: string, accountId: string) {
+export async function lockOwnedCoachPath(tx: Tx, learningPathId: string, accountId: string) {
   const [path] = await tx.select({ path: learningPaths }).from(learningPaths)
     .innerJoin(coachWorkspaces, eq(coachWorkspaces.id, learningPaths.coachWorkspaceId))
     .where(and(eq(learningPaths.id, learningPathId), eq(coachWorkspaces.ownerAccountId, accountId)))
@@ -69,7 +70,7 @@ async function lockOwnedCoachPath(tx: Tx, learningPathId: string, accountId: str
   return path?.path ?? null
 }
 
-async function openDraft(tx: Pick<Database, 'select'>, learningPathId: string) {
+export async function openDraft(tx: Pick<Database, 'select'>, learningPathId: string) {
   const [draft] = await tx.select().from(learningPathVersions).where(and(eq(learningPathVersions.learningPathId, learningPathId), isNull(learningPathVersions.publishedAt)))
   return draft ?? null
 }
@@ -334,6 +335,8 @@ async function writeDraft(tx: Tx, path: typeof learningPaths.$inferSelect, draft
       }
     }
   }
+  // New Tasks join their Skill's preparation board, if it was opened (ADR 0029).
+  await addDraftCards(tx, draftId, newTasks.map((task) => ({ taskId: task.id, skillId: task.skillId })))
 
   // This Version's Canvas Layout: one card per Skill, written only where it moved.
   const storedCards = new Map((await tx.select().from(versionSkillCards).where(eq(versionSkillCards.learningPathVersionId, draftId))).map((card) => [card.skillId, card]))
@@ -365,11 +368,13 @@ async function writeDraft(tx: Tx, path: typeof learningPaths.$inferSelect, draft
   // Its logical IDs stay this Path's, so an editor undo can bring it back.
   if (removedTasks.length > 0) {
     changed = true
+    await removeDraftCards(tx, draftId, removedTasks.map((task) => task.taskId))
     await tx.delete(versionTasks).where(and(eq(versionTasks.learningPathVersionId, draftId), inArray(versionTasks.taskId, removedTasks.map((task) => task.taskId))))
   }
   if (removedSkills.length > 0) {
     changed = true
     const ids = removedSkills.map((skill) => skill.skillId)
+    await deleteDraftBoards(tx, draftId, ids)
     await tx.delete(versionSkillCards).where(and(eq(versionSkillCards.learningPathVersionId, draftId), inArray(versionSkillCards.skillId, ids)))
     await tx.delete(versionSkills).where(and(eq(versionSkills.learningPathVersionId, draftId), inArray(versionSkills.skillId, ids)))
   }
@@ -468,6 +473,8 @@ export async function archiveDraftTask(db: Database, learningPathId: string, tas
     if (!(await publishedContent(tx, locked.path.id)).tasks.has(taskId)) {
       return { ok: false, refusal: 'task_not_published', detail: `Task "${task.title}" was never published, so it has no history to archive` } as const
     }
+    // It leaves its preparation board with it; the board's undo cannot bring it back (ADR 0029).
+    await removeDraftCards(tx, draft.id, [taskId])
     await tx.delete(versionTasks).where(and(eq(versionTasks.learningPathVersionId, draft.id), eq(versionTasks.taskId, taskId)))
     return { ok: true, document: await readDocument(tx, await advanceRevision(tx, locked.path)) } as const
   })

@@ -91,7 +91,7 @@ async function saved(page: Page, revision: number) {
   await page.waitForSelector(`#save-status[data-state="saved"][data-revision="${revision}"]`)
   await state(page, 'saved')
 }
-/** `board`: the context has a Task Board (personal since UX03 #49); Coach and learner boards arrive with UX04/UX05. */
+/** `board`: the context has a Task Board (personal since UX03 #49, Coach Drafts since UX04 #50); learner boards arrive with UX05. */
 async function cleanChrome(page: Page, ids: string[], board = false) {
   const body = await page.evaluate(() => document.body.innerText)
   for (const id of ids) {
@@ -414,7 +414,7 @@ async function main() {
     await setValue(coach, `#task-edit-title-${c.ta}`, 'Coach-authored Task')
     await saved(coach, draftSeed.learningPath.revision + 1)
     check(await visible(coach, `#task-edit-required-${c.ta}`), 'Draft Required/Enrichment setting became unreachable')
-    await cleanChrome(coach, [coachPath, c.a, c.b, c.ta, c.tb])
+    await cleanChrome(coach, [coachPath, c.a, c.b, c.ta, c.tb], true)
     await narrow(coach, 'Matrices', c.tb)
     const savedDraft = await ok(coach, `/coach/learning-paths/${coachPath}`)
     const version = (await ok(coach, `/coach/learning-paths/${coachPath}/publication`, 'POST', { expectedRevision: savedDraft.learningPath.revision })).version

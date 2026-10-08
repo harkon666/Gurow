@@ -40,9 +40,10 @@ Every browser check is in the profile. No browser check is retired: each one gua
 | `t30-archive-content` | Keep | Retention and archival: archived Tasks keep their history and XP, deletion of Tasks with history is blocked, Version evidence is kept | |
 | `t31-arrange-selection` | Keep | Box selection and multi-drag as one undo step, world limits, stale and out-of-range saves refused | |
 | `t32-delete-content` | Keep | Deletion refused when history exists, undo/redo of deletions as new saves, stale and forbidden deletions | |
-| `ux01-navigation` | Adapt | Canvas-first shell, keyboard navigation, truthful save language, no technical chrome, renderer-down learning and Review, forbidden cross-context writes | UX03 (#49): Open board is expected in the personal context; Coach and learner views must still show no board action until UX04/UX05. |
+| `ux01-navigation` | Adapt | Canvas-first shell, keyboard navigation, truthful save language, no technical chrome, renderer-down learning and Review, forbidden cross-context writes | UX03 (#49): Open board is expected in the personal context. UX04 (#50): it is expected in the Coach Draft too; learner and Review views must still show no board action until UX05. |
 | `ux02-connections` | Keep | Dragged Prerequisite connections: validation, persistence, one-gesture undo, stale reapply, read-only learner and published views | |
 | `ux03-task-board` | Keep | Personal Task Board (#49): Completion Column membership equals completion under XP rules, failed/lost/stale/refused board writes keep local intent, column removal never loses Tasks, archived Tasks stay off the board, narrow keyboard use without WebGPU | Added by UX03; parallel on ports 3595/3596 with `gurow_ux03_browser_test`. |
+| `ux04-coach-board` | Keep | Coach Draft preparation board (#50): columns grant no Approval, XP, Mastery or publication gate, only the owning Coach reads or saves it, a published Draft's board is frozen, deletion undo and archival keep published material and history, failed/stale writes keep local intent, identity switching leaks nothing, narrow keyboard use without WebGPU | Added by UX04; parallel on ports 3597/3598 with `gurow_ux04_browser_test`. |
 
 ## Suites and support checks
 
@@ -81,6 +82,7 @@ Each of these runs the same test files as a broader suite in the profile. The su
 | `t28-kept-work-rules` | Retire | Kept-work records and sessions | `frontend-tests` runs `keptWork.test.ts`, `keptWorkSession.test.ts` and the other four listed files |
 | `ux03-backend-board` | Retire | Task Board ownership, initial placement, conflicts, atomic completion, retry-safe XP, retention and the database membership triggers | `backend-tests` runs `test/task-board.test.ts` |
 | `ux03-board-rules` | Retire | Board intents, completion effects and the board save state machine | `frontend-tests` runs `src/components/board/board.test.ts` |
+| `ux04-backend-board` | Retire | Draft preparation board ownership, open-Draft scope, initial placement, conflicts, coherence with Draft saves and archival, frozen published boards, no learner or content writes | `backend-tests` runs `test/draft-board.test.ts` |
 | `t29-reuse-rules` | Retire | Copy/reuse rules | `frontend-tests` runs `reuse.test.ts`, `draftRules.test.ts` |
 | `t31-protocol` | Retire | Multi-selection protocol | `frontend-tests` runs `protocol.test.ts`, `selection.test.ts`, `run.test.ts` |
 | `t06-l3-08-engine-labels` | Retire | Engine label geometry | `rust-tests` runs every `engine-core` test (this check filters by `label`) |

@@ -493,6 +493,56 @@ export const personalBoardCards = pgTable('personal_board_cards', {
   foreignKey({ name: 'personal_board_cards_column_fk', columns: [t.columnId, t.learningPathId, t.skillId], foreignColumns: [personalBoardColumns.id, personalBoardColumns.learningPathId, personalBoardColumns.skillId] }),
 ])
 
+/**
+ * A Coach's preparation board for one Skill of a Learning Path Draft (ADR 0027, 0029):
+ * ordered columns of the Draft's Tasks expressing material readiness, kept apart from
+ * the Draft's content. It belongs to the Draft (an unpublished Version), so publication
+ * freezes it with the Version (migration 0017) and the next Draft starts its own board.
+ * `revision` is the expected revision of every board save, independent of the Path's.
+ */
+export const draftTaskBoards = pgTable('draft_task_boards', {
+  learningPathVersionId: uuid('learning_path_version_id').notNull(),
+  skillId: uuid('skill_id').notNull(),
+  revision: integer('revision').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ name: 'draft_task_boards_pk', columns: [t.learningPathVersionId, t.skillId] }),
+  foreignKey({ name: 'draft_task_boards_skill_fk', columns: [t.learningPathVersionId, t.skillId], foreignColumns: [versionSkills.learningPathVersionId, versionSkills.skillId] }),
+  check('draft_task_boards_revision_nonnegative', sql`${t.revision} >= 0`),
+])
+
+/** A preparation column: a user-named readiness grouping with no learning role. */
+export const draftBoardColumns = pgTable('draft_board_columns', {
+  id: uuid('id').primaryKey(),
+  learningPathVersionId: uuid('learning_path_version_id').notNull(),
+  skillId: uuid('skill_id').notNull(),
+  name: text('name').notNull(),
+  position: integer('position').notNull(),
+}, (t) => [
+  unique('draft_board_columns_id_board_key').on(t.id, t.learningPathVersionId, t.skillId),
+  unique('draft_board_columns_position_key').on(t.learningPathVersionId, t.skillId, t.position),
+  foreignKey({ name: 'draft_board_columns_board_fk', columns: [t.learningPathVersionId, t.skillId], foreignColumns: [draftTaskBoards.learningPathVersionId, draftTaskBoards.skillId] }),
+  check('draft_board_columns_name', sql`length(trim(${t.name})) > 0 AND length(${t.name}) <= 60`),
+])
+
+/**
+ * One Draft Task's card. It refers to the Task's definition in this Draft, so a Task
+ * leaves the board before it leaves the Draft, and never copies anything from it.
+ */
+export const draftBoardCards = pgTable('draft_board_cards', {
+  learningPathVersionId: uuid('learning_path_version_id').notNull(),
+  skillId: uuid('skill_id').notNull(),
+  taskId: uuid('task_id').notNull(),
+  columnId: uuid('column_id').notNull(),
+  position: integer('position').notNull(),
+}, (t) => [
+  primaryKey({ name: 'draft_board_cards_pk', columns: [t.learningPathVersionId, t.taskId] }),
+  unique('draft_board_cards_position_key').on(t.columnId, t.position),
+  foreignKey({ name: 'draft_board_cards_task_fk', columns: [t.learningPathVersionId, t.taskId], foreignColumns: [versionTasks.learningPathVersionId, versionTasks.taskId] }),
+  foreignKey({ name: 'draft_board_cards_task_skill_fk', columns: [t.taskId, t.skillId], foreignColumns: [tasks.id, tasks.skillId] }),
+  foreignKey({ name: 'draft_board_cards_column_fk', columns: [t.columnId, t.learningPathVersionId, t.skillId], foreignColumns: [draftBoardColumns.id, draftBoardColumns.learningPathVersionId, draftBoardColumns.skillId] }),
+])
+
 /** ALL prerequisite edges within one personal Path, satisfied by declared Mastery. */
 export const personalPrerequisites = pgTable('personal_prerequisites', {
   learningPathId: uuid('learning_path_id').notNull(),

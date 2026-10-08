@@ -6,7 +6,7 @@ import { TemporaryPanel } from '../editor/TemporaryPanel'
 import { loadCameraState, saveCameraState } from '../editor/checkpoint'
 import type { CameraState, PrerequisiteConnection } from '../editor/protocol'
 import type { GpuStatus, SelectedSkillInfo } from '../editor/types'
-import { archiveDraftTask, archivePersonalTask, performLearningAction, readCoachPath, readCoachVersion, readLearningPath, readLearningState, saveCoachDraft, saveLearningPath, type ApiResult, type EditablePathDocument, type LearningAction, type LearningState, type PathSave, type PathSkill, type PathTask } from '../../lib/api'
+import { archiveDraftTask, archivePersonalTask, performLearningAction, readCoachPath, readCoachVersion, readDraftBoard, readLearningPath, readLearningState, readPersonalBoard, saveCoachDraft, saveDraftBoard, saveLearningPath, savePersonalBoard, type ApiResult, type EditablePathDocument, type LearningAction, type LearningState, type PathSave, type PathSkill, type PathTask } from '../../lib/api'
 import { Autosave, type SaveState } from './autosave'
 import { CANVAS_FORMAT_VERSION, nameSkills, pathChanges, pathWorkProblem, reapplyPath, samePathWork, type PathWork, type WorkContext } from './keptWork'
 import { KeptWorkList, SaveConflict } from './KeptWorkPanel'
@@ -19,7 +19,8 @@ import { ReusePanel } from './ReusePanel'
 import { ArchiveTaskControl, RetainedTasks, type RetainedTask } from './Archival'
 import { DeleteSkillControl } from './Deletion'
 import { TaskBoard } from '../board/TaskBoard'
-import { usePersonalBoards } from './personalBoards'
+import type { BoardColumn } from '../board/boardModel'
+import { useTaskBoards, type BoardStore } from './taskBoards'
 
 const AUTOSAVE_DELAY_MS = 500
 
@@ -158,10 +159,16 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
   const autosaveRef = useRef<Autosave<LocalDocument> | null>(null)
   /** Each Skill's Task IDs in the document the backend last accepted from this tab. */
   const savedTasks = useRef(new Map(initial.application.skills.map((skill) => [skill.id, skill.tasks.map((task) => task.id)])))
-  // Personal Task Boards (ADR 0027): their arrangement is saved apart from the document, against its own revision.
-  const boards = usePersonalBoards({
-    pathId,
-    enabled: personal,
+  // Task Boards (ADR 0027): their arrangement is saved apart from the document, against its own revision.
+  // A personal board's Completion Column completes Tasks; a Draft's preparation board (ADR 0029) only arranges.
+  const boardStore = useMemo<BoardStore<LearningState>>(() => personal
+    ? { read: (skillId) => readPersonalBoard(pathId, skillId), save: (skillId, revision, columns) => savePersonalBoard(pathId, skillId, revision, columns) }
+    : { read: (skillId) => readDraftBoard(pathId, draftId!, skillId), save: (skillId, revision, columns) => saveDraftBoard(pathId, draftId!, skillId, revision, columns) },
+  [personal, pathId, draftId])
+  const boards = useTaskBoards<LearningState>({
+    scope: `${pathId}:${draftId ?? ''}`,
+    store: boardStore,
+    enabled: personal || draftId !== null,
     tasksOf: (skillId) => local.current.skills.find((skill) => skill.id === skillId)?.tasks.map((task) => task.id) ?? [],
     savedTasksOf: (skillId) => savedTasks.current.get(skillId) ?? [],
     // Read again rather than taking the board's answer: a reward change answered meanwhile may be newer.
@@ -619,11 +626,16 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
     })
     boardSync.perform({ kind: 'move', taskId: deleted.task.id, columnId: deleted.columnId, index: deleted.columnIndex, columnName: deleted.columnName })
   }
-  /** Deletion where the Task has no history; otherwise the existing revision-checked archival. */
+  /**
+   * Deletion where the Task has no history; otherwise the existing revision-checked archival:
+   * a personal Task with learning records, or a Draft Task a published Version holds.
+   */
   const boardRemoval = (taskId: string) => {
-    if (!records) return { kind: 'unknown' as const }
-    const saved = records.tasks.some((task) => task.taskId === taskId)
-    if (saved && records.historyTaskIds.includes(taskId)) {
+    const history = personal
+      ? records && records.tasks.some((task) => task.taskId === taskId) && records.historyTaskIds.includes(taskId)
+      : publishedVersionIds.length === 0 ? false : published && published.has(taskId)
+    if (history === null || history === undefined) return { kind: 'unknown' as const }
+    if (history) {
       const task = boardSkill?.tasks.find((t) => t.id === taskId)
       return {
         kind: 'archive' as const,
@@ -632,7 +644,9 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
             prefix="board-"
             taskId={taskId}
             title={task.title}
-            consequence="It leaves the board and this Path's editing; its completion, XP and your Mastery stay as they are."
+            consequence={personal
+              ? 'It leaves the board and this Path\'s editing; its completion, XP and your Mastery stay as they are.'
+              : `It leaves this Draft and its board, so it will not be in the next Version; ${retainedBy(taskId)} and its learners' Submissions, Reviews and XP keep it.`}
             blocked={archiveBlocked}
             busy={keptView.busy}
             onArchive={() => void handleArchive(taskId, task.title).then((archived) => { if (archived) boardSync?.forgetTask(taskId) })}
@@ -811,10 +825,10 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
           onUpdateOutcome={handleUpdateOutcome}
           onAddTask={handleAddTask}
           skillActions={selected ? deleteControl(selected) : null}
-          boardAction={personal && selected ? (
+          boardAction={selected && (personal || draftId) ? (
             <button id="open-board-btn" onClick={() => { setBoardDeletion(null); boards.open(selected.id) }}
               className="w-full rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium py-2">
-              Open board
+              {personal ? 'Open board' : 'Open preparation board'}
             </button>
           ) : null}
           learning={!selectedId ? null : (
@@ -832,18 +846,11 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
               return task && <><TaskDraftRules task={task} onReward={(xpReward) => handleTaskReward(taskId, xpReward)} />{archiveControl(taskId)}</>
             }}
         />
-        {personal && boardSkill && boards.view && (
+        {boardSkill && boards.view && (
           <TaskBoard
             skillTitle={boardSkill.title}
             view={boards.view}
             tasks={boardSkill.tasks}
-            completed={(taskId) => records?.tasks.find((task) => task.taskId === taskId)?.completed}
-            columnNote={(column) => (column.completion ? 'Moving a Task here completes it; moving it out undoes completion. Mastery stays your own declaration.' : null)}
-            effectText={(taskId, completed) => {
-              const reward = records?.tasks.find((task) => task.taskId === taskId)?.xpReward ?? 0
-              return completed ? `+${reward} XP` : `−${reward} XP (XP Correction)`
-            }}
-            completionBlocked={boardLearningSkill && !boardLearningSkill.access ? 'This Skill is locked, so its Tasks cannot be completed until it opens.' : null}
             onOp={(op) => boardSync?.perform(op)}
             onRetry={() => boardSync?.retry()}
             onDiscard={() => boardSync?.discard()}
@@ -856,9 +863,38 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
             onEditTask={(taskId, change) => changeBoardTasks(boardSkill.id, (tasks) => tasks.map((task) => (task.id === taskId ? { ...task, ...change } : task)))}
             removal={boardRemoval}
             deletion={boardDeletion && boardDeletion.skillId === boardSkill.id ? { title: boardDeletion.task.title, onUndo: undoBoardDeletion } : null}
-            taskExtra={(taskId) => <TaskLearning prefix="board-" view={learning} taskId={taskId} onAction={act} />}
+            {...(personal ? {
+              completed: (taskId: string) => records?.tasks.find((task) => task.taskId === taskId)?.completed,
+              columnNote: (column: BoardColumn) => (column.completion ? 'Moving a Task here completes it; moving it out undoes completion. Mastery stays your own declaration.' : null),
+              effectText: (taskId: string, completed: boolean) => {
+                const reward = records?.tasks.find((task) => task.taskId === taskId)?.xpReward ?? 0
+                return completed ? `+${reward} XP` : `−${reward} XP (XP Correction)`
+              },
+              completionBlocked: boardLearningSkill && !boardLearningSkill.access ? 'This Skill is locked, so its Tasks cannot be completed until it opens.' : null,
+              taskExtra: (taskId: string) => <TaskLearning prefix="board-" view={learning} taskId={taskId} onAction={act} />,
+            } : {
+              // A Draft's preparation board (ADR 0029): readiness only, with the Task's Draft rules at hand.
+              boardName: 'Preparation board',
+              boardNote: 'Columns show how ready this Draft\'s material is. They do not publish, approve, award XP or change any learner\'s board; publication checks the Draft\'s rules as before.',
+              removalNote: 'Only the Tasks\' column changes: no Task, rule, publication check or learner record changes.',
+              cardBadges: (taskId: string) => {
+                const task = boardSkill.tasks.find((t) => t.id === taskId)
+                return task && <DraftTaskBadges task={task} />
+              },
+              taskExtra: (taskId: string) => {
+                const task = boardSkill.tasks.find((t) => t.id === taskId)
+                return task && (
+                  <TaskDraftRules
+                    prefix="board-"
+                    task={task}
+                    onRequired={(required) => changeBoardTasks(boardSkill.id, (tasks) => tasks.map((t) => (t.id === taskId ? { ...t, required } : t)))}
+                    onReward={(xpReward) => changeBoardTasks(boardSkill.id, (tasks) => tasks.map((t) => (t.id === taskId ? { ...t, xpReward } : t)))}
+                  />
+                )
+              },
+            })}
             statusExtra={<>
-              <span id="board-path-xp" data-xp={records?.xp ?? ''} className="text-xs px-2 py-1 rounded-lg border border-sky-800/60 text-sky-200">{records ? `Path XP ${records.xp}` : 'Path XP …'}</span>
+              {personal && <span id="board-path-xp" data-xp={records?.xp ?? ''} className="text-xs px-2 py-1 rounded-lg border border-sky-800/60 text-sky-200">{records ? `Path XP ${records.xp}` : 'Path XP …'}</span>}
               <span id="board-document-status" data-state={saveState.kind} className="text-xs text-slate-400">{saveState.kind === 'saved' ? 'Tasks saved' : saveState.kind === 'saving' || saveState.kind === 'dirty' ? 'Saving Tasks…' : 'Tasks not saved: go back to the canvas to resolve it'}</span>
             </>}
           />
@@ -876,6 +912,16 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
         )}
       </section>
     </div>
+  )
+}
+
+/** A Draft Task's designation and reward on its preparation card. */
+function DraftTaskBadges({ task }: { task: PathTask }) {
+  return (
+    <>
+      <span data-required={task.required === true} className={`text-[10px] px-1 rounded border ${task.required ? 'text-slate-300 border-slate-700' : 'text-sky-300 border-sky-900/70'}`}>{task.required ? 'Required' : 'Enrichment'}</span>
+      <span className="text-[10px] px-1 rounded border text-amber-300 border-amber-900/70">{task.xpReward ?? 0} XP</span>
+    </>
   )
 }
 

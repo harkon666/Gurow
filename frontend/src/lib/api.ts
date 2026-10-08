@@ -207,6 +207,19 @@ export const readPersonalBoard = (pathId: string, skillId: string) => call<{ boa
 export const savePersonalBoard = (pathId: string, skillId: string, expectedRevision: number, columns: TaskBoardColumn[]) =>
   call<{ changed: boolean; board: TaskBoard; learningState: LearningState }>(boardRoute(pathId, skillId), { method: 'PUT', body: { expectedRevision, columns } })
 
+const draftBoardRoute = (pathId: string, draftId: string, skillId: string) => `/coach/learning-paths/${pathId}/drafts/${draftId}/skills/${skillId}/board`
+
+/**
+ * A Draft Skill's preparation board (ADR 0029), opened (and created once) by reading it.
+ * Its columns have no role: a save writes the arrangement and nothing else. A board of a
+ * Draft published meanwhile answers 409 `draft_published`.
+ */
+export const readDraftBoard = (pathId: string, draftId: string, skillId: string) => call<{ board: TaskBoard }>(draftBoardRoute(pathId, draftId, skillId))
+
+/** Saves the whole preparation board based on `expectedRevision`; stale and repeated saves answer as for a personal board. */
+export const saveDraftBoard = (pathId: string, draftId: string, skillId: string, expectedRevision: number, columns: TaskBoardColumn[]) =>
+  call<{ changed: boolean; board: TaskBoard }>(draftBoardRoute(pathId, draftId, skillId), { method: 'PUT', body: { expectedRevision, columns } })
+
 /** A Coach Workspace the signed-in Account owns (ADR 0011). */
 export interface CoachWorkspaceSummary { id: string; name: string; createdAt: string }
 export interface CoachWorkspace { workspace: CoachWorkspaceSummary; learningPaths: { id: string; title: string; goal: string }[] }

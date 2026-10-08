@@ -16,11 +16,19 @@ export interface BoardTask { id: string; title: string; description: string }
 
 export interface TaskBoardProps {
   skillTitle: string
+  /** What this context calls the board (e.g. "Preparation board"); "Task Board" by default. */
+  boardName?: string
+  /** What the board's placement means here, shown under its header. */
+  boardNote?: string
   view: BoardView
   /** This tab's active Tasks of the Skill. */
   tasks: BoardTask[]
-  /** Backend-confirmed completion of a Task, shown on its card; undefined until it is saved. */
-  completed: (taskId: string) => boolean | undefined
+  /** Backend-confirmed completion of a Task, shown on its card; undefined until it is saved. Absent where boards have no completion. */
+  completed?: (taskId: string) => boolean | undefined
+  /** Context facts shown on a card (e.g. Required or Enrichment, reward). */
+  cardBadges?: (taskId: string) => ReactNode
+  /** What removing a column changes beyond the Tasks' column, where the board has no Completion Column. */
+  removalNote?: string
   /** What a column's role means here, shown under its name (e.g. "Moving a Task here completes it"). */
   columnNote?: (column: BoardColumn) => string | null
   /** The learning consequence of a Task entering (true) or leaving (false) the Completion Column. */
@@ -165,11 +173,11 @@ export function TaskBoard(props: TaskBoardProps) {
   }
 
   return (
-    <BoardSurface title={`Task Board · ${props.skillTitle}`} onClose={() => { if (!drag) props.onClose() }}>
+    <BoardSurface title={`${props.boardName ?? 'Task Board'} · ${props.skillTitle}`} onClose={() => { if (!drag) props.onClose() }}>
       <div className="h-full flex flex-col">
         <header className="shrink-0 flex flex-wrap items-center gap-3 px-4 py-3 border-b border-slate-800 bg-slate-900/70">
           <button id="board-close-btn" onClick={props.onClose} className="rounded-lg border border-slate-700 px-3 py-1.5 text-sm hover:bg-slate-800">← Back to canvas</button>
-          <h2 id="board-title" className="text-base font-semibold text-slate-100">Task Board · {props.skillTitle}</h2>
+          <h2 id="board-title" className="text-base font-semibold text-slate-100">{props.boardName ?? 'Task Board'} · {props.skillTitle}</h2>
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {props.statusExtra}
             <BoardStatusBadge status={view.status} />
@@ -183,6 +191,7 @@ export function TaskBoard(props: TaskBoardProps) {
             </button>
           </div>
         </header>
+        {props.boardNote && <p id="board-note" className="shrink-0 px-4 py-1.5 text-xs text-slate-400 border-b border-slate-800">{props.boardNote}</p>}
         <BoardAlerts {...props} titleOf={(id) => titles.get(id)?.title ?? null} />
         {view.goneTaskIds.length > 0 && (
           <p id="board-stale-tasks" role="status" data-task-ids={view.goneTaskIds.join(',')} className="shrink-0 px-4 py-2 text-xs text-amber-100 bg-amber-950/30 border-b border-amber-900/60">
@@ -266,7 +275,7 @@ export function TaskBoard(props: TaskBoardProps) {
                     const task = titles.get(taskId)
                     if (!task) return null
                     const dragged = drag?.taskId === taskId
-                    const completed = props.completed(taskId)
+                    const completed = props.completed?.(taskId)
                     return (
                       <li key={taskId} className="relative">
                         {drag?.target?.columnId === column.id && drag.target.index === index && !dragged && <div data-drop-indicator className="absolute -top-1.5 inset-x-1 h-0.5 rounded bg-blue-400" />}
@@ -274,7 +283,7 @@ export function TaskBoard(props: TaskBoardProps) {
                           id={`board-card-${taskId}`}
                           data-card-id={taskId}
                           data-column-id={column.id}
-                          data-completed={completed === undefined ? 'unknown' : String(completed)}
+                          data-completed={!props.completed ? undefined : completed === undefined ? 'unknown' : String(completed)}
                           aria-label={task.title}
                           onPointerDown={(e) => onPointerDown(e, taskId)}
                           onPointerMove={onPointerMove}
@@ -288,6 +297,7 @@ export function TaskBoard(props: TaskBoardProps) {
                             {completed && <span className="shrink-0 text-[10px] text-emerald-300 border border-emerald-800/70 rounded px-1">Complete</span>}
                           </div>
                           {task.description && <p className="mt-1 text-xs text-slate-400 line-clamp-2 whitespace-pre-wrap">{task.description}</p>}
+                          {props.cardBadges && <div className="mt-1.5 flex flex-wrap gap-1">{props.cardBadges(taskId)}</div>}
                           <div className="mt-2 flex gap-1.5">
                             <button id={`card-move-${taskId}`} aria-expanded={menu?.kind === 'card' && menu.id === taskId}
                               onClick={() => setMenu(menu?.kind === 'card' && menu.id === taskId ? null : { kind: 'card', id: taskId })}
@@ -349,6 +359,7 @@ export function TaskBoard(props: TaskBoardProps) {
           columnId={removing}
           titleOf={(id) => titles.get(id)?.title ?? null}
           effectText={props.effectText}
+          removalNote={props.removalNote}
           completionBlocked={props.completionBlocked ?? null}
           onConfirm={(op) => { setRemoving(null); perform(op, 'board-add-column-btn') }}
           onClose={() => setRemoving(null)}
@@ -625,11 +636,12 @@ function CardDetails({ task, columnName, removal, extra, onSave, onClose }: {
   )
 }
 
-function RemoveColumnDialog({ columns, columnId, titleOf, effectText, completionBlocked, onConfirm, onClose }: {
+function RemoveColumnDialog({ columns, columnId, titleOf, effectText, removalNote, completionBlocked, onConfirm, onClose }: {
   columns: BoardColumn[]
   columnId: string
   titleOf: (taskId: string) => string | null
   effectText?: (taskId: string, completed: boolean) => string
+  removalNote?: string
   completionBlocked: string | null
   onConfirm: (op: BoardOp) => void
   onClose: () => void
@@ -664,7 +676,7 @@ function RemoveColumnDialog({ columns, columnId, titleOf, effectText, completion
             )}
             <div id="remove-consequences" className="rounded border border-slate-700 bg-slate-900 p-3 text-xs text-slate-300">
               <p className="font-semibold text-slate-200 mb-1">What happens</p>
-              {effects.length === 0 ? <p id="remove-no-learning-change">No Task's completion or XP changes.</p> : (
+              {effects.length === 0 ? <p id="remove-no-learning-change">{removalNote ?? 'No Task\'s completion or XP changes.'}</p> : (
                 <ul className="list-disc pl-4 space-y-0.5">
                   {effects.map((effect) => {
                     const title = titleOf(effect.taskId)
@@ -680,7 +692,7 @@ function RemoveColumnDialog({ columns, columnId, titleOf, effectText, completion
                   })}
                 </ul>
               )}
-              <p className="mt-1 text-slate-500">Mastery does not change.</p>
+              {!removalNote && <p className="mt-1 text-slate-500">Mastery does not change.</p>}
             </div>
             {blockedCompletion && <p id="remove-column-refusal" role="alert" className="text-xs text-red-300">{blockedCompletion}</p>}
             <div className="flex gap-2">

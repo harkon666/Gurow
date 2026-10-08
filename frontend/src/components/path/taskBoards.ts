@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { readPersonalBoard, savePersonalBoard, type LearningState } from '../../lib/api'
+import type { ApiResult } from '../../lib/api'
+import type { Board, BoardColumn } from '../board/boardModel'
 import { BoardSync, type BoardSaveAnswer, type BoardView } from '../board/boardSync'
 
 const REFUSALS: Record<string, string> = {
@@ -10,18 +11,31 @@ const REFUSALS: Record<string, string> = {
   invalid_board: 'the board is not valid',
   skill_not_found: 'this Skill is not saved yet',
   learning_path_not_found: 'this Path is not available to the signed-in Account',
+  draft_published: 'this Draft was published, so its board can no longer change; reload the page to see the latest version',
+  draft_not_found: 'this Draft is not available to the signed-in Account',
   unauthenticated: 'you are signed out',
 }
 
 /**
- * The personal Task Boards of one Path (ADR 0027), one per Skill. Each keeps its own
+ * Where one context's boards are read and saved: a personal Path's (answering its
+ * learning records too) or a Coach Draft's (ADR 0027, 0029).
+ */
+export interface BoardStore<L> {
+  read: (skillId: string) => Promise<ApiResult<{ board: Board }>>
+  save: (skillId: string, expectedRevision: number, columns: BoardColumn[]) => Promise<ApiResult<{ board: Board; learningState?: L }>>
+}
+
+/**
+ * The Task Boards of one Path or Draft (ADR 0027), one per Skill. Each keeps its own
  * pending board changes while the board is closed, so a refused or conflicting change
  * stays recoverable until the owner retries, reapplies or discards it. Only the open
  * board is shown; an accepted save, the first board read, or a board adopted with other
  * Tasks in its Completion Column calls `learningChanged`, since completion may have changed.
+ * `scope` names the boards' owner (the Path, and the Draft); another scope starts afresh.
  */
-export function usePersonalBoards({ pathId, enabled, tasksOf, savedTasksOf, learningChanged }: {
-  pathId: string
+export function useTaskBoards<L>({ scope, store, enabled, tasksOf, savedTasksOf, learningChanged }: {
+  scope: string
+  store: BoardStore<L>
   enabled: boolean
   /** This tab's active Task IDs of a Skill, in document order. */
   tasksOf: (skillId: string) => string[]
@@ -29,28 +43,28 @@ export function usePersonalBoards({ pathId, enabled, tasksOf, savedTasksOf, lear
   savedTasksOf: (skillId: string) => string[]
   learningChanged: () => void
 }) {
-  const syncs = useRef(new Map<string, BoardSync<LearningState>>())
+  const syncs = useRef(new Map<string, BoardSync<L>>())
   const [openId, setOpenId] = useState<string | null>(null)
   const openRef = useRef<string | null>(null)
   const [view, setView] = useState<BoardView | null>(null)
   const [pending, setPending] = useState(false)
-  const latest = useRef({ tasksOf, savedTasksOf, learningChanged })
-  latest.current = { tasksOf, savedTasksOf, learningChanged }
+  const latest = useRef({ store, tasksOf, savedTasksOf, learningChanged })
+  latest.current = { store, tasksOf, savedTasksOf, learningChanged }
 
   const syncFor = useCallback((skillId: string) => {
     let sync = syncs.current.get(skillId)
     if (sync) return sync
-    sync = new BoardSync<LearningState>({
+    sync = new BoardSync<L>({
       read: async () => {
         try {
-          const result = await readPersonalBoard(pathId, skillId)
+          const result = await latest.current.store.read(skillId)
           return result.ok ? { ok: true, board: result.value.board } : { ok: false, detail: REFUSALS[result.error] ?? result.error }
         } catch {
           return { ok: false, detail: 'the backend could not be reached' }
         }
       },
-      save: async (expectedRevision, columns): Promise<BoardSaveAnswer<LearningState>> => {
-        const result = await savePersonalBoard(pathId, skillId, expectedRevision, columns)
+      save: async (expectedRevision, columns): Promise<BoardSaveAnswer<L>> => {
+        const result = await latest.current.store.save(skillId, expectedRevision, columns)
         if (result.ok) return { kind: 'accepted', board: result.value.board, learning: result.value.learningState }
         if (result.error === 'stale_revision' && result.body?.current) return { kind: 'stale', current: result.body.current as never }
         const detail = REFUSALS[result.error] ?? result.error
@@ -67,9 +81,12 @@ export function usePersonalBoards({ pathId, enabled, tasksOf, savedTasksOf, lear
     })
     syncs.current.set(skillId, sync)
     return sync
-  }, [pathId])
+  }, [scope])
 
-  useEffect(() => () => { for (const sync of syncs.current.values()) sync.close() }, [])
+  useEffect(() => () => {
+    for (const sync of syncs.current.values()) sync.close()
+    syncs.current.clear()
+  }, [scope])
 
   const open = useCallback((skillId: string) => {
     if (!enabled) return

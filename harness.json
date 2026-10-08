@@ -82,11 +82,13 @@
     "ux03-backend-board": {"cwd": "backend", "argv": ["bun", "test", "test/task-board.test.ts"], "timeout": 180, "requires": ["db-up"]},
     "ux03-board-rules": {"cwd": "frontend", "argv": ["bun", "test", "src/components/board/board.test.ts"], "timeout": 120, "parallel": true},
     "ux03-task-board": {"cwd": "frontend", "argv": ["bun", "run", "scripts/ux03-task-board-check.ts", "--skip-build"], "timeout": 900, "requires": ["build", "db-up"], "parallel": true},
+    "ux04-backend-board": {"cwd": "backend", "argv": ["bun", "test", "test/draft-board.test.ts"], "timeout": 180, "requires": ["db-up"]},
+    "ux04-coach-board": {"cwd": "frontend", "argv": ["bun", "run", "scripts/ux04-coach-board-check.ts", "--skip-build"], "timeout": 900, "requires": ["build", "db-up"], "parallel": true},
     "t06-l3-06-gate-tests": {"cwd": "frontend", "argv": ["bun", "test", "scripts/benchmark/gate.test.ts", "scripts/benchmark/report.test.ts", "scripts/benchmark/fixture.test.ts", "scripts/benchmark/run.test.ts"], "timeout": 120, "parallel": true}
   },
   "profiles": {
     "quick": ["harness-tests", "frontend-types", "frontend-tests", "rust-tests", "collector-tests", "report-tests", "db-up", "backend-types", "backend-tests"],
-    "regression": ["harness-tests", "frontend-types", "frontend-tests", "rust-tests", "build", "db-up", "backend-types", "backend-tests", "t04-browser", "t05-browser", "editor-lifecycle", "t06-functional", "t43-gpu-errors", "t44-label-scroll", "t15-sign-in", "t16-path-authoring", "t17-personal-learning", "t18-coach-draft", "t19-publication", "t20-invitation", "t21-enrolled-navigation", "t22-learner-work", "t23-coach-review", "t24-correct-approval", "t25-access-override", "t26-participation", "t27-shared-layout", "t28-recovery", "t29-copy-content", "t30-archive-content", "t31-arrange-selection", "t32-delete-content", "ux01-navigation", "ux02-connections", "ux03-task-board"],
+    "regression": ["harness-tests", "frontend-types", "frontend-tests", "rust-tests", "build", "db-up", "backend-types", "backend-tests", "t04-browser", "t05-browser", "editor-lifecycle", "t06-functional", "t43-gpu-errors", "t44-label-scroll", "t15-sign-in", "t16-path-authoring", "t17-personal-learning", "t18-coach-draft", "t19-publication", "t20-invitation", "t21-enrolled-navigation", "t22-learner-work", "t23-coach-review", "t24-correct-approval", "t25-access-override", "t26-participation", "t27-shared-layout", "t28-recovery", "t29-copy-content", "t30-archive-content", "t31-arrange-selection", "t32-delete-content", "ux01-navigation", "ux02-connections", "ux03-task-board", "ux04-coach-board"],
     "full": ["@regression"]
   },
   "tickets": {
@@ -129,6 +131,7 @@
     "T32": ["t32-backend-deletion", "t32-engine-deletion", "t32-delete-content", "@regression"],
     "T06-L3-06": ["t06-functional", "t06-l3-06-gate-tests", "t06-l3-08-fixture-check-v5", "frontend-types"],
     "UX-H": ["harness-tests", "@regression"],
-    "UX03": ["ux03-backend-board", "ux03-board-rules", "ux03-task-board", "@regression"]
+    "UX03": ["ux03-backend-board", "ux03-board-rules", "ux03-task-board", "@regression"],
+    "UX04": ["ux04-backend-board", "ux03-board-rules", "ux04-coach-board", "@regression"]
   }
 }
