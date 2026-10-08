@@ -45,6 +45,7 @@ const PERSONAL_REFUSAL_STATUS: Record<personal.PersonalRefusal, ContentfulStatus
   task_not_found: 404,
   skill_not_found: 404,
   task_archived: 409,
+  skill_archived: 409,
   skill_locked: 403,
 }
 
@@ -86,6 +87,7 @@ const SAVE_REFUSAL_STATUS: Record<authoring.SaveRefusal, ContentfulStatusCode> =
   task_owned_elsewhere: 409,
   task_skill_mismatch: 409,
   task_archived: 409,
+  skill_archived: 409,
   skill_has_history: 409,
   task_has_history: 409,
 }
@@ -97,6 +99,7 @@ const DRAFT_REFUSAL_STATUS: Record<coaching.DraftRefusal, ContentfulStatusCode> 
   skill_owned_elsewhere: 409,
   task_owned_elsewhere: 409,
   task_skill_mismatch: 409,
+  skill_archived: 409,
   skill_has_history: 409,
   task_has_history: 409,
 }
@@ -467,6 +470,20 @@ export function createApp({ db, identity, auth, delivery }: { db: Database; iden
     return c.json({ changed: result.changed, learningState: result.learningState, document: result.document })
   })
 
+  app.post(`${personalPath}/skills/:skillId/archive`, async (c) => {
+    const target = personalTarget(c.req.param('pathId'), c.req.param('skillId'))
+    if (!target) return c.json({ error: 'learning_path_not_found' }, 404)
+    const body: unknown = await c.req.json().catch(() => null)
+    const expectedRevision = typeof body === 'object' && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>).expectedRevision : undefined
+    if (typeof expectedRevision !== 'number' || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      if (!await authoring.readPersonalPath(db, target.pathId, c.get('accountId'))) return c.json({ error: 'learning_path_not_found' }, 404)
+      return c.json({ error: 'invalid_request', detail: 'expectedRevision must be a non-negative integer' }, 422)
+    }
+    const result = await authoring.archivePersonalSkill(db, target.pathId, target.targetId, c.get('accountId'), expectedRevision)
+    if (!result.ok) return c.json({ error: result.refusal, detail: result.detail, ...(result.current ? { current: result.current } : {}) }, result.refusal === 'stale_revision' || result.refusal === 'skill_has_prerequisites' ? 409 : 404)
+    return c.json({ changed: result.changed, learningState: result.learningState, document: result.document })
+  })
+
   app.put(`${personalPath}/tasks/:taskId/reward`, async (c) => {
     const target = personalTarget(c.req.param('pathId'), c.req.param('taskId'))
     if (!target) return c.json({ error: 'learning_path_not_found' }, 404)
@@ -593,6 +610,21 @@ export function createApp({ db, identity, auth, delivery }: { db: Database; iden
     }
     const result = await coaching.archiveDraftTask(db, pathId, taskId, c.get('accountId'), expectedRevision)
     if (!result.ok) return c.json({ error: result.refusal, detail: result.detail, ...(result.current ? { current: result.current } : {}) }, ARCHIVE_DRAFT_REFUSAL_STATUS[result.refusal])
+    return c.json(result.document)
+  })
+
+  app.post(`${coachPath}/draft/skills/:skillId/archive`, async (c) => {
+    const pathId = c.req.param('pathId')
+    if (!UUID.test(pathId)) return c.json({ error: 'learning_path_not_found' }, 404)
+    const skillId = UUID.test(c.req.param('skillId')) ? c.req.param('skillId').toLowerCase() : NIL_UUID
+    const body: unknown = await c.req.json().catch(() => null)
+    const expectedRevision = typeof body === 'object' && body !== null && !Array.isArray(body) ? (body as Record<string, unknown>).expectedRevision : undefined
+    if (typeof expectedRevision !== 'number' || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
+      if (!await coaching.readCoachPath(db, pathId, c.get('accountId'))) return c.json({ error: 'learning_path_not_found' }, 404)
+      return c.json({ error: 'invalid_request', detail: 'expectedRevision must be a non-negative integer' }, 422)
+    }
+    const result = await coaching.archiveDraftSkill(db, pathId, skillId, c.get('accountId'), expectedRevision)
+    if (!result.ok) return c.json({ error: result.refusal, detail: result.detail, ...(result.current ? { current: result.current } : {}) }, result.refusal === 'learning_path_not_found' || result.refusal === 'skill_not_found' ? 404 : 409)
     return c.json(result.document)
   })
 

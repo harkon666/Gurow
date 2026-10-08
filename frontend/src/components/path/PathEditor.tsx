@@ -6,7 +6,7 @@ import { TemporaryPanel } from '../editor/TemporaryPanel'
 import { loadCameraState, saveCameraState } from '../editor/checkpoint'
 import type { CameraState, PrerequisiteConnection } from '../editor/protocol'
 import type { GpuStatus, SelectedSkillInfo } from '../editor/types'
-import { archiveDraftTask, archivePersonalTask, performLearningAction, readCoachPath, readCoachVersion, readDraftBoard, readLearningPath, readLearningState, readPersonalBoard, saveCoachDraft, saveDraftBoard, saveLearningPath, savePersonalBoard, type ApiResult, type EditablePathDocument, type LearningAction, type LearningState, type PathSave, type PathSkill, type PathTask } from '../../lib/api'
+import { archiveDraftSkill, archiveDraftTask, archivePersonalSkill, archivePersonalTask, performLearningAction, readCoachPath, readCoachVersion, readDraftBoard, readLearningPath, readLearningState, readPersonalBoard, saveCoachDraft, saveDraftBoard, saveLearningPath, savePersonalBoard, type ApiResult, type ArchivedSkill, type EditablePathDocument, type LearningAction, type LearningState, type PathSave, type PathSkill, type PathTask } from '../../lib/api'
 import { Autosave, type SaveState } from './autosave'
 import { CANVAS_FORMAT_VERSION, nameSkills, pathChanges, pathWorkProblem, reapplyPath, samePathWork, type PathWork, type WorkContext } from './keptWork'
 import { KeptWorkList, SaveConflict } from './KeptWorkPanel'
@@ -16,7 +16,7 @@ import { describeAction, LearningStatus, SkillLearning, SkillStatusChips, TaskLe
 import { draftRuleProblem, optionalPrerequisiteProblem, optionalToggleProblem, SkillDraftRules, TaskDraftRules } from './DraftRules'
 import { copySkills, copyTask, type ContentKind, type ReuseContent } from './reuse'
 import { ReusePanel } from './ReusePanel'
-import { ArchiveTaskControl, RetainedTasks, type RetainedTask } from './Archival'
+import { ArchivedSkills, ArchiveSkillControl, ArchiveTaskControl, RetainedTasks, type RetainedTask } from './Archival'
 import { DeleteSkillControl } from './Deletion'
 import { TaskBoard } from '../board/TaskBoard'
 import type { BoardColumn } from '../board/boardModel'
@@ -60,6 +60,7 @@ export interface PathMode {
   newTask: (id: string) => PathTask
   /** Archives a saved Task (ADR 0018), based on the accepted revision; answers the new document. */
   archiveTask: (pathId: string, taskId: string, expectedRevision: number) => Promise<ApiResult<EditablePathDocument>>
+  archiveSkill: (pathId: string, skillId: string, expectedRevision: number) => Promise<ApiResult<EditablePathDocument>>
 }
 
 /** Personal Paths (ADR 0012): rewards and thresholds are learning records, not document content. */
@@ -73,6 +74,10 @@ export const PERSONAL_MODE: PathMode = {
     const result = await archivePersonalTask(pathId, taskId, expectedRevision)
     return result.ok ? { ...result, value: result.value.document } : result
   },
+  archiveSkill: async (pathId, skillId, expectedRevision) => {
+    const result = await archivePersonalSkill(pathId, skillId, expectedRevision)
+    return result.ok ? { ...result, value: result.value.document } : result
+  },
 }
 
 /** A Coach's Draft: a new Skill is required with no threshold, a new Task Required with no reward. */
@@ -83,6 +88,7 @@ export const COACH_MODE: PathMode = {
   newSkill: (id, title, outcome) => ({ id, title, outcome, optional: false, xpThreshold: 0, tasks: [] }),
   newTask: (id) => ({ id, title: 'New Task', description: '', required: true, xpReward: 0 }),
   archiveTask: archiveDraftTask,
+  archiveSkill: archiveDraftSkill,
 }
 
 const editorInput = (document: EditablePathDocument) => ({
@@ -135,6 +141,8 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
   const [reuseOpen, setReuseOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
+  const [archiveOpen, setArchiveOpen] = useState(false)
+  const [archivedSkills, setArchivedSkills] = useState<ArchivedSkill[]>(initial.archivedSkills ?? [])
   /** What the last copy added, until the next one. */
   const [reuseNotice, setReuseNotice] = useState<string | null>(null)
   /** What the last archival did or why it failed. */
@@ -175,6 +183,7 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
     learningChanged: () => void learningRef.current?.refresh(),
   })
   const documentAccepted = (document: EditablePathDocument) => {
+    setArchivedSkills(document.archivedSkills ?? [])
     savedTasks.current = new Map(document.application.skills.map((skill) => [skill.id, skill.tasks.map((task) => task.id)]))
     boards.documentAccepted()
   }
@@ -386,18 +395,19 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
    * holds the kept-work session meanwhile: the editor is locked, and an edit that still
    * reaches it is kept for reapplying rather than replaced by the answered document.
    */
-  const handleArchive = async (taskId: string, title: string): Promise<boolean> => {
-    if (saveState.kind !== 'saved') return false
+  const handleArchive = async (id: string, title: string, kind: 'task' | 'skill' = 'task'): Promise<boolean> => {
+    if (saveState.kind !== 'saved' || keptView.busy || archivalHold.current.active || !editorReady) return false
+    if (kind === 'skill' && (boards.pending || learning.pending !== null || connections.some((edge) => edge.from_id === id || edge.to_id === id))) return false
     setArchival(null)
     // From an open board, the board stays in front; the summary is not reopened over it.
-    reselect.current = boards.openId ? null : selectedSkill?.id ?? null
+    reselect.current = kind === 'skill' || boards.openId ? null : selectedSkill?.id ?? null
     archivalHold.current = { active: true, edited: false }
     const outcome = await kept.accept(async () => {
-      const result = await mode.archiveTask(pathId, taskId, saveState.revision)
+      const result = await (kind === 'skill' ? mode.archiveSkill : mode.archiveTask)(pathId, id, saveState.revision)
       if (result.ok) return { ok: true, accepted: result.value }
       const detail = result.error === 'stale_revision'
         ? 'this Path was saved elsewhere since; reload the page to archive from the saved version'
-        : typeof result.body?.detail === 'string' ? result.body.detail : result.status === 404 ? 'this Task is not available to the signed-in Account' : result.error
+        : typeof result.body?.detail === 'string' ? result.body.detail : result.status === 404 ? `this ${kind === 'skill' ? 'Skill' : 'Task'} is not available to the signed-in Account` : result.error
       return { ok: false, detail }
     }).finally(() => { archivalHold.current.active = false })
     // Shown, the answered document replaced the editor and kept any later edit for reapplying; otherwise the edit is saved now.
@@ -408,9 +418,18 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
       return false
     }
     if (outcome.kind === 'shown') {
-      setArchival({ kind: 'done', text: personal
-        ? `Archived “${title}”. Its completion and XP stay in this Path's history.`
-        : `Archived “${title}” from this Draft. ${retainedBy(taskId)} and its learners' work keep it.` })
+      if (kind === 'skill') {
+        boards.close()
+        setBoardDeletion(null)
+        document.getElementById('btn-more-actions')?.focus()
+      }
+      setArchival({ kind: 'done', text: kind === 'skill'
+        ? personal
+          ? `Archived Skill “${title}”. Its Tasks, XP, Mastery and history are retained. Find it in More actions → Archived Skills.`
+          : `Archived Skill “${title}” from this Draft. Published Versions and learners' work stay unchanged. Find it in More actions → Archived Skills.`
+        : personal
+          ? `Archived “${title}”. Its completion and XP stay in this Path's history.`
+          : `Archived “${title}” from this Draft. ${retainedBy(id)} and its learners' work keep it.` })
     }
     return outcome.kind === 'shown'
   }
@@ -544,11 +563,11 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
   const deletionHistory = (skill: PathSkill): string | null | undefined => {
     if (personal) {
       if (!records) return undefined
-      return records.historySkillIds.includes(skill.id) ? `“${skill.title}” has learning history, so it cannot be deleted. Archive its Tasks to take them out of active use.` : null
+      return records.historySkillIds.includes(skill.id) ? `“${skill.title}” has learning history, so it cannot be deleted. Archive this Skill to take it out of active use.` : null
     }
     const held = publishedVersionIds.length === 0 ? new Set<string>() : publishedSkills
     if (!held) return undefined
-    return held.has(skill.id) ? `“${skill.title}” is part of a published Version, so it cannot be deleted. Archive its Tasks from this Draft to leave them out of the next Version.` : null
+    return held.has(skill.id) ? `“${skill.title}” is part of a published Version, so it cannot be deleted. Archive this Skill from this Draft to leave it out of the next Version.` : null
   }
   /** Deletes the selected unused Skill through the engine: one undo step with its card and connections. */
   const handleDeleteSkill = (skill: PathSkill) => {
@@ -572,7 +591,18 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
       />
     )
   }
-  const skillTitles = useMemo(() => new Map(skills.map((skill) => [skill.id, skill.title])), [skills])
+  const skillArchiveControl = (skill: PathSkill) => {
+    const connected = connections.some((edge) => edge.from_id === skill.id || edge.to_id === skill.id)
+    const blocked = connected ? 'Disconnect all Requires and Prerequisite for connections in Manage prerequisites first.'
+      : !editorReady ? 'The editor is still loading'
+      : boards.pending ? 'Wait until your board changes are saved'
+      : learning.pending !== null ? 'Wait until your learning action is recorded'
+      : archiveBlocked
+    return <ArchiveSkillControl key={skill.id} skillId={skill.id} title={skill.title} taskCount={skill.tasks.length}
+      consequence={personal ? 'It leaves the active canvas. Its Tasks, completion, XP, Mastery and history stay stored.' : 'It leaves this Draft and the next Version. Published Versions and their learners’ work stay unchanged.'}
+      blocked={blocked} busy={keptView.busy} onArchive={() => void handleArchive(skill.id, skill.title, 'skill')} />
+  }
+  const skillTitles = useMemo(() => new Map([...archivedSkills, ...skills].map((skill) => [skill.id, skill.title])), [skills, archivedSkills])
   const taskTitles = useMemo(() => new Map([
     ...(records?.tasks ?? []).map((task) => [task.taskId, task.title] as const),
     ...skills.flatMap((skill) => skill.tasks.map((task) => [task.id, task.title] as const)),
@@ -771,8 +801,12 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
         {moreOpen && <TemporaryPanel title="More actions" closeId="btn-close-more-actions" onClose={() => setMoreOpen(false)}>
           <div className="p-4 space-y-3">
             <button id="open-reuse-btn" onClick={() => { setMoreOpen(false); setReuseOpen(true) }} className="text-sm text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg p-3">Copy from a Path…</button>
-            <p className="text-xs text-slate-400">Select a Skill to manage its Tasks, relationships, rules and deletion. Archived history stays with that Skill.</p>
+            <button id="open-archived-skills-btn" onClick={() => { setMoreOpen(false); setArchiveOpen(true) }} className="block text-sm text-slate-200 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg p-3">Archived Skills ({archivedSkills.length})</button>
+            <p className="text-xs text-slate-400">Select a Skill to manage its Tasks, relationships, rules and archival. Archived history is retained.</p>
           </div>
+        </TemporaryPanel>}
+        {archiveOpen && <TemporaryPanel title="Archived Skills" closeId="btn-close-archived-skills" onClose={() => setArchiveOpen(false)}>
+          <ArchivedSkills skills={archivedSkills} personal={personal} records={records} loadError={learning.loadError} onReload={() => void learningRef.current?.refresh()} />
         </TemporaryPanel>}
         <WebGpuEditor
           onCreateSkill={() => setAddOpen(true)}
@@ -824,21 +858,21 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
           onUpdateTask={handleUpdateTask}
           onUpdateOutcome={handleUpdateOutcome}
           onAddTask={handleAddTask}
-          skillActions={selected ? deleteControl(selected) : null}
+          skillActions={selected ? <>{skillArchiveControl(selected)}{deleteControl(selected)}</> : null}
           boardAction={selected && (personal || draftId) ? (
             <button id="open-board-btn" onClick={() => { setBoardDeletion(null); boards.open(selected.id) }}
               className="w-full rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium py-2">
               {personal ? 'Open board' : 'Open preparation board'}
             </button>
           ) : null}
-          learning={!selectedId ? null : (
-            <>
-              {personal
-                ? <SkillLearning view={learning} skillId={selectedId} skillTitles={skillTitles} taskTitles={taskTitles} onAction={act} />
-                : selected && <SkillDraftRules skill={selected} onOptional={handleOptional} onThreshold={handleThreshold} />}
-              <RetainedTasks heading={personal ? 'Archived Tasks · history kept' : 'Archived · kept by published Versions'} tasks={retained} />
-            </>
-          )}
+          learning={selectedId && personal ? <SkillLearning view={learning} skillId={selectedId} skillTitles={skillTitles} taskTitles={taskTitles} onAction={act} /> : <div className="space-y-2 text-xs text-slate-400"><p>Access: Evaluated for each Enrollment after publication.</p><p>Mastery: Awarded through Required Task Approvals after publication.</p></div>}
+          settings={selectedId && (personal
+            ? <SkillLearning section="settings" view={learning} skillId={selectedId} skillTitles={skillTitles} taskTitles={taskTitles} onAction={act} />
+            : selected && <SkillDraftRules skill={selected} onOptional={handleOptional} onThreshold={handleThreshold} />)}
+          history={<>
+            {selectedId && personal && <SkillLearning section="history" view={learning} skillId={selectedId} skillTitles={skillTitles} taskTitles={taskTitles} onAction={act} />}
+            <RetainedTasks heading={personal ? 'Archived Tasks · history kept' : 'Archived · kept by published Versions'} tasks={retained} />
+          </>}
           renderTaskExtra={personal
             ? (taskId) => <><TaskLearning view={learning} taskId={taskId} onAction={act} />{archiveControl(taskId)}</>
             : (taskId) => {

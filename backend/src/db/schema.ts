@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { type AnyPgColumn, boolean, check, doublePrecision, foreignKey, index, integer, pgEnum, pgTable, primaryKey, text, timestamp, unique, uuid, uniqueIndex } from 'drizzle-orm/pg-core'
+import { type AnyPgColumn, boolean, check, doublePrecision, foreignKey, index, integer, jsonb, pgEnum, pgTable, primaryKey, text, timestamp, unique, uuid, uniqueIndex } from 'drizzle-orm/pg-core'
 
 /**
  * An identity usable for personal learning and contextual Coach and Learner roles
@@ -125,6 +125,22 @@ export const versionSkills = pgTable('version_skills', {
 }, (t) => [
   primaryKey({ columns: [t.learningPathVersionId, t.skillId] }),
   check('version_skills_xp_threshold_nonnegative', sql`${t.xpThreshold} >= 0`),
+])
+
+/** Retained Coach Draft definition, independent of published Version content.
+ * The logical Skill and all of its Task identities remain reserved; no restoration.
+ */
+export const archivedCoachSkills = pgTable('archived_coach_skills', {
+  learningPathId: uuid('learning_path_id').notNull(),
+  skillId: uuid('skill_id').notNull(),
+  archivedAt: timestamp('archived_at', { withTimezone: true }).notNull(),
+  definition: jsonb('definition').$type<{
+    id: string; title: string; outcome: string; optional: boolean; xpThreshold: number;
+    tasks: { id: string; title: string; description: string; required: boolean; xpReward: number }[];
+  }>().notNull(),
+}, (t) => [
+  primaryKey({ columns: [t.learningPathId, t.skillId] }),
+  foreignKey({ columns: [t.skillId, t.learningPathId], foreignColumns: [skills.id, skills.learningPathId] }),
 ])
 
 /** ALL prerequisite edges, with both ends defined in the same pinned Version. */
@@ -388,6 +404,8 @@ export const personalSkills = pgTable('personal_skills', {
   learningOutcome: text('learning_outcome').notNull(),
   xpThreshold: integer('xp_threshold').notNull().default(0),
   masteryDeclaredAt: timestamp('mastery_declared_at', { withTimezone: true }),
+  /** One-way archival; definitions and learning records remain authoritative. */
+  archivedAt: timestamp('archived_at', { withTimezone: true }),
   /** Position in the Path's Skill list, as last saved by the owner. */
   ordinal: integer('ordinal').notNull().default(0),
 }, (t) => [

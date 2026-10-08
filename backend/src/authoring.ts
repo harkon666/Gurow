@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, asc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import type { Database } from './db/client'
 import { lockedTimestamp } from './db/clock'
 import { learningPaths, personalPrerequisites, personalSkillCards, personalSkills, personalTasks, personalWorkspaces } from './db/schema'
@@ -187,22 +187,28 @@ export const defaultPosition = (index: number) => ({ x: 80 + (index % 4) * 240, 
 /** Reads a Path document; archived Tasks are out of active use and not edited here. */
 async function readDocument(tx: Tx, path: typeof learningPaths.$inferSelect) {
   const skillRows = await tx.select().from(personalSkills).where(eq(personalSkills.learningPathId, path.id)).orderBy(asc(personalSkills.ordinal), asc(personalSkills.skillId))
+  const activeSkills = skillRows.filter((skill) => skill.archivedAt === null)
+  const allTasks = await tx.select().from(personalTasks).where(eq(personalTasks.learningPathId, path.id))
   const taskRows = await tx.select().from(personalTasks).where(and(eq(personalTasks.learningPathId, path.id), isNull(personalTasks.archivedAt))).orderBy(asc(personalTasks.ordinal), asc(personalTasks.taskId))
   const cards = new Map((await tx.select().from(personalSkillCards).where(eq(personalSkillCards.learningPathId, path.id))).map((card) => [card.skillId, card]))
   const connections = await tx.select({ from_id: personalPrerequisites.prerequisiteSkillId, to_id: personalPrerequisites.skillId }).from(personalPrerequisites)
     .where(eq(personalPrerequisites.learningPathId, path.id)).orderBy(asc(personalPrerequisites.prerequisiteSkillId), asc(personalPrerequisites.skillId))
   return {
     learningPath: { id: path.id, personalWorkspaceId: path.personalWorkspaceId!, title: path.title, goal: path.goal, revision: path.revision },
+    archivedSkills: skillRows.filter((skill) => skill.archivedAt !== null).map((skill) => ({
+      id: skill.skillId, title: skill.title, outcome: skill.learningOutcome, archivedAt: skill.archivedAt!.toISOString(),
+      taskCount: allTasks.filter((task) => task.skillId === skill.skillId).length,
+    })),
     editor: {
       format_version: SNAPSHOT_FORMAT_VERSION,
-      cards: skillRows.map((skill, index) => {
+      cards: activeSkills.map((skill, index) => {
         const card = cards.get(skill.skillId)
         return { id: skill.skillId, title: skill.title, position: card ? { x: card.x, y: card.y } : defaultPosition(index) }
       }),
       connections,
     },
     application: {
-      skills: skillRows.map((skill) => ({
+      skills: activeSkills.map((skill) => ({
         id: skill.skillId, title: skill.title, outcome: skill.learningOutcome,
         tasks: taskRows.filter((task) => task.skillId === skill.skillId).map((task) => ({ id: task.taskId, title: task.title, description: task.description })),
       })),
@@ -232,7 +238,7 @@ export async function readPersonalPath(db: Database, learningPathId: string, acc
 
 export type SaveRefusal =
   | 'learning_path_not_found' | 'stale_revision' | 'skill_owned_elsewhere' | 'task_owned_elsewhere'
-  | 'task_skill_mismatch' | 'task_archived' | 'skill_has_history' | 'task_has_history'
+  | 'task_skill_mismatch' | 'task_archived' | 'skill_archived' | 'skill_has_history' | 'task_has_history'
 type SaveResult = { ok: true; document: PathDocument } | { ok: false; refusal: SaveRefusal; detail: string; current?: PathDocument }
 
 class Refused extends Error {
@@ -278,12 +284,14 @@ async function writeDocument(tx: Tx, path: typeof learningPaths.$inferSelect, in
   const sentTasks = new Set(input.application.skills.flatMap((skill) => skill.tasks.map((task) => task.id)))
   // Content with progress history is never deleted (ADR 0018): a Task is archived instead, and a Skill is kept.
   // Content without history is deleted.
-  const removedSkills = [...existingSkills.values()].filter((skill) => !sentSkills.has(skill.skillId))
+  const archived = input.application.skills.find((skill) => existingSkills.get(skill.id)?.archivedAt)
+  if (archived) throw new Refused('skill_archived', `Skill ${archived.id} is archived and cannot be restored or edited`)
+  const removedSkills = [...existingSkills.values()].filter((skill) => !skill.archivedAt && !sentSkills.has(skill.skillId))
   const removedTasks = [...existingTasks.values()].filter((task) => !task.archivedAt && !sentTasks.has(task.taskId))
   if (removedSkills.length > 0 || removedTasks.length > 0) {
     const history = await personalHistory(tx, path.id)
     const kept = removedSkills.find((skill) => history.skills.has(skill.skillId))
-    if (kept) throw new Refused('skill_has_history', `Skill "${kept.title}" has learning history and cannot be deleted; its Tasks can be archived`)
+    if (kept) throw new Refused('skill_has_history', `Skill "${kept.title}" has learning history and cannot be deleted; archive the Skill instead`)
     const worked = removedTasks.find((task) => history.tasks.has(task.taskId))
     if (worked) throw new Refused('task_has_history', `Task "${worked.title}" has learning history and cannot be deleted; archive it instead`)
   }
@@ -374,6 +382,36 @@ async function writeDocument(tx: Tx, path: typeof learningPaths.$inferSelect, in
 }
 
 export type ArchiveRefusal = 'learning_path_not_found' | 'task_not_found' | 'stale_revision'
+export type ArchiveSkillRefusal = 'learning_path_not_found' | 'skill_not_found' | 'stale_revision' | 'skill_has_prerequisites'
+type ArchiveSkillResult =
+  | Extract<ArchiveResult, { ok: true }>
+  | { ok: false; refusal: ArchiveSkillRefusal; detail: string; current?: PathDocument }
+
+/** Removes a disconnected Skill from active use without changing XP, Mastery or history. */
+export async function archivePersonalSkill(db: Database, learningPathId: string, skillId: string, accountId: string, expectedRevision: number): Promise<ArchiveSkillResult> {
+  return db.transaction(async (tx) => {
+    const path = await lockOwnedPath(tx, learningPathId, accountId)
+    if (!path) return { ok: false, refusal: 'learning_path_not_found', detail: 'no such Path' } as const
+    if (path.revision !== expectedRevision) return {
+      ok: false, refusal: 'stale_revision', detail: `the archive was based on revision ${expectedRevision}, but revision ${path.revision} is accepted`, current: await readDocument(tx, path),
+    } as const
+    const [skill] = await tx.select().from(personalSkills).where(and(eq(personalSkills.learningPathId, path.id), eq(personalSkills.skillId, skillId)))
+    if (!skill) return { ok: false, refusal: 'skill_not_found', detail: 'no such Skill in this Path' } as const
+    let current = path
+    if (!skill.archivedAt) {
+      const [edge] = await tx.select().from(personalPrerequisites).where(and(eq(personalPrerequisites.learningPathId, path.id), or(eq(personalPrerequisites.skillId, skillId), eq(personalPrerequisites.prerequisiteSkillId, skillId)))).limit(1)
+      if (edge) return { ok: false, refusal: 'skill_has_prerequisites', detail: `Disconnect all incoming and outgoing Prerequisite connections for Skill "${skill.title}" before archiving it` } as const
+      const now = await lockedTimestamp(tx)
+      const activeTasks = await tx.select({ id: personalTasks.taskId }).from(personalTasks).where(and(eq(personalTasks.learningPathId, path.id), eq(personalTasks.skillId, skillId), isNull(personalTasks.archivedAt)))
+      await tx.update(personalTasks).set({ archivedAt: now }).where(and(eq(personalTasks.learningPathId, path.id), eq(personalTasks.skillId, skillId), isNull(personalTasks.archivedAt)))
+      await removeCards(tx, path.id, activeTasks.map((task) => task.id))
+      await tx.delete(personalSkillCards).where(and(eq(personalSkillCards.learningPathId, path.id), eq(personalSkillCards.skillId, skillId)))
+      await tx.update(personalSkills).set({ archivedAt: now }).where(eq(personalSkills.skillId, skillId))
+      ;[current] = await tx.update(learningPaths).set({ revision: sql`${learningPaths.revision} + 1` }).where(eq(learningPaths.id, path.id)).returning()
+    }
+    return { ok: true, changed: !skill.archivedAt, document: await readDocument(tx, current), learningState: await readPersonalLearningStateIn(tx, path.id) } as const
+  })
+}
 type ArchiveResult =
   | { ok: true; changed: boolean; document: PathDocument; learningState: Awaited<ReturnType<typeof readPersonalLearningStateIn>> }
   | { ok: false; refusal: ArchiveRefusal; detail: string; current?: PathDocument }

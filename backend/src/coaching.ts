@@ -1,7 +1,8 @@
-import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, or, sql } from 'drizzle-orm'
 import { defaultPosition, LIMITS, SNAPSHOT_FORMAT_VERSION, type DocumentInput, type TaskInput } from './authoring'
 import type { Database } from './db/client'
-import { coachWorkspaces, learningPaths, learningPathVersions, versionPrerequisites, versionSkillCards, versionSkills, versionTasks } from './db/schema'
+import { lockedTimestamp } from './db/clock'
+import { archivedCoachSkills, coachWorkspaces, learningPaths, learningPathVersions, versionPrerequisites, versionSkillCards, versionSkills, versionTasks } from './db/schema'
 import type { Tx } from './personal'
 import { checkRequiredRoute, type BlockedSkill } from './publication'
 import { claimLogicalIds } from './logicalIds'
@@ -107,6 +108,9 @@ async function readDocument(tx: Tx, path: typeof learningPaths.$inferSelect, sho
     draft: draft ? { id: draft.id, versionNumber: draft.versionNumber } : null,
     version: source ? { id: source.id, versionNumber: source.versionNumber, publishedAt: source.publishedAt, layoutRevision: source.layoutRevision } : null,
     versions: published.map((version) => ({ id: version.id, versionNumber: version.versionNumber, publishedAt: version.publishedAt!, enrollmentClosed: version.enrollmentClosedAt !== null })),
+    ...(source && !source.publishedAt ? { archivedSkills: (await tx.select().from(archivedCoachSkills).where(eq(archivedCoachSkills.learningPathId, path.id)).orderBy(asc(archivedCoachSkills.archivedAt), asc(archivedCoachSkills.skillId))).map((row) => ({
+      id: row.skillId, title: row.definition.title, outcome: row.definition.outcome, archivedAt: row.archivedAt.toISOString(), taskCount: row.definition.tasks.length,
+    })) } : {}),
     ...(source ? await readVersionContent(tx, source.id) : { editor: { format_version: SNAPSHOT_FORMAT_VERSION, cards: [], connections: [] }, application: { skills: [] } }),
   }
 }
@@ -244,7 +248,7 @@ export async function saveVersionLayout(db: Database, versionId: string, account
 
 export type DraftRefusal =
   | 'learning_path_not_found' | 'no_open_draft' | 'stale_revision' | 'skill_owned_elsewhere' | 'task_owned_elsewhere'
-  | 'task_skill_mismatch' | 'skill_has_history' | 'task_has_history'
+  | 'task_skill_mismatch' | 'skill_archived' | 'skill_has_history' | 'task_has_history'
 type SaveResult = { ok: true; document: CoachPathDocument } | { ok: false; refusal: DraftRefusal; detail: string; current?: CoachPathDocument }
 
 class Refused extends Error {
@@ -294,7 +298,7 @@ async function writeDraft(tx: Tx, path: typeof learningPaths.$inferSelect, draft
   if (removedSkills.length > 0 || removedTasks.length > 0) {
     const published = await publishedContent(tx, path.id)
     const kept = removedSkills.find((skill) => published.skills.has(skill.skillId))
-    if (kept) throw new Refused('skill_has_history', `Skill "${kept.title}" is part of a published Version and cannot be deleted; its Tasks can be archived from this Draft`)
+    if (kept) throw new Refused('skill_has_history', `Skill "${kept.title}" is part of a published Version and cannot be deleted; archive the Skill from this Draft instead`)
     const worked = removedTasks.find((task) => published.tasks.has(task.taskId))
     if (worked) throw new Refused('task_has_history', `Task "${worked.title}" is part of a published Version and cannot be deleted; archive it from this Draft instead`)
   }
@@ -448,6 +452,33 @@ export async function prepareDraft(db: Database, learningPathId: string, account
     if (edgeRows.length > 0) await tx.insert(versionPrerequisites).values(copy(edgeRows))
     const cardRows = await tx.select().from(versionSkillCards).where(eq(versionSkillCards.learningPathVersionId, latest.id))
     if (cardRows.length > 0) await tx.insert(versionSkillCards).values(copy(cardRows))
+    return { ok: true, document: await readDocument(tx, await advanceRevision(tx, locked.path)) } as const
+  })
+}
+
+export type ArchiveDraftSkillRefusal = 'learning_path_not_found' | 'stale_revision' | 'no_open_draft' | 'skill_not_found' | 'skill_has_prerequisites'
+type ArchiveDraftSkillResult = { ok: true; document: CoachPathDocument } | { ok: false; refusal: ArchiveDraftSkillRefusal; detail: string; current?: CoachPathDocument }
+
+/** Retains the Draft definition, then removes only its active Draft rows in FK order.
+ * Published Versions and their Enrollments are untouched. The tombstone survives publication.
+ */
+export async function archiveDraftSkill(db: Database, learningPathId: string, skillId: string, accountId: string, expectedRevision: number): Promise<ArchiveDraftSkillResult> {
+  return db.transaction(async (tx) => {
+    const locked = await lockForChange(tx, learningPathId, accountId, expectedRevision)
+    if (!locked.ok) return locked
+    const draft = await openDraft(tx, locked.path.id)
+    if (!draft) return { ok: false, refusal: 'no_open_draft', detail: 'this Path has no open Draft' } as const
+    const [archived] = await tx.select().from(archivedCoachSkills).where(and(eq(archivedCoachSkills.learningPathId, learningPathId), eq(archivedCoachSkills.skillId, skillId)))
+    if (archived) return { ok: true, document: await readDocument(tx, locked.path) } as const
+    const definition = (await readContent(tx, draft.id)).skills.find((skill) => skill.id === skillId)
+    if (!definition) return { ok: false, refusal: 'skill_not_found', detail: 'no such Skill in this Draft' } as const
+    const [edge] = await tx.select().from(versionPrerequisites).where(and(eq(versionPrerequisites.learningPathVersionId, draft.id), or(eq(versionPrerequisites.skillId, skillId), eq(versionPrerequisites.prerequisiteSkillId, skillId)))).limit(1)
+    if (edge) return { ok: false, refusal: 'skill_has_prerequisites', detail: `Disconnect all incoming and outgoing Prerequisite connections for Skill "${definition.title}" before archiving it` } as const
+    await tx.insert(archivedCoachSkills).values({ learningPathId, skillId, archivedAt: await lockedTimestamp(tx), definition })
+    await deleteDraftBoards(tx, draft.id, [skillId])
+    await tx.delete(versionTasks).where(and(eq(versionTasks.learningPathVersionId, draft.id), eq(versionTasks.skillId, skillId)))
+    await tx.delete(versionSkillCards).where(and(eq(versionSkillCards.learningPathVersionId, draft.id), eq(versionSkillCards.skillId, skillId)))
+    await tx.delete(versionSkills).where(and(eq(versionSkills.learningPathVersionId, draft.id), eq(versionSkills.skillId, skillId)))
     return { ok: true, document: await readDocument(tx, await advanceRevision(tx, locked.path)) } as const
   })
 }

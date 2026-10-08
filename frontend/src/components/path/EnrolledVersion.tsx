@@ -281,7 +281,12 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
               )}
             </>
           ) : null}
+          tasksLabel="Tasks / Review"
+          tasksRequest={coach ? focusTaskId : null}
+          editLabel="Manage Access"
           learning={selected && <EnrolledSkillLearning view={view} skillId={selected.id} skillTitles={skillTitles} taskTitles={taskTitles} coach={coach} enrollmentId={enrollmentId} names={overrideNames} onRecordsStale={loadRecords} />}
+          settings={coach && selected && <EnrolledSkillLearning section="settings" view={view} skillId={selected.id} skillTitles={skillTitles} taskTitles={taskTitles} coach={coach} enrollmentId={enrollmentId} names={overrideNames} onRecordsStale={loadRecords} />}
+          history={selected && <EnrolledSkillLearning section="history" view={view} skillId={selected.id} skillTitles={skillTitles} taskTitles={taskTitles} coach={coach} enrollmentId={enrollmentId} names={overrideNames} onRecordsStale={loadRecords} />}
           // While the board is open, a Task's work and history live in its card details instead, so one
           // private draft is never edited in two places; the summary reads it again when the board closes.
           renderTaskExtra={(taskId) => boards.openId ? null : (
@@ -443,7 +448,8 @@ function AwaitingReviewQueue({ awaiting, inactive, skills, onOpen }: { awaiting:
  * Override Record) and Mastery, and the XP its Tasks contribute. The Coach grants or
  * revokes the override here.
  */
-function EnrolledSkillLearning({ view, skillId, skillTitles, taskTitles, coach, enrollmentId, names, onRecordsStale }: {
+function EnrolledSkillLearning({ view, skillId, skillTitles, taskTitles, coach, enrollmentId, names, onRecordsStale, section = 'summary' }: {
+  section?: 'summary' | 'settings' | 'history'
   view: RecordsView
   skillId: string
   skillTitles: Map<string, string>
@@ -497,8 +503,8 @@ function EnrolledSkillLearning({ view, skillId, skillTitles, taskTitles, coach, 
           </div>
         )}
         <p className="mt-1 text-[10px] text-slate-500">Access lets you start Tasks and send work. Reaching an XP Threshold spends no XP.</p>
-        {coach && <AccessOverrideControl key={skillId} enrollmentId={enrollmentId} skill={skill} records={state} names={names} onChanged={onRecordsStale} />}
-        {overrideRecords.length > 0 && (
+        {section === 'settings' && coach && <AccessOverrideControl key={skillId} enrollmentId={enrollmentId} skill={skill} records={state} names={names} onChanged={onRecordsStale} />}
+        {section === 'history' && overrideRecords.length > 0 && (
           <ol id="skill-override-history" data-records={overrideRecords.length} aria-label="Override Records of this Skill" className="mt-2 text-[10px] text-slate-400 space-y-1 border-t border-slate-700/50 pt-2">
             {overrideRecords.map((record) => {
               const text = overrideRecordText(record, names)
@@ -511,7 +517,7 @@ function EnrolledSkillLearning({ view, skillId, skillTitles, taskTitles, coach, 
           </ol>
         )}
       </section>
-      <section id="skill-mastery" data-mastery={skill.mastery ? 'mastered' : 'not-mastered'} aria-labelledby="skill-mastery-heading" className="rounded-xl p-3 border bg-slate-800/40 border-slate-700/40">
+      {section !== 'settings' && <section id="skill-mastery" data-mastery={skill.mastery ? 'mastered' : 'not-mastered'} aria-labelledby="skill-mastery-heading" className="rounded-xl p-3 border bg-slate-800/40 border-slate-700/40">
         <div className="flex items-center justify-between gap-2">
           <h4 id="skill-mastery-heading" className="text-xs font-semibold uppercase tracking-wider text-slate-400">Mastery</h4>
           <span id="skill-mastery-state" className={`text-xs font-semibold ${skill.mastery ? 'text-violet-300' : 'text-slate-400'}`}>{skill.mastery ? 'Mastered' : 'Not mastered yet'}</span>
@@ -522,15 +528,16 @@ function EnrolledSkillLearning({ view, skillId, skillTitles, taskTitles, coach, 
             This Skill is locked, but its Mastery stays: it rests on the Approvals of its own Required Tasks, which still count. Access and Mastery are separate.
           </p>
         )}
-        {masteryEvents.length > 0 && (
+        {section === 'history' && masteryEvents.length > 0 && (
           <ul id="skill-mastery-history" data-events={masteryEvents.length} aria-label="Mastery history of this Skill" className="mt-2 text-[10px] text-slate-400 space-y-0.5">
             {masteryEvents.map((event) => (
               <li key={event.id} data-action={event.action}>{masteryEventText(event, taskTitles.get(event.taskId) ?? 'a Task')} · {new Date(event.occurredAt).toLocaleString()}</li>
             ))}
           </ul>
         )}
-      </section>
-      <p id="skill-xp" data-xp={skillXp} className="text-[11px] text-slate-400">This Skill's Tasks contribute {skillXp} of your {state.xp} Enrollment XP.</p>
+      </section>}
+      {section === 'history' && <p id="skill-xp" data-xp={skillXp} className="text-[11px] text-slate-400">This Skill's Tasks contribute {skillXp} of your {state.xp} Enrollment XP.</p>}
+      {section === 'history' && <section aria-label="XP history"><h4 className="text-xs font-semibold text-slate-400">XP history</h4><ol id="skill-xp-history" className="mt-2 text-[11px] text-slate-300 space-y-1">{state.xpHistory.filter((event) => state.tasks.find((task) => task.taskId === event.taskId)?.skillId === skillId).map((event) => <li key={event.id}>{taskTitles.get(event.taskId) ?? 'a Task'}: {xpEventText(event)}</li>)}</ol></section>}
     </div>
   )
 }

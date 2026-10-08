@@ -1,0 +1,4048 @@
+{
+  "id": "d17f6c05-b39f-4833-8dae-30cb808cf325",
+  "prevId": "7e02b1c8-bd58-49d7-b62c-c581c26731ef",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.accounts": {
+      "name": "accounts",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email_verified": {
+          "name": "email_verified",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "image": {
+          "name": "image",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "accounts_email_lower_key": {
+          "name": "accounts_email_lower_key",
+          "columns": [
+            {
+              "expression": "lower(\"email\")",
+              "asc": true,
+              "isExpression": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.archived_coach_skills": {
+      "name": "archived_coach_skills",
+      "schema": "",
+      "columns": {
+        "learning_path_id": {
+          "name": "learning_path_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "archived_at": {
+          "name": "archived_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "definition": {
+          "name": "definition",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "archived_coach_skills_skill_id_learning_path_id_skills_id_learning_path_id_fk": {
+          "name": "archived_coach_skills_skill_id_learning_path_id_skills_id_learning_path_id_fk",
+          "tableFrom": "archived_coach_skills",
+          "tableTo": "skills",
+          "columnsFrom": [
+            "skill_id",
+            "learning_path_id"
+          ],
+          "columnsTo": [
+            "id",
+            "learning_path_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "archived_coach_skills_learning_path_id_skill_id_pk": {
+          "name": "archived_coach_skills_learning_path_id_skill_id_pk",
+          "columns": [
+            "learning_path_id",
+            "skill_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.auth_credentials": {
+      "name": "auth_credentials",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_account_id": {
+          "name": "provider_account_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provider_id": {
+          "name": "provider_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "access_token": {
+          "name": "access_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "refresh_token": {
+          "name": "refresh_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "id_token": {
+          "name": "id_token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "access_token_expires_at": {
+          "name": "access_token_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "refresh_token_expires_at": {
+          "name": "refresh_token_expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "scope": {
+          "name": "scope",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "password": {
+          "name": "password",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "auth_credentials_account_idx": {
+          "name": "auth_credentials_account_idx",
+          "columns": [
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "auth_credentials_account_id_accounts_id_fk": {
+          "name": "auth_credentials_account_id_accounts_id_fk",
+          "tableFrom": "auth_credentials",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "auth_credentials_provider_key": {
+          "name": "auth_credentials_provider_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "provider_id",
+            "provider_account_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.auth_sessions": {
+      "name": "auth_sessions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token": {
+          "name": "token",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ip_address": {
+          "name": "ip_address",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "user_agent": {
+          "name": "user_agent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "auth_sessions_account_idx": {
+          "name": "auth_sessions_account_idx",
+          "columns": [
+            {
+              "expression": "account_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "auth_sessions_account_id_accounts_id_fk": {
+          "name": "auth_sessions_account_id_accounts_id_fk",
+          "tableFrom": "auth_sessions",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "auth_sessions_token_unique": {
+          "name": "auth_sessions_token_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "token"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.auth_verifications": {
+      "name": "auth_verifications",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "identifier": {
+          "name": "identifier",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "value": {
+          "name": "value",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "auth_verifications_identifier_idx": {
+          "name": "auth_verifications_identifier_idx",
+          "columns": [
+            {
+              "expression": "identifier",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.coach_workspaces": {
+      "name": "coach_workspaces",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "owner_account_id": {
+          "name": "owner_account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "coach_workspaces_owner_account_id_accounts_id_fk": {
+          "name": "coach_workspaces_owner_account_id_accounts_id_fk",
+          "tableFrom": "coach_workspaces",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "owner_account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.draft_board_cards": {
+      "name": "draft_board_cards",
+      "schema": "",
+      "columns": {
+        "learning_path_version_id": {
+          "name": "learning_path_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "column_id": {
+          "name": "column_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "draft_board_cards_task_fk": {
+          "name": "draft_board_cards_task_fk",
+          "tableFrom": "draft_board_cards",
+          "tableTo": "version_tasks",
+          "columnsFrom": [
+            "learning_path_version_id",
+            "task_id"
+          ],
+          "columnsTo": [
+            "learning_path_version_id",
+            "task_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "draft_board_cards_task_skill_fk": {
+          "name": "draft_board_cards_task_skill_fk",
+          "tableFrom": "draft_board_cards",
+          "tableTo": "tasks",
+          "columnsFrom": [
+            "task_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "draft_board_cards_column_fk": {
+          "name": "draft_board_cards_column_fk",
+          "tableFrom": "draft_board_cards",
+          "tableTo": "draft_board_columns",
+          "columnsFrom": [
+            "column_id",
+            "learning_path_version_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "id",
+            "learning_path_version_id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "draft_board_cards_pk": {
+          "name": "draft_board_cards_pk",
+          "columns": [
+            "learning_path_version_id",
+            "task_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {
+        "draft_board_cards_position_key": {
+          "name": "draft_board_cards_position_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "column_id",
+            "position"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.draft_board_columns": {
+      "name": "draft_board_columns",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "learning_path_version_id": {
+          "name": "learning_path_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "draft_board_columns_board_fk": {
+          "name": "draft_board_columns_board_fk",
+          "tableFrom": "draft_board_columns",
+          "tableTo": "draft_task_boards",
+          "columnsFrom": [
+            "learning_path_version_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "learning_path_version_id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "draft_board_columns_id_board_key": {
+          "name": "draft_board_columns_id_board_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "learning_path_version_id",
+            "skill_id"
+          ]
+        },
+        "draft_board_columns_position_key": {
+          "name": "draft_board_columns_position_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "learning_path_version_id",
+            "skill_id",
+            "position"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "draft_board_columns_name": {
+          "name": "draft_board_columns_name",
+          "value": "length(trim(\"draft_board_columns\".\"name\")) > 0 AND length(\"draft_board_columns\".\"name\") <= 60"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.draft_task_boards": {
+      "name": "draft_task_boards",
+      "schema": "",
+      "columns": {
+        "learning_path_version_id": {
+          "name": "learning_path_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "draft_task_boards_skill_fk": {
+          "name": "draft_task_boards_skill_fk",
+          "tableFrom": "draft_task_boards",
+          "tableTo": "version_skills",
+          "columnsFrom": [
+            "learning_path_version_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "learning_path_version_id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "draft_task_boards_pk": {
+          "name": "draft_task_boards_pk",
+          "columns": [
+            "learning_path_version_id",
+            "skill_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "draft_task_boards_revision_nonnegative": {
+          "name": "draft_task_boards_revision_nonnegative",
+          "value": "\"draft_task_boards\".\"revision\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.enrollment_board_cards": {
+      "name": "enrollment_board_cards",
+      "schema": "",
+      "columns": {
+        "enrollment_id": {
+          "name": "enrollment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "learning_path_version_id": {
+          "name": "learning_path_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "column_id": {
+          "name": "column_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "enrollment_board_cards_enrollment_fk": {
+          "name": "enrollment_board_cards_enrollment_fk",
+          "tableFrom": "enrollment_board_cards",
+          "tableTo": "enrollments",
+          "columnsFrom": [
+            "enrollment_id",
+            "learning_path_version_id"
+          ],
+          "columnsTo": [
+            "id",
+            "learning_path_version_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "enrollment_board_cards_task_fk": {
+          "name": "enrollment_board_cards_task_fk",
+          "tableFrom": "enrollment_board_cards",
+          "tableTo": "version_tasks",
+          "columnsFrom": [
+            "learning_path_version_id",
+            "task_id"
+          ],
+          "columnsTo": [
+            "learning_path_version_id",
+            "task_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "enrollment_board_cards_task_skill_fk": {
+          "name": "enrollment_board_cards_task_skill_fk",
+          "tableFrom": "enrollment_board_cards",
+          "tableTo": "tasks",
+          "columnsFrom": [
+            "task_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "enrollment_board_cards_column_fk": {
+          "name": "enrollment_board_cards_column_fk",
+          "tableFrom": "enrollment_board_cards",
+          "tableTo": "enrollment_board_columns",
+          "columnsFrom": [
+            "column_id",
+            "enrollment_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "id",
+            "enrollment_id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "enrollment_board_cards_pk": {
+          "name": "enrollment_board_cards_pk",
+          "columns": [
+            "enrollment_id",
+            "task_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {
+        "enrollment_board_cards_position_key": {
+          "name": "enrollment_board_cards_position_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "column_id",
+            "position"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.enrollment_board_columns": {
+      "name": "enrollment_board_columns",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "enrollment_id": {
+          "name": "enrollment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "enrollment_board_columns_board_fk": {
+          "name": "enrollment_board_columns_board_fk",
+          "tableFrom": "enrollment_board_columns",
+          "tableTo": "enrollment_task_boards",
+          "columnsFrom": [
+            "enrollment_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "enrollment_id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "enrollment_board_columns_id_board_key": {
+          "name": "enrollment_board_columns_id_board_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "enrollment_id",
+            "skill_id"
+          ]
+        },
+        "enrollment_board_columns_position_key": {
+          "name": "enrollment_board_columns_position_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "enrollment_id",
+            "skill_id",
+            "position"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "enrollment_board_columns_name": {
+          "name": "enrollment_board_columns_name",
+          "value": "length(trim(\"enrollment_board_columns\".\"name\")) > 0 AND length(\"enrollment_board_columns\".\"name\") <= 60"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.enrollment_invitations": {
+      "name": "enrollment_invitations",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "learning_path_version_id": {
+          "name": "learning_path_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "invited_by_account_id": {
+          "name": "invited_by_account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "accepted_at": {
+          "name": "accepted_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "delivery_status": {
+          "name": "delivery_status",
+          "type": "invitation_delivery_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "delivery_attempts": {
+          "name": "delivery_attempts",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "delivered_at": {
+          "name": "delivered_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "enrollment_invitations_version_idx": {
+          "name": "enrollment_invitations_version_idx",
+          "columns": [
+            {
+              "expression": "learning_path_version_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "enrollment_invitations_learning_path_version_id_learning_path_versions_id_fk": {
+          "name": "enrollment_invitations_learning_path_version_id_learning_path_versions_id_fk",
+          "tableFrom": "enrollment_invitations",
+          "tableTo": "learning_path_versions",
+          "columnsFrom": [
+            "learning_path_version_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "enrollment_invitations_invited_by_account_id_accounts_id_fk": {
+          "name": "enrollment_invitations_invited_by_account_id_accounts_id_fk",
+          "tableFrom": "enrollment_invitations",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "invited_by_account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.enrollment_lifecycle_records": {
+      "name": "enrollment_lifecycle_records",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "enrollment_lifecycle_records_sequence_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "enrollment_id": {
+          "name": "enrollment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "learning_path_version_id": {
+          "name": "learning_path_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_account_id": {
+          "name": "actor_account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "learner_account_id": {
+          "name": "learner_account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "enrollment_lifecycle_records_actor_account_id_accounts_id_fk": {
+          "name": "enrollment_lifecycle_records_actor_account_id_accounts_id_fk",
+          "tableFrom": "enrollment_lifecycle_records",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "actor_account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "enrollment_lifecycle_records_learner_account_id_accounts_id_fk": {
+          "name": "enrollment_lifecycle_records_learner_account_id_accounts_id_fk",
+          "tableFrom": "enrollment_lifecycle_records",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "learner_account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "enrollment_lifecycle_records_enrollment_id_learning_path_version_id_enrollments_id_learning_path_version_id_fk": {
+          "name": "enrollment_lifecycle_records_enrollment_id_learning_path_version_id_enrollments_id_learning_path_version_id_fk",
+          "tableFrom": "enrollment_lifecycle_records",
+          "tableTo": "enrollments",
+          "columnsFrom": [
+            "enrollment_id",
+            "learning_path_version_id"
+          ],
+          "columnsTo": [
+            "id",
+            "learning_path_version_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "enrollment_lifecycle_records_sequence_key": {
+          "name": "enrollment_lifecycle_records_sequence_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "sequence"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "enrollment_lifecycle_records_action": {
+          "name": "enrollment_lifecycle_records_action",
+          "value": "\"enrollment_lifecycle_records\".\"action\" IN ('deactivate', 'reactivate')"
+        },
+        "enrollment_lifecycle_records_reason": {
+          "name": "enrollment_lifecycle_records_reason",
+          "value": "(\"enrollment_lifecycle_records\".\"reason\" IS NOT NULL AND length(trim(\"enrollment_lifecycle_records\".\"reason\")) > 0 AND length(\"enrollment_lifecycle_records\".\"reason\") <= 500) OR (\"enrollment_lifecycle_records\".\"reason\" IS NULL AND \"enrollment_lifecycle_records\".\"action\" = 'deactivate' AND \"enrollment_lifecycle_records\".\"actor_account_id\" = \"enrollment_lifecycle_records\".\"learner_account_id\")"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.enrollment_task_boards": {
+      "name": "enrollment_task_boards",
+      "schema": "",
+      "columns": {
+        "enrollment_id": {
+          "name": "enrollment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "learning_path_version_id": {
+          "name": "learning_path_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "enrollment_task_boards_enrollment_fk": {
+          "name": "enrollment_task_boards_enrollment_fk",
+          "tableFrom": "enrollment_task_boards",
+          "tableTo": "enrollments",
+          "columnsFrom": [
+            "enrollment_id",
+            "learning_path_version_id"
+          ],
+          "columnsTo": [
+            "id",
+            "learning_path_version_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "enrollment_task_boards_skill_fk": {
+          "name": "enrollment_task_boards_skill_fk",
+          "tableFrom": "enrollment_task_boards",
+          "tableTo": "version_skills",
+          "columnsFrom": [
+            "learning_path_version_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "learning_path_version_id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "enrollment_task_boards_pk": {
+          "name": "enrollment_task_boards_pk",
+          "columns": [
+            "enrollment_id",
+            "skill_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "enrollment_task_boards_revision_nonnegative": {
+          "name": "enrollment_task_boards_revision_nonnegative",
+          "value": "\"enrollment_task_boards\".\"revision\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.enrollments": {
+      "name": "enrollments",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "account_id": {
+          "name": "account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "learning_path_version_id": {
+          "name": "learning_path_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "enrollment_status",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'active'"
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "enrollments_account_id_accounts_id_fk": {
+          "name": "enrollments_account_id_accounts_id_fk",
+          "tableFrom": "enrollments",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "enrollments_learning_path_version_id_learning_path_versions_id_fk": {
+          "name": "enrollments_learning_path_version_id_learning_path_versions_id_fk",
+          "tableFrom": "enrollments",
+          "tableTo": "learning_path_versions",
+          "columnsFrom": [
+            "learning_path_version_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "enrollments_account_version_key": {
+          "name": "enrollments_account_version_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "account_id",
+            "learning_path_version_id"
+          ]
+        },
+        "enrollments_id_version_key": {
+          "name": "enrollments_id_version_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "learning_path_version_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.learning_path_versions": {
+      "name": "learning_path_versions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "learning_path_id": {
+          "name": "learning_path_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "version_number": {
+          "name": "version_number",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "goal": {
+          "name": "goal",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "published_at": {
+          "name": "published_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "enrollment_closed_at": {
+          "name": "enrollment_closed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "layout_revision": {
+          "name": "layout_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "learning_path_versions_one_draft_key": {
+          "name": "learning_path_versions_one_draft_key",
+          "columns": [
+            {
+              "expression": "learning_path_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"learning_path_versions\".\"published_at\" IS NULL",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "learning_path_versions_learning_path_id_learning_paths_id_fk": {
+          "name": "learning_path_versions_learning_path_id_learning_paths_id_fk",
+          "tableFrom": "learning_path_versions",
+          "tableTo": "learning_paths",
+          "columnsFrom": [
+            "learning_path_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "learning_path_versions_path_number_key": {
+          "name": "learning_path_versions_path_number_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "learning_path_id",
+            "version_number"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "learning_path_versions_layout_revision_nonnegative": {
+          "name": "learning_path_versions_layout_revision_nonnegative",
+          "value": "\"learning_path_versions\".\"layout_revision\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.learning_paths": {
+      "name": "learning_paths",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "coach_workspace_id": {
+          "name": "coach_workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "personal_workspace_id": {
+          "name": "personal_workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "goal": {
+          "name": "goal",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "learning_paths_coach_workspace_id_coach_workspaces_id_fk": {
+          "name": "learning_paths_coach_workspace_id_coach_workspaces_id_fk",
+          "tableFrom": "learning_paths",
+          "tableTo": "coach_workspaces",
+          "columnsFrom": [
+            "coach_workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "learning_paths_personal_workspace_id_personal_workspaces_id_fk": {
+          "name": "learning_paths_personal_workspace_id_personal_workspaces_id_fk",
+          "tableFrom": "learning_paths",
+          "tableTo": "personal_workspaces",
+          "columnsFrom": [
+            "personal_workspace_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "learning_paths_id_personal_workspace_key": {
+          "name": "learning_paths_id_personal_workspace_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "personal_workspace_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "learning_paths_revision_nonnegative": {
+          "name": "learning_paths_revision_nonnegative",
+          "value": "\"learning_paths\".\"revision\" >= 0"
+        },
+        "learning_paths_one_workspace": {
+          "name": "learning_paths_one_workspace",
+          "value": "num_nonnulls(\"learning_paths\".\"coach_workspace_id\", \"learning_paths\".\"personal_workspace_id\") = 1"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.mastery_events": {
+      "name": "mastery_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "mastery_events_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "enrollment_id": {
+          "name": "enrollment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "learning_path_version_id": {
+          "name": "learning_path_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision_id": {
+          "name": "revision_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_account_id": {
+          "name": "actor_account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "mastery_events_revision_id_submission_reviews_revision_id_fk": {
+          "name": "mastery_events_revision_id_submission_reviews_revision_id_fk",
+          "tableFrom": "mastery_events",
+          "tableTo": "submission_reviews",
+          "columnsFrom": [
+            "revision_id"
+          ],
+          "columnsTo": [
+            "revision_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "mastery_events_actor_account_id_accounts_id_fk": {
+          "name": "mastery_events_actor_account_id_accounts_id_fk",
+          "tableFrom": "mastery_events",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "actor_account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "mastery_events_enrollment_id_learning_path_version_id_enrollments_id_learning_path_version_id_fk": {
+          "name": "mastery_events_enrollment_id_learning_path_version_id_enrollments_id_learning_path_version_id_fk",
+          "tableFrom": "mastery_events",
+          "tableTo": "enrollments",
+          "columnsFrom": [
+            "enrollment_id",
+            "learning_path_version_id"
+          ],
+          "columnsTo": [
+            "id",
+            "learning_path_version_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "mastery_events_learning_path_version_id_skill_id_version_skills_learning_path_version_id_skill_id_fk": {
+          "name": "mastery_events_learning_path_version_id_skill_id_version_skills_learning_path_version_id_skill_id_fk",
+          "tableFrom": "mastery_events",
+          "tableTo": "version_skills",
+          "columnsFrom": [
+            "learning_path_version_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "learning_path_version_id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "mastery_events_action": {
+          "name": "mastery_events_action",
+          "value": "\"mastery_events\".\"action\" IN ('award', 'revocation')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.override_records": {
+      "name": "override_records",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "override_records_sequence_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "enrollment_id": {
+          "name": "enrollment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "learning_path_version_id": {
+          "name": "learning_path_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "coach_account_id": {
+          "name": "coach_account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "learner_account_id": {
+          "name": "learner_account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "grant_record_id": {
+          "name": "grant_record_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "override_records_coach_account_id_accounts_id_fk": {
+          "name": "override_records_coach_account_id_accounts_id_fk",
+          "tableFrom": "override_records",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "coach_account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "override_records_learner_account_id_accounts_id_fk": {
+          "name": "override_records_learner_account_id_accounts_id_fk",
+          "tableFrom": "override_records",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "learner_account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "override_records_grant_record_id_override_records_id_fk": {
+          "name": "override_records_grant_record_id_override_records_id_fk",
+          "tableFrom": "override_records",
+          "tableTo": "override_records",
+          "columnsFrom": [
+            "grant_record_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "override_records_enrollment_id_learning_path_version_id_enrollments_id_learning_path_version_id_fk": {
+          "name": "override_records_enrollment_id_learning_path_version_id_enrollments_id_learning_path_version_id_fk",
+          "tableFrom": "override_records",
+          "tableTo": "enrollments",
+          "columnsFrom": [
+            "enrollment_id",
+            "learning_path_version_id"
+          ],
+          "columnsTo": [
+            "id",
+            "learning_path_version_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "override_records_learning_path_version_id_skill_id_version_skills_learning_path_version_id_skill_id_fk": {
+          "name": "override_records_learning_path_version_id_skill_id_version_skills_learning_path_version_id_skill_id_fk",
+          "tableFrom": "override_records",
+          "tableTo": "version_skills",
+          "columnsFrom": [
+            "learning_path_version_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "learning_path_version_id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "override_records_sequence_key": {
+          "name": "override_records_sequence_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "sequence"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "override_records_action": {
+          "name": "override_records_action",
+          "value": "(\"override_records\".\"action\" = 'grant' AND \"override_records\".\"grant_record_id\" IS NULL) OR (\"override_records\".\"action\" = 'revoke' AND \"override_records\".\"grant_record_id\" IS NOT NULL)"
+        },
+        "override_records_reason": {
+          "name": "override_records_reason",
+          "value": "length(trim(\"override_records\".\"reason\")) > 0 AND length(\"override_records\".\"reason\") <= 500"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.personal_board_cards": {
+      "name": "personal_board_cards",
+      "schema": "",
+      "columns": {
+        "learning_path_id": {
+          "name": "learning_path_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "column_id": {
+          "name": "column_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "personal_board_cards_task_fk": {
+          "name": "personal_board_cards_task_fk",
+          "tableFrom": "personal_board_cards",
+          "tableTo": "personal_tasks",
+          "columnsFrom": [
+            "learning_path_id",
+            "task_id"
+          ],
+          "columnsTo": [
+            "learning_path_id",
+            "task_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "personal_board_cards_task_skill_fk": {
+          "name": "personal_board_cards_task_skill_fk",
+          "tableFrom": "personal_board_cards",
+          "tableTo": "tasks",
+          "columnsFrom": [
+            "task_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "personal_board_cards_column_fk": {
+          "name": "personal_board_cards_column_fk",
+          "tableFrom": "personal_board_cards",
+          "tableTo": "personal_board_columns",
+          "columnsFrom": [
+            "column_id",
+            "learning_path_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "id",
+            "learning_path_id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "personal_board_cards_pk": {
+          "name": "personal_board_cards_pk",
+          "columns": [
+            "learning_path_id",
+            "task_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {
+        "personal_board_cards_position_key": {
+          "name": "personal_board_cards_position_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "column_id",
+            "position"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.personal_board_columns": {
+      "name": "personal_board_columns",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "learning_path_id": {
+          "name": "learning_path_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "completion": {
+          "name": "completion",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "position": {
+          "name": "position",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "personal_board_columns_one_completion_key": {
+          "name": "personal_board_columns_one_completion_key",
+          "columns": [
+            {
+              "expression": "learning_path_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "skill_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"personal_board_columns\".\"completion\"",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "personal_board_columns_board_fk": {
+          "name": "personal_board_columns_board_fk",
+          "tableFrom": "personal_board_columns",
+          "tableTo": "personal_task_boards",
+          "columnsFrom": [
+            "learning_path_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "learning_path_id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "personal_board_columns_id_board_key": {
+          "name": "personal_board_columns_id_board_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "learning_path_id",
+            "skill_id"
+          ]
+        },
+        "personal_board_columns_position_key": {
+          "name": "personal_board_columns_position_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "learning_path_id",
+            "skill_id",
+            "position"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "personal_board_columns_name": {
+          "name": "personal_board_columns_name",
+          "value": "length(trim(\"personal_board_columns\".\"name\")) > 0 AND length(\"personal_board_columns\".\"name\") <= 60"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.personal_mastery_events": {
+      "name": "personal_mastery_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "personal_mastery_events_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "learning_path_id": {
+          "name": "learning_path_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_account_id": {
+          "name": "actor_account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "personal_mastery_events_actor_account_id_accounts_id_fk": {
+          "name": "personal_mastery_events_actor_account_id_accounts_id_fk",
+          "tableFrom": "personal_mastery_events",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "actor_account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "personal_mastery_events_learning_path_id_skill_id_personal_skills_learning_path_id_skill_id_fk": {
+          "name": "personal_mastery_events_learning_path_id_skill_id_personal_skills_learning_path_id_skill_id_fk",
+          "tableFrom": "personal_mastery_events",
+          "tableTo": "personal_skills",
+          "columnsFrom": [
+            "learning_path_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "learning_path_id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "personal_mastery_events_action": {
+          "name": "personal_mastery_events_action",
+          "value": "\"personal_mastery_events\".\"action\" IN ('declare', 'withdraw')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.personal_override_records": {
+      "name": "personal_override_records",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "sequence": {
+          "name": "sequence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "personal_override_records_sequence_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "learning_path_id": {
+          "name": "learning_path_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_account_id": {
+          "name": "actor_account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "action": {
+          "name": "action",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "personal_override_records_actor_account_id_accounts_id_fk": {
+          "name": "personal_override_records_actor_account_id_accounts_id_fk",
+          "tableFrom": "personal_override_records",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "actor_account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "personal_override_records_learning_path_id_skill_id_personal_skills_learning_path_id_skill_id_fk": {
+          "name": "personal_override_records_learning_path_id_skill_id_personal_skills_learning_path_id_skill_id_fk",
+          "tableFrom": "personal_override_records",
+          "tableTo": "personal_skills",
+          "columnsFrom": [
+            "learning_path_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "learning_path_id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "personal_override_records_sequence_key": {
+          "name": "personal_override_records_sequence_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "sequence"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "personal_override_records_action": {
+          "name": "personal_override_records_action",
+          "value": "\"personal_override_records\".\"action\" IN ('grant', 'revoke')"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.personal_prerequisites": {
+      "name": "personal_prerequisites",
+      "schema": "",
+      "columns": {
+        "learning_path_id": {
+          "name": "learning_path_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "prerequisite_skill_id": {
+          "name": "prerequisite_skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "personal_prerequisites_source_fk": {
+          "name": "personal_prerequisites_source_fk",
+          "tableFrom": "personal_prerequisites",
+          "tableTo": "personal_skills",
+          "columnsFrom": [
+            "learning_path_id",
+            "prerequisite_skill_id"
+          ],
+          "columnsTo": [
+            "learning_path_id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "personal_prerequisites_target_fk": {
+          "name": "personal_prerequisites_target_fk",
+          "tableFrom": "personal_prerequisites",
+          "tableTo": "personal_skills",
+          "columnsFrom": [
+            "learning_path_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "learning_path_id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "personal_prerequisites_pk": {
+          "name": "personal_prerequisites_pk",
+          "columns": [
+            "learning_path_id",
+            "prerequisite_skill_id",
+            "skill_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "personal_prerequisites_no_self_edge": {
+          "name": "personal_prerequisites_no_self_edge",
+          "value": "\"personal_prerequisites\".\"prerequisite_skill_id\" <> \"personal_prerequisites\".\"skill_id\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.personal_skill_cards": {
+      "name": "personal_skill_cards",
+      "schema": "",
+      "columns": {
+        "learning_path_id": {
+          "name": "learning_path_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "x": {
+          "name": "x",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "y": {
+          "name": "y",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "personal_skill_cards_skill_fk": {
+          "name": "personal_skill_cards_skill_fk",
+          "tableFrom": "personal_skill_cards",
+          "tableTo": "personal_skills",
+          "columnsFrom": [
+            "learning_path_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "learning_path_id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "personal_skill_cards_pk": {
+          "name": "personal_skill_cards_pk",
+          "columns": [
+            "learning_path_id",
+            "skill_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "personal_skill_cards_bounds": {
+          "name": "personal_skill_cards_bounds",
+          "value": "abs(\"personal_skill_cards\".\"x\") <= 1000000 AND abs(\"personal_skill_cards\".\"y\") <= 1000000"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.personal_skills": {
+      "name": "personal_skills",
+      "schema": "",
+      "columns": {
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "learning_path_id": {
+          "name": "learning_path_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "personal_workspace_id": {
+          "name": "personal_workspace_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "learning_outcome": {
+          "name": "learning_outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "xp_threshold": {
+          "name": "xp_threshold",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "mastery_declared_at": {
+          "name": "mastery_declared_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "archived_at": {
+          "name": "archived_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ordinal": {
+          "name": "ordinal",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "personal_skills_skill_id_learning_path_id_skills_id_learning_path_id_fk": {
+          "name": "personal_skills_skill_id_learning_path_id_skills_id_learning_path_id_fk",
+          "tableFrom": "personal_skills",
+          "tableTo": "skills",
+          "columnsFrom": [
+            "skill_id",
+            "learning_path_id"
+          ],
+          "columnsTo": [
+            "id",
+            "learning_path_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "personal_skills_learning_path_id_personal_workspace_id_learning_paths_id_personal_workspace_id_fk": {
+          "name": "personal_skills_learning_path_id_personal_workspace_id_learning_paths_id_personal_workspace_id_fk",
+          "tableFrom": "personal_skills",
+          "tableTo": "learning_paths",
+          "columnsFrom": [
+            "learning_path_id",
+            "personal_workspace_id"
+          ],
+          "columnsTo": [
+            "id",
+            "personal_workspace_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "personal_skills_path_skill_key": {
+          "name": "personal_skills_path_skill_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "learning_path_id",
+            "skill_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "personal_skills_xp_threshold_nonnegative": {
+          "name": "personal_skills_xp_threshold_nonnegative",
+          "value": "\"personal_skills\".\"xp_threshold\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.personal_task_boards": {
+      "name": "personal_task_boards",
+      "schema": "",
+      "columns": {
+        "learning_path_id": {
+          "name": "learning_path_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "personal_task_boards_skill_fk": {
+          "name": "personal_task_boards_skill_fk",
+          "tableFrom": "personal_task_boards",
+          "tableTo": "personal_skills",
+          "columnsFrom": [
+            "learning_path_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "learning_path_id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "personal_task_boards_pk": {
+          "name": "personal_task_boards_pk",
+          "columns": [
+            "learning_path_id",
+            "skill_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "personal_task_boards_revision_nonnegative": {
+          "name": "personal_task_boards_revision_nonnegative",
+          "value": "\"personal_task_boards\".\"revision\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.personal_tasks": {
+      "name": "personal_tasks",
+      "schema": "",
+      "columns": {
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "learning_path_id": {
+          "name": "learning_path_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "ordinal": {
+          "name": "ordinal",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "xp_reward": {
+          "name": "xp_reward",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "completed_at": {
+          "name": "completed_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "archived_at": {
+          "name": "archived_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "personal_tasks_task_id_skill_id_tasks_id_skill_id_fk": {
+          "name": "personal_tasks_task_id_skill_id_tasks_id_skill_id_fk",
+          "tableFrom": "personal_tasks",
+          "tableTo": "tasks",
+          "columnsFrom": [
+            "task_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "personal_tasks_learning_path_id_skill_id_personal_skills_learning_path_id_skill_id_fk": {
+          "name": "personal_tasks_learning_path_id_skill_id_personal_skills_learning_path_id_skill_id_fk",
+          "tableFrom": "personal_tasks",
+          "tableTo": "personal_skills",
+          "columnsFrom": [
+            "learning_path_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "learning_path_id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "personal_tasks_path_task_key": {
+          "name": "personal_tasks_path_task_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "learning_path_id",
+            "task_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "personal_tasks_xp_reward_nonnegative": {
+          "name": "personal_tasks_xp_reward_nonnegative",
+          "value": "\"personal_tasks\".\"xp_reward\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.personal_workspaces": {
+      "name": "personal_workspaces",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "owner_account_id": {
+          "name": "owner_account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "personal_workspaces_owner_account_id_accounts_id_fk": {
+          "name": "personal_workspaces_owner_account_id_accounts_id_fk",
+          "tableFrom": "personal_workspaces",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "owner_account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "personal_workspaces_owner_key": {
+          "name": "personal_workspaces_owner_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "owner_account_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.personal_xp_events": {
+      "name": "personal_xp_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "personal_xp_events_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "learning_path_id": {
+          "name": "learning_path_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_account_id": {
+          "name": "actor_account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cause": {
+          "name": "cause",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "personal_xp_events_actor_account_id_accounts_id_fk": {
+          "name": "personal_xp_events_actor_account_id_accounts_id_fk",
+          "tableFrom": "personal_xp_events",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "actor_account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "personal_xp_events_learning_path_id_task_id_personal_tasks_learning_path_id_task_id_fk": {
+          "name": "personal_xp_events_learning_path_id_task_id_personal_tasks_learning_path_id_task_id_fk",
+          "tableFrom": "personal_xp_events",
+          "tableTo": "personal_tasks",
+          "columnsFrom": [
+            "learning_path_id",
+            "task_id"
+          ],
+          "columnsTo": [
+            "learning_path_id",
+            "task_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "personal_xp_events_kind": {
+          "name": "personal_xp_events_kind",
+          "value": "\"personal_xp_events\".\"kind\" IN ('award', 'correction')"
+        },
+        "personal_xp_events_cause": {
+          "name": "personal_xp_events_cause",
+          "value": "\"personal_xp_events\".\"cause\" IN ('completion', 'completion_undone', 'reward_change')"
+        },
+        "personal_xp_events_nonzero": {
+          "name": "personal_xp_events_nonzero",
+          "value": "\"personal_xp_events\".\"amount\" <> 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.skills": {
+      "name": "skills",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "learning_path_id": {
+          "name": "learning_path_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "skills_learning_path_id_learning_paths_id_fk": {
+          "name": "skills_learning_path_id_learning_paths_id_fk",
+          "tableFrom": "skills",
+          "tableTo": "learning_paths",
+          "columnsFrom": [
+            "learning_path_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "skills_id_learning_path_key": {
+          "name": "skills_id_learning_path_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "learning_path_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.submission_drafts": {
+      "name": "submission_drafts",
+      "schema": "",
+      "columns": {
+        "enrollment_id": {
+          "name": "enrollment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "learning_path_version_id": {
+          "name": "learning_path_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "urls": {
+          "name": "urls",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "submission_drafts_enrollment_id_learning_path_version_id_enrollments_id_learning_path_version_id_fk": {
+          "name": "submission_drafts_enrollment_id_learning_path_version_id_enrollments_id_learning_path_version_id_fk",
+          "tableFrom": "submission_drafts",
+          "tableTo": "enrollments",
+          "columnsFrom": [
+            "enrollment_id",
+            "learning_path_version_id"
+          ],
+          "columnsTo": [
+            "id",
+            "learning_path_version_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "submission_drafts_learning_path_version_id_task_id_version_tasks_learning_path_version_id_task_id_fk": {
+          "name": "submission_drafts_learning_path_version_id_task_id_version_tasks_learning_path_version_id_task_id_fk",
+          "tableFrom": "submission_drafts",
+          "tableTo": "version_tasks",
+          "columnsFrom": [
+            "learning_path_version_id",
+            "task_id"
+          ],
+          "columnsTo": [
+            "learning_path_version_id",
+            "task_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "submission_drafts_enrollment_id_task_id_pk": {
+          "name": "submission_drafts_enrollment_id_task_id_pk",
+          "columns": [
+            "enrollment_id",
+            "task_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.submission_reviews": {
+      "name": "submission_reviews",
+      "schema": "",
+      "columns": {
+        "revision_id": {
+          "name": "revision_id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "coach_account_id": {
+          "name": "coach_account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "decision": {
+          "name": "decision",
+          "type": "review_decision",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "feedback": {
+          "name": "feedback",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "decided_at": {
+          "name": "decided_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revocation_reason": {
+          "name": "revocation_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "revoked_by_account_id": {
+          "name": "revoked_by_account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "submission_reviews_revision_id_submission_revisions_id_fk": {
+          "name": "submission_reviews_revision_id_submission_revisions_id_fk",
+          "tableFrom": "submission_reviews",
+          "tableTo": "submission_revisions",
+          "columnsFrom": [
+            "revision_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "submission_reviews_coach_account_id_accounts_id_fk": {
+          "name": "submission_reviews_coach_account_id_accounts_id_fk",
+          "tableFrom": "submission_reviews",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "coach_account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "submission_reviews_revoked_by_account_id_accounts_id_fk": {
+          "name": "submission_reviews_revoked_by_account_id_accounts_id_fk",
+          "tableFrom": "submission_reviews",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "revoked_by_account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "submission_reviews_changes_feedback": {
+          "name": "submission_reviews_changes_feedback",
+          "value": "\"submission_reviews\".\"decision\" <> 'changes_requested' OR length(trim(\"submission_reviews\".\"feedback\")) > 0 AND \"submission_reviews\".\"feedback\" IS NOT NULL"
+        },
+        "submission_reviews_revocation": {
+          "name": "submission_reviews_revocation",
+          "value": "(\"submission_reviews\".\"revoked_at\" IS NULL AND \"submission_reviews\".\"revocation_reason\" IS NULL) OR (\"submission_reviews\".\"decision\" = 'approval' AND \"submission_reviews\".\"revoked_at\" IS NOT NULL AND \"submission_reviews\".\"revocation_reason\" IS NOT NULL AND length(trim(\"submission_reviews\".\"revocation_reason\")) > 0)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.submission_revisions": {
+      "name": "submission_revisions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "submission_id": {
+          "name": "submission_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision_number": {
+          "name": "revision_number",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "text": {
+          "name": "text",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "urls": {
+          "name": "urls",
+          "type": "text[]",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "sent_at": {
+          "name": "sent_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "superseded_at": {
+          "name": "superseded_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "submission_revisions_submission_id_submissions_id_fk": {
+          "name": "submission_revisions_submission_id_submissions_id_fk",
+          "tableFrom": "submission_revisions",
+          "tableTo": "submissions",
+          "columnsFrom": [
+            "submission_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "submission_revisions_submission_number_key": {
+          "name": "submission_revisions_submission_number_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "submission_id",
+            "revision_number"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.submissions": {
+      "name": "submissions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "enrollment_id": {
+          "name": "enrollment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "learning_path_version_id": {
+          "name": "learning_path_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "submissions_enrollment_id_learning_path_version_id_enrollments_id_learning_path_version_id_fk": {
+          "name": "submissions_enrollment_id_learning_path_version_id_enrollments_id_learning_path_version_id_fk",
+          "tableFrom": "submissions",
+          "tableTo": "enrollments",
+          "columnsFrom": [
+            "enrollment_id",
+            "learning_path_version_id"
+          ],
+          "columnsTo": [
+            "id",
+            "learning_path_version_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "submissions_learning_path_version_id_task_id_version_tasks_learning_path_version_id_task_id_fk": {
+          "name": "submissions_learning_path_version_id_task_id_version_tasks_learning_path_version_id_task_id_fk",
+          "tableFrom": "submissions",
+          "tableTo": "version_tasks",
+          "columnsFrom": [
+            "learning_path_version_id",
+            "task_id"
+          ],
+          "columnsTo": [
+            "learning_path_version_id",
+            "task_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "submissions_enrollment_task_key": {
+          "name": "submissions_enrollment_task_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "enrollment_id",
+            "task_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.task_starts": {
+      "name": "task_starts",
+      "schema": "",
+      "columns": {
+        "enrollment_id": {
+          "name": "enrollment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "learning_path_version_id": {
+          "name": "learning_path_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "task_starts_enrollment_id_learning_path_version_id_enrollments_id_learning_path_version_id_fk": {
+          "name": "task_starts_enrollment_id_learning_path_version_id_enrollments_id_learning_path_version_id_fk",
+          "tableFrom": "task_starts",
+          "tableTo": "enrollments",
+          "columnsFrom": [
+            "enrollment_id",
+            "learning_path_version_id"
+          ],
+          "columnsTo": [
+            "id",
+            "learning_path_version_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "task_starts_learning_path_version_id_task_id_version_tasks_learning_path_version_id_task_id_fk": {
+          "name": "task_starts_learning_path_version_id_task_id_version_tasks_learning_path_version_id_task_id_fk",
+          "tableFrom": "task_starts",
+          "tableTo": "version_tasks",
+          "columnsFrom": [
+            "learning_path_version_id",
+            "task_id"
+          ],
+          "columnsTo": [
+            "learning_path_version_id",
+            "task_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "task_starts_enrollment_id_task_id_pk": {
+          "name": "task_starts_enrollment_id_task_id_pk",
+          "columns": [
+            "enrollment_id",
+            "task_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.tasks": {
+      "name": "tasks",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "tasks_skill_id_skills_id_fk": {
+          "name": "tasks_skill_id_skills_id_fk",
+          "tableFrom": "tasks",
+          "tableTo": "skills",
+          "columnsFrom": [
+            "skill_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "tasks_id_skill_key": {
+          "name": "tasks_id_skill_key",
+          "nullsNotDistinct": false,
+          "columns": [
+            "id",
+            "skill_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.version_prerequisites": {
+      "name": "version_prerequisites",
+      "schema": "",
+      "columns": {
+        "learning_path_version_id": {
+          "name": "learning_path_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "prerequisite_skill_id": {
+          "name": "prerequisite_skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "version_prerequisites_source_fk": {
+          "name": "version_prerequisites_source_fk",
+          "tableFrom": "version_prerequisites",
+          "tableTo": "version_skills",
+          "columnsFrom": [
+            "learning_path_version_id",
+            "prerequisite_skill_id"
+          ],
+          "columnsTo": [
+            "learning_path_version_id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "version_prerequisites_target_fk": {
+          "name": "version_prerequisites_target_fk",
+          "tableFrom": "version_prerequisites",
+          "tableTo": "version_skills",
+          "columnsFrom": [
+            "learning_path_version_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "learning_path_version_id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "version_prerequisites_pk": {
+          "name": "version_prerequisites_pk",
+          "columns": [
+            "learning_path_version_id",
+            "prerequisite_skill_id",
+            "skill_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "version_prerequisites_no_self_edge": {
+          "name": "version_prerequisites_no_self_edge",
+          "value": "\"version_prerequisites\".\"prerequisite_skill_id\" <> \"version_prerequisites\".\"skill_id\""
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.version_skill_cards": {
+      "name": "version_skill_cards",
+      "schema": "",
+      "columns": {
+        "learning_path_version_id": {
+          "name": "learning_path_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "x": {
+          "name": "x",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "y": {
+          "name": "y",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "version_skill_cards_skill_fk": {
+          "name": "version_skill_cards_skill_fk",
+          "tableFrom": "version_skill_cards",
+          "tableTo": "version_skills",
+          "columnsFrom": [
+            "learning_path_version_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "learning_path_version_id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "version_skill_cards_pk": {
+          "name": "version_skill_cards_pk",
+          "columns": [
+            "learning_path_version_id",
+            "skill_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "version_skill_cards_bounds": {
+          "name": "version_skill_cards_bounds",
+          "value": "abs(\"version_skill_cards\".\"x\") <= 1000000 AND abs(\"version_skill_cards\".\"y\") <= 1000000"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.version_skills": {
+      "name": "version_skills",
+      "schema": "",
+      "columns": {
+        "learning_path_version_id": {
+          "name": "learning_path_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "learning_outcome": {
+          "name": "learning_outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "xp_threshold": {
+          "name": "xp_threshold",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "optional": {
+          "name": "optional",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "ordinal": {
+          "name": "ordinal",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "version_skills_learning_path_version_id_learning_path_versions_id_fk": {
+          "name": "version_skills_learning_path_version_id_learning_path_versions_id_fk",
+          "tableFrom": "version_skills",
+          "tableTo": "learning_path_versions",
+          "columnsFrom": [
+            "learning_path_version_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "version_skills_skill_id_skills_id_fk": {
+          "name": "version_skills_skill_id_skills_id_fk",
+          "tableFrom": "version_skills",
+          "tableTo": "skills",
+          "columnsFrom": [
+            "skill_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "version_skills_learning_path_version_id_skill_id_pk": {
+          "name": "version_skills_learning_path_version_id_skill_id_pk",
+          "columns": [
+            "learning_path_version_id",
+            "skill_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "version_skills_xp_threshold_nonnegative": {
+          "name": "version_skills_xp_threshold_nonnegative",
+          "value": "\"version_skills\".\"xp_threshold\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.version_tasks": {
+      "name": "version_tasks",
+      "schema": "",
+      "columns": {
+        "learning_path_version_id": {
+          "name": "learning_path_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "skill_id": {
+          "name": "skill_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "required": {
+          "name": "required",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "xp_reward": {
+          "name": "xp_reward",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "''"
+        },
+        "ordinal": {
+          "name": "ordinal",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "version_tasks_task_id_skill_id_tasks_id_skill_id_fk": {
+          "name": "version_tasks_task_id_skill_id_tasks_id_skill_id_fk",
+          "tableFrom": "version_tasks",
+          "tableTo": "tasks",
+          "columnsFrom": [
+            "task_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "version_tasks_learning_path_version_id_skill_id_version_skills_learning_path_version_id_skill_id_fk": {
+          "name": "version_tasks_learning_path_version_id_skill_id_version_skills_learning_path_version_id_skill_id_fk",
+          "tableFrom": "version_tasks",
+          "tableTo": "version_skills",
+          "columnsFrom": [
+            "learning_path_version_id",
+            "skill_id"
+          ],
+          "columnsTo": [
+            "learning_path_version_id",
+            "skill_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "version_tasks_learning_path_version_id_task_id_pk": {
+          "name": "version_tasks_learning_path_version_id_task_id_pk",
+          "columns": [
+            "learning_path_version_id",
+            "task_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "version_tasks_xp_reward_nonnegative": {
+          "name": "version_tasks_xp_reward_nonnegative",
+          "value": "\"version_tasks\".\"xp_reward\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.xp_events": {
+      "name": "xp_events",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "xp_events_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "2147483647",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "enrollment_id": {
+          "name": "enrollment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "learning_path_version_id": {
+          "name": "learning_path_version_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "task_id": {
+          "name": "task_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision_id": {
+          "name": "revision_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "actor_account_id": {
+          "name": "actor_account_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "occurred_at": {
+          "name": "occurred_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "amount": {
+          "name": "amount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "xp_events_revision_id_submission_reviews_revision_id_fk": {
+          "name": "xp_events_revision_id_submission_reviews_revision_id_fk",
+          "tableFrom": "xp_events",
+          "tableTo": "submission_reviews",
+          "columnsFrom": [
+            "revision_id"
+          ],
+          "columnsTo": [
+            "revision_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "xp_events_actor_account_id_accounts_id_fk": {
+          "name": "xp_events_actor_account_id_accounts_id_fk",
+          "tableFrom": "xp_events",
+          "tableTo": "accounts",
+          "columnsFrom": [
+            "actor_account_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "xp_events_enrollment_id_learning_path_version_id_enrollments_id_learning_path_version_id_fk": {
+          "name": "xp_events_enrollment_id_learning_path_version_id_enrollments_id_learning_path_version_id_fk",
+          "tableFrom": "xp_events",
+          "tableTo": "enrollments",
+          "columnsFrom": [
+            "enrollment_id",
+            "learning_path_version_id"
+          ],
+          "columnsTo": [
+            "id",
+            "learning_path_version_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "xp_events_learning_path_version_id_task_id_version_tasks_learning_path_version_id_task_id_fk": {
+          "name": "xp_events_learning_path_version_id_task_id_version_tasks_learning_path_version_id_task_id_fk",
+          "tableFrom": "xp_events",
+          "tableTo": "version_tasks",
+          "columnsFrom": [
+            "learning_path_version_id",
+            "task_id"
+          ],
+          "columnsTo": [
+            "learning_path_version_id",
+            "task_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "xp_events_kind": {
+          "name": "xp_events_kind",
+          "value": "\"xp_events\".\"kind\" IN ('award', 'correction')"
+        },
+        "xp_events_nonzero": {
+          "name": "xp_events_nonzero",
+          "value": "\"xp_events\".\"amount\" <> 0"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.enrollment_status": {
+      "name": "enrollment_status",
+      "schema": "public",
+      "values": [
+        "active",
+        "inactive"
+      ]
+    },
+    "public.invitation_delivery_status": {
+      "name": "invitation_delivery_status",
+      "schema": "public",
+      "values": [
+        "pending",
+        "sent",
+        "logged",
+        "failed"
+      ]
+    },
+    "public.review_decision": {
+      "name": "review_decision",
+      "schema": "public",
+      "values": [
+        "approval",
+        "changes_requested"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

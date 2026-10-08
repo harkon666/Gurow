@@ -20,7 +20,7 @@ export type BoardRefusal =
 
 async function findSkill(tx: Tx, learningPathId: string, skillId: string) {
   const [skill] = await tx.select({ skillId: personalSkills.skillId }).from(personalSkills)
-    .where(and(eq(personalSkills.learningPathId, learningPathId), eq(personalSkills.skillId, skillId)))
+    .where(and(eq(personalSkills.learningPathId, learningPathId), eq(personalSkills.skillId, skillId), isNull(personalSkills.archivedAt)))
   return skill ?? null
 }
 

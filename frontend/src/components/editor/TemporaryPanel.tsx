@@ -2,12 +2,15 @@ import { useEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 /** A temporary, keyboard-contained view; closing returns to its invoking control. */
-export function TemporaryPanel({ title, closeId, onClose, children, initialFocus }: {
+export function TemporaryPanel({ title, closeId, onClose, children, initialFocus, footer, onEscape }: {
   title: string
   closeId: string
   onClose: () => void
   children: ReactNode
   initialFocus?: string
+  footer?: ReactNode
+  /** Optional subview Back behavior; omitted panels keep Escape-to-close. */
+  onEscape?: () => void
 }) {
   const ref = useRef<HTMLDialogElement>(null)
   const close = useRef(onClose)
@@ -26,14 +29,17 @@ export function TemporaryPanel({ title, closeId, onClose, children, initialFocus
   }, [initialFocus])
   return createPortal(
     // React propagates the cancel event through portals to enclosing dialogs: only this one closes.
-    <dialog ref={ref} aria-label={title} onCancel={(event) => { event.preventDefault(); event.stopPropagation(); close.current() }}
+    <dialog ref={ref} aria-label={title} onCancel={(event) => { event.preventDefault(); event.stopPropagation(); if (onEscape) onEscape(); else close.current() }}
       // Scroll padding keeps content scrolled into view (focus, find) clear of the sticky header.
       className="fixed inset-0 m-auto scroll-pt-16 w-full h-dvh max-w-none max-h-none md:w-[36rem] md:h-auto md:max-h-[88dvh] md:rounded-2xl border border-slate-700 bg-slate-950 text-slate-200 p-0 shadow-2xl backdrop:bg-black/50">
       <div className="sticky top-0 z-10 flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-800 bg-slate-950">
         <h2 className="font-semibold">{title}</h2>
         <button id={closeId} onClick={onClose} className="rounded-lg border border-slate-700 px-3 py-1 text-sm hover:bg-slate-800">Close</button>
       </div>
-      {children}
+      {footer ? <div className="flex flex-col max-h-[calc(100dvh-3.5rem)] md:max-h-[calc(88dvh-3.5rem)]">
+        <div className="min-h-0 overflow-y-auto">{children}</div>
+        <div className="shrink-0 border-t border-slate-800 bg-slate-950 p-4">{footer}</div>
+      </div> : children}
     </dialog>, document.body,
   )
 }

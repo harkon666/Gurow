@@ -19,7 +19,7 @@ export async function personalHistory(tx: Pick<Database, 'select'>, learningPath
   const scored = await tx.select({ taskId: personalXpEvents.taskId, skillId: personalTasks.skillId }).from(personalXpEvents)
     .innerJoin(personalTasks, eq(personalTasks.taskId, personalXpEvents.taskId)).where(eq(personalXpEvents.learningPathId, learningPathId))
   const mastery = await tx.select({ skillId: personalMasteryEvents.skillId }).from(personalMasteryEvents).where(eq(personalMasteryEvents.learningPathId, learningPathId))
-  const declared = await tx.select({ skillId: personalSkills.skillId }).from(personalSkills).where(and(eq(personalSkills.learningPathId, learningPathId), isNotNull(personalSkills.masteryDeclaredAt)))
+  const declared = await tx.select({ skillId: personalSkills.skillId }).from(personalSkills).where(and(eq(personalSkills.learningPathId, learningPathId), or(isNotNull(personalSkills.masteryDeclaredAt), isNotNull(personalSkills.archivedAt))))
   const overrides = await tx.select({ skillId: personalOverrideRecords.skillId }).from(personalOverrideRecords).where(eq(personalOverrideRecords.learningPathId, learningPathId))
   const tasks = [...worked, ...scored]
   return {

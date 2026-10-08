@@ -37,9 +37,15 @@ interface SkillDetailPanelProps {
   onAddTask?: () => void
   /** Learning records of the selected Skill (Access, Mastery, XP), shown after its outcome. */
   learning?: React.ReactNode
-  /** Actions on the selected Skill itself (deletion), shown under its title. */
+  settings?: React.ReactNode
+  history?: React.ReactNode
+  editLabel?: string
+  tasksLabel?: string
+  /** Queue navigation requests Tasks without exposing a learner's private board. */
+  tasksRequest?: string | null
+  /** Infrequent Skill actions (such as deletion), behind the summary actions menu. */
   skillActions?: React.ReactNode
-  /** The way to the Skill's Task Board, shown first under its title. */
+  /** Primary summary-footer action for contexts with a Task Board. */
   boardAction?: React.ReactNode
   /** Learning controls shown inside each Task card. */
   renderTaskExtra?: (taskId: string) => React.ReactNode
@@ -95,15 +101,42 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
   onUpdateOutcome,
   onAddTask,
   learning,
+  settings,
+  history,
+  editLabel = 'Edit Skill',
+  tasksLabel = 'Tasks',
+  tasksRequest,
   skillActions,
   boardAction,
   renderTaskExtra,
 }) => {
   const [selectedTargetId, setSelectedTargetId] = useState<string>('')
+  const [view, setView] = useState<'summary' | 'edit' | 'prerequisites' | 'history' | 'tasks'>('summary')
+  const [actionsOpen, setActionsOpen] = useState(false)
+  const bodyRef = React.useRef<HTMLElement>(null)
+  const returnFocus = React.useRef<string | null>(null)
+  const changeView = (next: typeof view, trigger?: string) => {
+    returnFocus.current = next === 'summary' ? returnFocus.current : trigger ?? null
+    setActionsOpen(false)
+    setView(next)
+  }
+  React.useEffect(() => {
+    const body = bodyRef.current
+    if (!body) return
+    body.parentElement?.scrollTo(0, 0)
+    if (view !== 'summary') document.getElementById('btn-back-skill-summary')?.focus()
+    else if (returnFocus.current) document.getElementById(returnFocus.current)?.focus()
+  }, [view])
+  React.useEffect(() => {
+    if (tasksRequest) setView('tasks')
+  }, [tasksRequest])
 
   // Reset selectedTargetId whenever the active skill selection changes
   React.useEffect(() => {
     setSelectedTargetId('')
+    setView(tasksRequest ? 'tasks' : 'summary')
+    setActionsOpen(false)
+    returnFocus.current = null
   }, [selectedSkill?.id])
 
   if (!selectedSkill) return <div id="skill-detail-panel" hidden data-connections={JSON.stringify(connections)} data-connections-count={connections.length} />
@@ -127,12 +160,20 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
     otherSkills.find((s) => s.id === selectedTargetId)?.id ?? (otherSkills[0]?.id ?? '')
 
   return (
-    <TemporaryPanel title="Skill summary" closeId="btn-close-skill-details" onClose={onClose}>
+    <TemporaryPanel title={view === 'summary' ? 'Skill summary' : view === 'edit' ? editLabel : view === 'prerequisites' ? 'Manage prerequisites' : view === 'history' ? 'Skill history' : tasksLabel} closeId="btn-close-skill-details" onClose={onClose}
+      onEscape={view !== 'summary' || actionsOpen ? () => { if (actionsOpen) { setActionsOpen(false); document.getElementById('skill-actions-btn')?.focus() } else changeView('summary') } : undefined}
+      footer={<div id="skill-summary-footer" aria-busy={busy} inert={busy} className="flex flex-col gap-2">
+        {view === 'summary' ? <>{boardAction || <button id="open-skill-tasks-btn" onClick={() => changeView('tasks', 'open-skill-tasks-btn')} className="rounded-lg bg-blue-600 hover:bg-blue-500 py-2 text-sm text-white">{tasksLabel}</button>}
+          {(onUpdateOutcome || settings) && <button id="edit-skill-btn" onClick={() => changeView('edit', 'edit-skill-btn')} className="rounded-lg border border-slate-700 py-2 text-sm hover:bg-slate-800">{editLabel}</button>}
+        </> : <button id="btn-back-skill-summary" onClick={() => changeView('summary')} className="rounded-lg border border-slate-700 py-2 text-sm hover:bg-slate-800">Back to Skill summary</button>}
+      </div>}>
     {feedback && <div className="px-4 py-3 border-b border-slate-800 space-y-2">{feedback}</div>}
     <section
       inert={busy}
       aria-busy={busy}
       id="skill-detail-panel"
+      ref={bodyRef}
+      data-view={view}
       data-selected-skill-id={selectedSkill.id}
       data-connections={JSON.stringify(connections)}
       data-connections-count={connections.length}
@@ -151,16 +192,16 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
             </span>
           </div>
 
-          <h2
-            id="selected-skill-title"
-            className="text-xl font-bold text-slate-100 tracking-tight"
-          >
-            {selectedSkill.title}
-          </h2>
-
+          <div className="flex items-start justify-between gap-3">
+            <h2 id="selected-skill-title" className="min-w-0 break-words text-xl font-bold text-slate-100 tracking-tight">
+              {selectedSkill.title}
+            </h2>
+            {view === 'summary' && skillActions && <div className="relative shrink-0">
+              <button id="skill-actions-btn" aria-label="Skill actions" aria-expanded={actionsOpen} aria-controls={actionsOpen ? 'skill-actions-menu' : undefined} onClick={() => setActionsOpen(!actionsOpen)} className="rounded-lg border border-slate-700 px-3 py-1 text-slate-300 hover:bg-slate-800 focus-visible:outline focus-visible:outline-blue-400">⋯</button>
+              {actionsOpen && <div id="skill-actions-menu" role="group" aria-label="Skill actions" className="absolute right-0 top-full z-10 mt-2 w-56 max-w-[calc(100vw-3rem)] rounded-xl border border-slate-700 bg-slate-900 p-3 shadow-xl flex flex-col gap-2">{skillActions}</div>}
+            </div>}
+          </div>
           <span id="selected-skill-id" hidden>{selectedSkill.id}</span>
-          {boardAction && <div className="mt-3">{boardAction}</div>}
-          {skillActions && <div className="mt-2 flex flex-col">{skillActions}</div>}
         </div>
 
         {/* Cycle Rejection Alert */}
@@ -191,11 +232,11 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
         )}
 
         {/* Learning Outcome */}
-        <div className="bg-slate-800/40 rounded-xl p-4 border border-slate-700/40">
+        {(view === 'summary' || view === 'edit') && <div className="bg-slate-800/40 rounded-xl p-4 border border-slate-700/40">
           <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5">
             Learning Outcome
           </h4>
-          {onUpdateOutcome ? (
+          {view === 'edit' && onUpdateOutcome ? (
             <textarea
               id="skill-outcome-input"
               aria-label="Learning outcome"
@@ -206,16 +247,25 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
               placeholder="What the learner can do once this Skill is mastered…"
             />
           ) : (
-            <p className="text-sm text-slate-300 leading-relaxed">
-              {activeOutcome}
+            <p id="skill-summary-outcome" className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap">
+              {activeOutcome || 'No learning outcome yet.'}
             </p>
           )}
-        </div>
+        </div>}
 
-        {learning}
+        {view === 'summary' && <>
+          {learning ?? <div className="space-y-2 text-xs text-slate-400"><p>Access: Not tracked in this view</p><p>Mastery: Not tracked in this view</p></div>}
+          <p id="skill-task-count" className="text-sm text-slate-300">{activeTasks.length} Tasks</p>
+          <div className="text-xs text-slate-300"><h4 className="font-semibold">Requires</h4><p>{incomingPrereqs.map((c) => allSkills.find((s) => s.id === c.from_id)?.title ?? 'Unavailable Skill').join(', ') || 'No prerequisites'}</p></div>
+          <details className="text-xs text-slate-400"><summary className="cursor-pointer">Prerequisite for ({outgoingDependents.length})</summary><p className="mt-2">{outgoingDependents.map((c) => allSkills.find((s) => s.id === c.to_id)?.title ?? 'Unavailable Skill').join(', ') || 'No dependent Skills'}</p></details>
+          {(onConnect || onDisconnect) && <button id="manage-prerequisites-btn" onClick={() => changeView('prerequisites', 'manage-prerequisites-btn')} className="text-xs text-blue-300 text-left">Manage prerequisites</button>}
+          {history && <button id="skill-history-btn" onClick={() => changeView('history', 'skill-history-btn')} className="text-xs text-slate-300 text-left">History</button>}
+        </>}
+        {view === 'edit' && settings}
+        {view === 'history' && history}
 
         {/* Prerequisite Connections Section */}
-        <div id="skill-prerequisites-section" className="space-y-3">
+        {view === 'prerequisites' && <div id="skill-prerequisites-section" className="space-y-3">
           <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center justify-between">
             <span>Relationships</span>
           </h4>
@@ -223,7 +273,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
           {/* Upstream Prerequisites Required for this Skill */}
           <div className="bg-slate-800/30 rounded-lg p-3 border border-slate-700/30 space-y-2">
             <div className="text-[11px] font-medium text-slate-300">
-              Requires (Prerequisites):
+              This Skill requires…
             </div>
             {incomingPrereqs.length > 0 ? (
               <ul id="incoming-prerequisites-list" className="space-y-1.5">
@@ -251,7 +301,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
           {/* Downstream Skills Dependent on this Skill */}
           <div className="bg-slate-800/30 rounded-lg p-3 border border-slate-700/30 space-y-2">
             <div className="text-[11px] font-medium text-slate-300">
-              Prerequisite For (Dependents):
+              This Skill is a prerequisite for…
             </div>
             {outgoingDependents.length > 0 ? (
               <ul id="outgoing-prerequisites-list" className="space-y-1.5">
@@ -303,7 +353,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
                   className="px-2 py-1.5 bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/40 rounded-lg text-xs font-medium transition-colors cursor-pointer text-center disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Make selected option a prerequisite for this skill"
                 >
-                  + As Prerequisite
+                  This Skill requires selected Skill
                 </button>
                 <button
                   id="btn-add-dependent"
@@ -312,18 +362,18 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
                   className="px-2 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-medium transition-colors cursor-pointer text-center disabled:opacity-50 disabled:cursor-not-allowed"
                   title="Make this skill a prerequisite for selected option"
                 >
-                  + As Dependent
+                  Selected Skill requires this Skill
                 </button>
               </div>
             </div>
           )}
-        </div>
+        </div>}
 
-        {/* Associated Tasks (Application-owned, ADR-0015 & Ticket T04 AC 1) */}
-        <div>
+        {/* Task controls are mounted only for callers without a board. */}
+        {view === 'tasks' && !boardAction && <div>
           <div className="mb-2 flex items-center justify-between">
             <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              Associated Tasks
+              Tasks
             </h4>
           </div>
 
@@ -439,7 +489,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
               + Add Task
             </button>
           )}
-        </div>
+        </div>}
       </div>
 
     </section>

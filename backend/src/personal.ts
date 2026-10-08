@@ -7,7 +7,7 @@ import { personalHistory } from './retention'
 
 export type Tx = Parameters<Parameters<Database['transaction']>[0]>[0]
 
-export type PersonalRefusal = 'learning_path_not_found' | 'task_not_found' | 'skill_not_found' | 'task_archived' | 'skill_locked'
+export type PersonalRefusal = 'learning_path_not_found' | 'task_not_found' | 'skill_not_found' | 'task_archived' | 'skill_archived' | 'skill_locked'
 type Outcome = { ok: true; changed: boolean } | { ok: false; refusal: PersonalRefusal }
 
 /**
@@ -32,7 +32,7 @@ async function derivePersonalState(tx: Pick<Database, 'select'>, learningPathId:
       const xpShortfall = Math.max(0, skill.xpThreshold - xp)
       const latest = latestOverrides.get(skill.skillId)
       const accessOverride = latest?.action === 'grant' ? latest : null
-      return { ...skill, mastery: mastered.has(skill.skillId), access: accessOverride !== null || xpShortfall === 0 && unmetPrerequisiteSkillIds.length === 0, accessOverride, unmetPrerequisiteSkillIds, xpShortfall }
+      return { ...skill, mastery: mastered.has(skill.skillId), access: skill.archivedAt === null && (accessOverride !== null || xpShortfall === 0 && unmetPrerequisiteSkillIds.length === 0), accessOverride, unmetPrerequisiteSkillIds, xpShortfall }
     }),
   }
 }
@@ -88,6 +88,8 @@ async function act(db: Database, learningPathId: string, accountId: string, chan
 export async function activeTask(tx: Tx, learningPathId: string, taskId: string) {
   const [task] = await tx.select().from(personalTasks).where(and(eq(personalTasks.learningPathId, learningPathId), eq(personalTasks.taskId, taskId)))
   if (!task) return { ok: false, refusal: 'task_not_found' } as const
+  const [skill] = await tx.select({ archivedAt: personalSkills.archivedAt }).from(personalSkills).where(and(eq(personalSkills.learningPathId, learningPathId), eq(personalSkills.skillId, task.skillId)))
+  if (skill?.archivedAt) return { ok: false, refusal: 'skill_archived' } as const
   // Archival removes the Task from active use and freezes its retained contribution.
   if (task.archivedAt) return { ok: false, refusal: 'task_archived' } as const
   return { ok: true, task } as const
@@ -175,6 +177,7 @@ async function findSkill(tx: Tx, learningPathId: string, skillId: string) {
 export const setMastery = (db: Database, learningPathId: string, skillId: string, accountId: string, declared: boolean) => act(db, learningPathId, accountId, async (tx, now) => {
   const skill = await findSkill(tx, learningPathId, skillId)
   if (!skill) return { ok: false, refusal: 'skill_not_found' }
+  if (skill.archivedAt) return { ok: false, refusal: 'skill_archived' }
   if ((skill.masteryDeclaredAt !== null) === declared) return { ok: true, changed: false }
   await tx.update(personalSkills).set({ masteryDeclaredAt: declared ? now : null }).where(eq(personalSkills.skillId, skillId))
   await tx.insert(personalMasteryEvents).values({ learningPathId, skillId, actorAccountId: accountId, occurredAt: now, action: declared ? 'declare' : 'withdraw' })
@@ -189,6 +192,7 @@ export const setMastery = (db: Database, learningPathId: string, skillId: string
 export const setXpThreshold = (db: Database, learningPathId: string, skillId: string, accountId: string, xpThreshold: number) => act(db, learningPathId, accountId, async (tx) => {
   const skill = await findSkill(tx, learningPathId, skillId)
   if (!skill) return { ok: false, refusal: 'skill_not_found' }
+  if (skill.archivedAt) return { ok: false, refusal: 'skill_archived' }
   if (skill.xpThreshold === xpThreshold) return { ok: true, changed: false }
   await tx.update(personalSkills).set({ xpThreshold }).where(eq(personalSkills.skillId, skillId))
   return { ok: true, changed: true }
@@ -196,7 +200,9 @@ export const setXpThreshold = (db: Database, learningPathId: string, skillId: st
 
 /** Waives both gates for one Skill without a reason; XP and Mastery are not touched. */
 export const setAccessOverride = (db: Database, learningPathId: string, skillId: string, accountId: string, granted: boolean) => act(db, learningPathId, accountId, async (tx, now) => {
-  if (!await findSkill(tx, learningPathId, skillId)) return { ok: false, refusal: 'skill_not_found' }
+  const skill = await findSkill(tx, learningPathId, skillId)
+  if (!skill) return { ok: false, refusal: 'skill_not_found' }
+  if (skill.archivedAt) return { ok: false, refusal: 'skill_archived' }
   const [latest] = await tx.select().from(personalOverrideRecords).where(and(eq(personalOverrideRecords.learningPathId, learningPathId), eq(personalOverrideRecords.skillId, skillId))).orderBy(desc(personalOverrideRecords.sequence)).limit(1)
   if ((latest?.action === 'grant') === granted) return { ok: true, changed: false }
   await tx.insert(personalOverrideRecords).values({ learningPathId, skillId, actorAccountId: accountId, action: granted ? 'grant' : 'revoke', occurredAt: now })

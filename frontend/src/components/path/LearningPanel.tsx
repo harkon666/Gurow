@@ -86,10 +86,11 @@ interface SkillLearningProps {
   skillTitles: Map<string, string>
   taskTitles: Map<string, string>
   onAction: (action: LearningAction) => void
+  section?: 'summary' | 'settings' | 'history'
 }
 
 /** Access, Mastery and the XP Threshold of the selected Skill, with this Skill's XP record. */
-export function SkillLearning({ view, skillId, skillTitles, taskTitles, onAction }: SkillLearningProps) {
+export function SkillLearning({ view, skillId, skillTitles, taskTitles, onAction, section = 'summary' }: SkillLearningProps) {
   const records = view.records
   const skill = records?.skills.find((s) => s.skillId === skillId)
   if (!records || !skill) {
@@ -105,7 +106,7 @@ export function SkillLearning({ view, skillId, skillTitles, taskTitles, onAction
   const events = records.xpHistory.filter((event) => records.tasks.find((t) => t.taskId === event.taskId)?.skillId === skillId)
   return (
     <div id="skill-learning" data-tracked="true" className="space-y-3">
-      <section id="skill-access" data-access={kind} aria-labelledby="skill-access-heading" className={`rounded-xl p-3 border ${kind === 'locked' ? 'bg-red-950/30 border-red-900/60' : 'bg-emerald-950/20 border-emerald-900/50'}`}>
+      {section !== 'history' && <section id="skill-access" data-access={kind} aria-labelledby="skill-access-heading" className={`rounded-xl p-3 border ${kind === 'locked' ? 'bg-red-950/30 border-red-900/60' : 'bg-emerald-950/20 border-emerald-900/50'}`}>
         <div className="flex items-center justify-between gap-2">
           <h4 id="skill-access-heading" className="text-xs font-semibold uppercase tracking-wider text-slate-400">Access</h4>
           <span id="skill-access-state" className={`text-xs font-semibold ${kind === 'locked' ? 'text-red-300' : 'text-emerald-300'}`}>{ACCESS_TEXT[kind]}</span>
@@ -116,7 +117,7 @@ export function SkillLearning({ view, skillId, skillTitles, taskTitles, onAction
           </ul>
         )}
         {kind === 'override' && reasons.length > 0 && <p className="mt-1 text-[10px] text-slate-500">These requirements are waived by your override.</p>}
-        <div className="mt-2 flex flex-col gap-1.5">
+        {section === 'settings' && <div className="mt-2 flex flex-col gap-1.5">
           {/* Keyed by Skill too: a draft typed for one Skill must not follow the selection to another. */}
           <NumberSetter key={`threshold:${skillId}:${skill.xpThreshold}`} id="xp-threshold-input" label="XP Threshold" value={skill.xpThreshold} disabled={busy} onSet={(xpThreshold) => onAction({ kind: 'threshold', skillId, xpThreshold })} />
           <p className="text-[10px] text-slate-500">Uses only XP from this Path. Reaching it spends no XP.</p>
@@ -129,10 +130,10 @@ export function SkillLearning({ view, skillId, skillTitles, taskTitles, onAction
             {skill.accessOverride ? 'Remove bypass' : 'Bypass Prerequisites and XP Threshold'}
           </button>
           <p className="text-[10px] text-slate-500">No reason needed. A bypass changes no XP or Mastery.</p>
-        </div>
-      </section>
+        </div>}
+      </section>}
 
-      <section id="skill-mastery" data-mastery={skill.mastery ? 'declared' : 'unclaimed'} aria-labelledby="skill-mastery-heading" className="rounded-xl p-3 border bg-slate-800/40 border-slate-700/40">
+      {section === 'summary' && <section id="skill-mastery" data-mastery={skill.mastery ? 'declared' : 'unclaimed'} aria-labelledby="skill-mastery-heading" className="rounded-xl p-3 border bg-slate-800/40 border-slate-700/40">
         <div className="flex items-center justify-between gap-2">
           <h4 id="skill-mastery-heading" className="text-xs font-semibold uppercase tracking-wider text-slate-400">Mastery</h4>
           <span id="skill-mastery-state" className={`text-xs font-semibold ${skill.mastery ? 'text-violet-300' : 'text-slate-400'}`}>{skill.mastery ? 'Declared' : 'Unclaimed'}</span>
@@ -146,9 +147,9 @@ export function SkillLearning({ view, skillId, skillTitles, taskTitles, onAction
           {skill.mastery ? 'Withdraw Mastery declaration' : 'Declare Mastery'}
         </button>
         <p className="mt-1 text-[10px] text-slate-500">Your own judgement: no evidence or review needed. Completing Tasks never declares it, and declaring it earns no XP.</p>
-      </section>
+      </section>}
 
-      <section id="skill-xp-record" aria-label="XP record of this Skill" className="rounded-xl p-3 border bg-slate-800/30 border-slate-700/30">
+      {section === 'history' && <section id="skill-xp-record" aria-label="XP record of this Skill" className="rounded-xl p-3 border bg-slate-800/30 border-slate-700/30">
         <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">XP record</h4>
         {events.length === 0 ? (
           <p className="mt-1 text-[11px] text-slate-500 italic">No XP recorded for this Skill's Tasks yet.</p>
@@ -157,7 +158,21 @@ export function SkillLearning({ view, skillId, skillTitles, taskTitles, onAction
             {events.map((event) => <li key={event.id} data-kind={event.kind} data-amount={event.amount}>{describeXpEvent(event, taskTitles)}</li>)}
           </ol>
         )}
-      </section>
+      </section>}
+      {section === 'history' && <>
+        <section aria-label="Mastery history" className="rounded-xl border border-slate-700/40 p-3">
+          <h4 className="text-xs font-semibold text-slate-400">Mastery history</h4>
+          <ol id="skill-mastery-history" className="mt-2 space-y-1 text-[11px] text-slate-300">
+            {records.masteryHistory.filter((event) => event.skillId === skillId).map((event) => <li key={event.id} data-action={event.action}>{event.action === 'declare' ? 'Mastery declared' : 'Mastery declaration withdrawn'} · {new Date(event.occurredAt).toLocaleString()}</li>)}
+          </ol>
+        </section>
+        <section aria-label="Access Override history" className="rounded-xl border border-slate-700/40 p-3">
+          <h4 className="text-xs font-semibold text-slate-400">Access Override history</h4>
+          <ol id="skill-override-history" className="mt-2 space-y-1 text-[11px] text-slate-300">
+            {records.overrideHistory.filter((event) => event.skillId === skillId).map((event, index) => <li key={`${event.occurredAt}:${index}`} data-action={event.action}>{event.action === 'grant' ? 'Access Override granted' : 'Access Override revoked'} · {new Date(event.occurredAt).toLocaleString()}</li>)}
+          </ol>
+        </section>
+      </>}
     </div>
   )
 }

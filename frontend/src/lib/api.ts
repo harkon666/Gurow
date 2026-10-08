@@ -24,6 +24,9 @@ export interface PersonalWorkspace {
 export interface PathTask { id: string; title: string; description: string; required?: boolean; xpReward?: number }
 export interface PathSkill { id: string; title: string; outcome: string; optional?: boolean; xpThreshold?: number; tasks: PathTask[] }
 
+/** Retained content outside the active canvas; never sent back as editable content. */
+export interface ArchivedSkill { id: string; title: string; outcome: string; archivedAt: string; taskCount: number }
+
 /**
  * A personal Learning Path as the backend stores it (ADR 0016): the editor snapshot
  * (cards and connections, no Tasks) beside the application payload. `revision` is
@@ -33,6 +36,7 @@ export interface PathDocument {
   learningPath: { id: string; personalWorkspaceId: string; title: string; goal: string; revision: number }
   editor: { format_version: 1; cards: { id: string; title: string; position: { x: number; y: number } }[]; connections: { from_id: string; to_id: string }[] }
   application: { skills: PathSkill[] }
+  archivedSkills?: ArchivedSkill[]
 }
 
 /** What both modes' documents share: the editor snapshot, the application payload and the revision. */
@@ -40,6 +44,7 @@ export interface EditablePathDocument {
   learningPath: { id: string; title: string; goal: string; revision: number }
   editor: PathDocument['editor']
   application: { skills: PathSkill[] }
+  archivedSkills?: ArchivedSkill[]
 }
 
 /** A save: the local document and the revision it was based on. */
@@ -110,6 +115,10 @@ export const saveLearningPath = (pathId: string, save: PathSave) =>
  */
 export const archivePersonalTask = (pathId: string, taskId: string, expectedRevision: number) =>
   call<{ changed: boolean; learningState: LearningState; document: PathDocument }>(`/personal/learning-paths/${encodeURIComponent(pathId)}/tasks/${encodeURIComponent(taskId)}/archive`, { method: 'POST', body: { expectedRevision } })
+
+/** Archives a disconnected Skill and its active Tasks, retaining learning records. */
+export const archivePersonalSkill = (pathId: string, skillId: string, expectedRevision: number) =>
+  call<{ changed: boolean; learningState: LearningState; document: PathDocument }>(`/personal/learning-paths/${encodeURIComponent(pathId)}/skills/${encodeURIComponent(skillId)}/archive`, { method: 'POST', body: { expectedRevision } })
 
 /** A Skill's current Access, Mastery and rule as the backend derives them for the owner. */
 export interface LearningSkill {
@@ -258,6 +267,10 @@ export const readCoachPath = (pathId: string) => call<CoachPathDocument>(`/coach
 /** Saves the whole Draft; a stale save answers 409 with the accepted document in `body.current`. */
 export const saveCoachDraft = (pathId: string, save: PathSave) =>
   call<CoachPathDocument>(`/coach/learning-paths/${encodeURIComponent(pathId)}/draft`, { method: 'PUT', body: save })
+
+/** Removes a disconnected Skill from this Draft only; published Versions keep it. */
+export const archiveDraftSkill = (pathId: string, skillId: string, expectedRevision: number) =>
+  call<CoachPathDocument>(`/coach/learning-paths/${encodeURIComponent(pathId)}/draft/skills/${encodeURIComponent(skillId)}/archive`, { method: 'POST', body: { expectedRevision } })
 
 /**
  * Archives a published Task from the open Draft (ADR 0018): the next Version leaves it

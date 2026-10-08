@@ -1,7 +1,7 @@
 /**
  * Deleting a Skill (ADR 0018): only content without learning history is deleted, with
  * its Tasks, card and connections, as one editor undo step. A Skill with history is
- * kept; the control says so and points to archiving its Tasks instead.
+ * kept; the control says so and points to archiving the Skill instead.
  */
 export function DeleteSkillControl({ skillId, title, taskCount, history, blocked, onDelete }: {
   skillId: string

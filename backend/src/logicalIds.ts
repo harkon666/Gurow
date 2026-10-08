@@ -1,8 +1,8 @@
-import { eq, inArray } from 'drizzle-orm'
-import { skills, tasks } from './db/schema'
+import { and, eq, inArray, isNotNull } from 'drizzle-orm'
+import { archivedCoachSkills, personalSkills, skills, tasks } from './db/schema'
 import type { Tx } from './personal'
 
-export type ClaimRefusal = 'skill_owned_elsewhere' | 'task_owned_elsewhere' | 'task_skill_mismatch'
+export type ClaimRefusal = 'skill_owned_elsewhere' | 'task_owned_elsewhere' | 'task_skill_mismatch' | 'skill_archived'
 
 /**
  * Claims logical Skill and Task IDs for a Path (ADR 0004). An ID already known is
@@ -11,6 +11,13 @@ export type ClaimRefusal = 'skill_owned_elsewhere' | 'task_owned_elsewhere' | 't
  * known ID refuses the save. The primary key decides concurrent claims.
  */
 export async function claimLogicalIds(tx: Tx, pathId: string, skillIds: string[], newTasks: { id: string; skillId: string }[]): Promise<{ refusal: ClaimRefusal; detail: string } | null> {
+  const requestedSkills = [...new Set([...skillIds, ...newTasks.map((task) => task.skillId)])]
+  if (requestedSkills.length > 0) {
+    const [archivedCoach] = await tx.select({ id: archivedCoachSkills.skillId }).from(archivedCoachSkills).where(and(eq(archivedCoachSkills.learningPathId, pathId), inArray(archivedCoachSkills.skillId, requestedSkills))).limit(1)
+    const [archivedPersonal] = await tx.select({ id: personalSkills.skillId }).from(personalSkills).where(and(eq(personalSkills.learningPathId, pathId), inArray(personalSkills.skillId, requestedSkills), isNotNull(personalSkills.archivedAt))).limit(1)
+    const archived = archivedCoach ?? archivedPersonal
+    if (archived) return { refusal: 'skill_archived', detail: `Skill ${archived.id} is archived and cannot be restored or edited` }
+  }
   if (skillIds.length > 0) {
     await tx.insert(skills).values(skillIds.map((id) => ({ id, learningPathId: pathId }))).onConflictDoNothing()
     const known = await tx.select().from(skills).where(inArray(skills.id, skillIds))
