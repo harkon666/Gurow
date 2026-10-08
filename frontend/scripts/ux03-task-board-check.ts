@@ -24,7 +24,7 @@ import { createServer } from 'node:net'
 import path from 'node:path'
 import puppeteer, { type Browser, type HTTPRequest, type Page } from 'puppeteer-core'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
-import { selectSkillFromList } from './editor-navigation'
+import { openSkillView, selectSkillFromList } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -567,7 +567,9 @@ export async function main() {
     if (await visible(owner, '#btn-close-card-details')) await activate(owner, '#btn-close-card-details')
     if (await visible(owner, '#task-board')) await closeBoard(owner)
     await selectSkillFromList(owner, A)
+    await openSkillView(owner, 'history')
     await owner.waitForSelector(`#retained-task-${borrow}`)
+    await openSkillView(owner, 'summary')
     pass('AC6 eligible deletion saved and undone in place through normal saves; a Task with history archives instead, leaves the board, keeps XP and stays reachable as retained history')
 
     // ---- AC8: reload restores the arrangement; another Skill and Path are untouched.

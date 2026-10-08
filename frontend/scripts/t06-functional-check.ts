@@ -12,7 +12,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import path from 'node:path'
 import puppeteer, { type Page } from 'puppeteer-core'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
-import { closeEditorPanels, openSkillList, selectSkillFromList } from './editor-navigation'
+import { closeEditorPanels, openSkillList, openSkillView, selectSkillFromList } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const PORT = Number(process.env.PORT ?? 3462)
@@ -65,6 +65,8 @@ async function select(page: Page, id: string) {
   check(point, `Card ${id} is not visible on the canvas`)
   await page.mouse.click(point.x, point.y)
   await page.waitForFunction((want: string) => document.querySelector('#selected-skill-id')?.textContent?.trim() === want, {}, id)
+  // The summary's Tasks view holds the editable Tasks where there is no board.
+  await openSkillView(page, 'tasks')
 }
 /** React-controlled inputs need the native setter before the input event. */
 async function setTaskTitle(page: Page, taskId: string, value: string) {
@@ -81,12 +83,14 @@ async function savedTask(page: Page, taskId: string, title: string) {
 }
 async function connect(page: Page, from: string, to: string) {
   await select(page, from)
+  await openSkillView(page, 'prerequisites')
   await page.select('#connect-skill-select', to)
   await page.click('#btn-add-dependent')
 }
 /** Moves selection through the keyboard listbox only: no pointer, no canvas. */
 async function keyboardSelect(page: Page, id: string) {
   await selectSkillFromList(page, id)
+  await openSkillView(page, 'tasks')
 }
 /** A canvas point at least 30 px from every label and not under a banner, so a press pans instead of picking. */
 const emptyPoint = (page: Page) => page.evaluate(() => {

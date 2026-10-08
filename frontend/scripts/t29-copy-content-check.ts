@@ -21,7 +21,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
-import { closeEditorPanels, openMoreActions } from './editor-navigation'
+import { closeEditorPanels, closeSummaryBoard, editBoardTask, openMoreActions, openSkillView, openTask } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -123,6 +123,24 @@ async function openEditor(page: Page, url: string, cards: number) {
   await page.waitForFunction((n: number) => document.querySelectorAll('[id^="card-label-"]').length === n, {}, cards)
 }
 /** Selects a Skill by clicking its card on the WebGPU canvas. */
+/** The selected Skill's learning outcome, from its Edit view. */
+async function outcomeShown(page: Page) {
+  await closeSummaryBoard(page)
+  await openSkillView(page, 'edit')
+  return fieldValue(page, '#skill-outcome-input')
+}
+async function setOutcome(page: Page, value: string) {
+  await closeSummaryBoard(page)
+  await openSkillView(page, 'edit')
+  await setValue(page, '#skill-outcome-input', value)
+}
+/** A Task's title as its board card shows it. */
+async function boardTitle(page: Page, taskId: string) {
+  await openTask(page, taskId)
+  const title = await text(page, `#board-card-title-${taskId}`)
+  await closeSummaryBoard(page)
+  return title
+}
 async function select(page: Page, id: string) {
   await closeEditorPanels(page)
   const point = await page.$eval(`#card-label-${id}`, (el) => {
@@ -313,20 +331,22 @@ async function main() {
 
     // 3. The copies carry no records; editing them leaves the source and its records alone, across reloads.
     await select(pat, ownershipCopy.id)
-    await pat.waitForSelector(`#task-learning-${ownershipCopy.tasks[0].id}[data-completed="false"]`)
+    await openTask(pat, ownershipCopy.tasks[0].id)
+    await pat.waitForSelector(`#board-task-learning-${ownershipCopy.tasks[0].id}[data-completed="false"]`)
     check((await data(pat, '#skill-mastery')).mastery === 'unclaimed' && (await data(pat, '#path-xp')).xp === '0', `copy shows records: mastery ${(await data(pat, '#skill-mastery')).mastery}, XP ${(await data(pat, '#path-xp')).xp}`)
-    await setValue(pat, '#skill-outcome-input', 'Explain moves in kernel code')
-    await setValue(pat, `#task-edit-title-${ownershipCopy.tasks[0].id}`, 'Borrow checker kata')
+    await editBoardTask(pat, ownershipCopy.tasks[0].id, { title: 'Borrow checker kata' })
+    await setOutcome(pat, 'Explain moves in kernel code')
     await waitForSaved(pat)
     const copyRecords = (await ok(pat, `/personal/learning-paths/${systems.learningPath.id}/learning-state`)).learningState
     check(copyRecords.xp === 0 && copyRecords.xpHistory.length === 0 && copyRecords.masteryHistory.length === 0 && copyRecords.tasks.every((t: any) => !t.completed && t.xpReward === 0), `copy records: ${JSON.stringify(copyRecords)}`)
     await pat.reload({ waitUntil: 'networkidle0' })
     await openEditor(pat, systemsUrl, 3)
     await select(pat, ownershipCopy.id)
-    check(await fieldValue(pat, '#skill-outcome-input') === 'Explain moves in kernel code' && await fieldValue(pat, `#task-edit-title-${ownershipCopy.tasks[0].id}`) === 'Borrow checker kata', 'the edited copy did not reload')
+    check(await outcomeShown(pat) === 'Explain moves in kernel code' && await boardTitle(pat, ownershipCopy.tasks[0].id) === 'Borrow checker kata', 'the edited copy did not reload')
     await openEditor(pat, `${ORIGIN}/paths/${rust.pathId}`, 3)
     await select(pat, rust.ownership)
-    check(await fieldValue(pat, '#skill-outcome-input') === 'Explain moves and borrows' && await fieldValue(pat, `#task-edit-title-${rust.borrow}`) === 'Borrow checker exercises', 'the source shows the copy\'s edits')
+    check(await outcomeShown(pat) === 'Explain moves and borrows' && await boardTitle(pat, rust.borrow) === 'Borrow checker exercises', 'the source shows the copy\'s edits')
+    await openSkillView(pat, 'summary')
     check((await data(pat, '#skill-mastery')).mastery === 'declared' && (await data(pat, '#path-xp')).xp === '20', 'the source lost its records')
     check(JSON.stringify(await ok(pat, `/personal/learning-paths/${rust.pathId}`)) === JSON.stringify(sourceBefore), 'the source document changed')
     pass('personal independence', `copy edited (outcome, Task title) and reloaded with XP 0, no completion or Mastery; source reloads unchanged with XP 20 and declared Mastery`)
@@ -386,13 +406,17 @@ async function main() {
 
     // 6. Carla edits the copy and reloads both sides: the Version and Lena's records stay as they were.
     await select(carla, vectorsCopyId)
-    await setValue(carla, '#skill-outcome-input', 'Resolve forces into components')
-    await setValue(carla, `#task-xp-reward-${vectorsCopy.tasks[0].id}`, '35')
+    await setOutcome(carla, 'Resolve forces into components')
+    await openTask(carla, vectorsCopy.tasks[0].id)
+    await setValue(carla, `#board-task-xp-reward-${vectorsCopy.tasks[0].id}`, '35')
+    await closeSummaryBoard(carla)
     await waitForSaved(carla)
     await carla.reload({ waitUntil: 'networkidle0' })
     await openEditor(carla, engineersUrl, 2)
     await select(carla, vectorsCopyId)
-    check(await fieldValue(carla, '#skill-outcome-input') === 'Resolve forces into components' && await fieldValue(carla, `#task-xp-reward-${vectorsCopy.tasks[0].id}`) === '35', 'the Draft copy edits did not reload')
+    await openTask(carla, vectorsCopy.tasks[0].id)
+    const reloadedReward = await fieldValue(carla, `#board-task-xp-reward-${vectorsCopy.tasks[0].id}`)
+    check(await outcomeShown(carla) === 'Resolve forces into components' && reloadedReward === '35', 'the Draft copy edits did not reload')
     await carla.goto(`${ORIGIN}/coach/paths/${la.pathId}`, { waitUntil: 'networkidle0' })
     await carla.waitForSelector('#published-version')
     check(await carla.$('#open-reuse-btn') === null, 'a published Version offers a copy into it')

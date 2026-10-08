@@ -1,5 +1,5 @@
 import puppeteer from 'puppeteer-core'
-import { closeEditorPanels, openSkillList } from './editor-navigation'
+import { closeEditorPanels, openSkillList, openSkillView } from './editor-navigation'
 import { spawn, execSync, execFileSync } from 'child_process'
 import path from 'path'
 import fs from 'fs'
@@ -314,6 +314,7 @@ async function main() {
 
     // Step B: Connect "Rust Fundamentals" -> "WebGPU Pipeline" to create an edge
     console.log('  Connecting "Rust Fundamentals" -> "WebGPU Pipeline" to establish prerequisite edge...')
+    await openSkillView(page, 'prerequisites')
     await page.waitForSelector('#connect-skill-select')
     await page.select('#connect-skill-select', 'skill-wgpu-pipeline')
     await page.click('#btn-add-dependent')
@@ -378,6 +379,7 @@ async function main() {
 
     // Type a draft edit on rust-basics task
     const unsavedText = ' [PRE-FAILURE DRAFT EDIT]'
+    await openSkillView(page, 'tasks')
     await page.type('#task-edit-title-task-rust-toolchain', unsavedText)
     const taskTitleBeforeFailure = await page.$eval(
       '#task-edit-title-task-rust-toolchain',
@@ -445,6 +447,7 @@ async function main() {
 
     // Edit task on the second skill while recovery is pending/interrupted
     const recoveryEditText = ' [EDITED DURING RECOVERY]'
+    await openSkillView(page, 'tasks')
     const secondSkillTaskInput = await page.waitForSelector('[id^="task-edit-title-task-"]')
     await secondSkillTaskInput.type(recoveryEditText)
     const secondSkillTaskVal = await page.$eval('[id^="task-edit-title-task-"]', (el: any) => el.value)
@@ -539,6 +542,7 @@ async function main() {
     // 2. Verify graph edge connection is preserved after recovery
     await closeEditorPanels(page)
     await page.click('#card-label-skill-rust-basics')
+    await openSkillView(page, 'prerequisites')
     await page.waitForSelector('#outgoing-prerequisites-list')
     const postRecoveryOutgoing = await page.$eval(
       '#outgoing-prerequisites-list',
@@ -557,6 +561,7 @@ async function main() {
     await page.waitForFunction(
       () => document.querySelector('#selected-skill-id')?.textContent?.trim() !== 'skill-rust-basics'
     )
+    await openSkillView(page, 'tasks')
     const postRecoveryTaskVal = await page.$eval('[id^="task-edit-title-task-"]', (el: any) => el.value)
     if (!postRecoveryTaskVal.includes(recoveryEditText)) {
       throw new Error(
@@ -734,6 +739,7 @@ async function main() {
     console.log(`  Selected Skill without WebGPU: "${noGpuSelectedTitle}"`)
 
     // Verify editing task without WebGPU
+    await openSkillView(noGpuPage, 'tasks')
     const noGpuTaskTitleInput = await noGpuPage.waitForSelector('[id^="task-edit-title-"]')
     if (!noGpuTaskTitleInput) {
       throw new Error('Task editing input must be available without WebGPU')

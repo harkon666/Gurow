@@ -28,7 +28,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type BrowserContext, type HTTPRequest, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
-import { closeEditorPanels, clickOutsideDetails } from './editor-navigation'
+import { addBoardTask, closeEditorPanels, closeSummaryBoard, clickOutsideDetails, openSkillView, openSummaryBoard, openTask } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -158,6 +158,7 @@ async function drag(page: Page, id: string, dx: number, dy: number) {
 /** Selects a Skill by clicking its card on the WebGPU canvas. */
 async function select(page: Page, id: string) {
   await page.bringToFront()
+  await closeSummaryBoard(page)
   const point = await cardPoint(page, id)
   await page.mouse.click(point.x, point.y)
   await page.waitForFunction((want: string) => document.querySelector('#selected-skill-id')?.textContent?.trim() === want, {}, id)
@@ -203,7 +204,23 @@ async function openEnrollment(page: Page, enrollmentId: string) {
   await page.waitForFunction(() => document.querySelectorAll('[id^="card-label-"]').length === 2)
 }
 const work = (taskId: string) => `#task-work-${taskId}`
-const draftReady = (page: Page, taskId: string) => page.waitForSelector(`${work(taskId)}[data-draft-state="ready"]`)
+/** Opens the Task where the learner works on it (their board's details), then waits for its private draft. */
+async function draftReady(page: Page, taskId: string) {
+  await openTask(page, taskId)
+  await page.waitForSelector(`${work(taskId)}[data-draft-state="ready"]`)
+}
+/** The selected Skill's learning outcome, from its Edit view. */
+async function outcome(page: Page) {
+  await openSkillView(page, 'edit')
+  return value(page, '#skill-outcome-input')
+}
+/** The selected Skill's Task titles, as its board shows them. */
+async function boardTitles(page: Page) {
+  await openSummaryBoard(page)
+  const titles = await page.$$eval('[id^="board-card-title-"]', (els) => Object.fromEntries(els.map((el) => [el.id.replace('board-card-title-', ''), el.textContent ?? ''])))
+  await closeSummaryBoard(page)
+  return titles as Record<string, string>
+}
 async function waitStatus(page: Page, taskId: string, kind: string) {
   await page.waitForSelector(`${work(taskId)}[data-status="${kind}"]`).catch(async () => {
     throw new Error(`task ${taskId} did not reach status ${kind} (status ${(await data(page, work(taskId))).status}: ${await text(page, work(taskId))})`)
@@ -337,12 +354,17 @@ async function main() {
     await waitForSaved(patA, r0 + 1)
     const acceptedByA = await storedPath()
     await select(patB, p.matrices)
+    await openSkillView(patB, 'edit')
     await setValue(patB, '#skill-outcome-input', 'Multiply and invert matrices')
     await waitForState(patB, 'conflict')
-    // More work after the conflict stays local: a Task, a card move and a connection.
-    await patB.click('#add-task-btn')
+    // More work after the conflict stays local: a Task (added on the board), a card move and a connection.
+    await openSummaryBoard(patB)
+    await addBoardTask(patB, 'New Task')
+    await closeSummaryBoard(patB)
+    await closeEditorPanels(patB)
     await drag(patB, p.vectors, 60, 80)
     await select(patB, p.matrices)
+    await openSkillView(patB, 'prerequisites')
     await setValue(patB, '#connect-skill-select', p.vectors)
     await patB.click('#btn-add-prerequisite')
     await patB.waitForFunction((pair: string) => (document.querySelector('#skill-detail-panel') as HTMLElement).dataset.connections?.includes(pair.split('>')[1]), {}, `${p.vectors}>${p.matrices}`)
@@ -364,7 +386,7 @@ async function main() {
     check(kept.baseRevision === r0 && kept.context.accountId === patId && kept.context.versionId === null && kept.base.goal === 'Self-study' && kept.mine.editor.format_version === 1 &&
       kept.mine.application.skills.find((s: any) => s.id === p.matrices).outcome === 'Multiply and invert matrices' && newTask?.title === 'New Task' &&
       (keptVectors.x !== 80 || keptVectors.y !== 120) && same(kept.mine.editor.connections, [{ from_id: p.vectors, to_id: p.matrices }]), `kept record: ${JSON.stringify(kept)}`)
-    check(await value(patB, '#skill-outcome-input') === 'Multiply and invert matrices' && await value(patB, `#task-edit-title-${newTask.id}`) === 'New Task' && await value(patB, '#path-goal-input') === 'Self-study', 'the stale tab lost its local work')
+    check(await outcome(patB) === 'Multiply and invert matrices' && (await boardTitles(patB))[newTask.id] === 'New Task' && await value(patB, '#path-goal-input') === 'Self-study', 'the stale tab lost its local work')
     pass('competing tabs', `tab A saved rev ${r0 + 1}; tab B's save on rev ${r0} → conflict "${conflictText.slice(0, 60)}…", 4 changes listed, PostgreSQL still holds tab A's Path, tab B's outcome/Task/move/connection kept on screen and under ${patPrefix.slice(0, 26)}… (base rev ${r0})`)
 
     // 2. The tab is interrupted; a new tab shows the accepted Path and offers the kept work.
@@ -377,11 +399,12 @@ async function main() {
     check(entries.length === 1 && entries[0].id === kept.id && entries[0].baseRevision === r0 && same(entries[0].changes, conflictChanges) && entries[0].baseChanged && !/revision\s*\d/i.test(entries[0].text), `kept work offered: ${JSON.stringify(entries)}`)
     check(await value(patC, '#path-goal-input') === 'Goal saved in tab A', 'the reopened tab does not show the accepted goal')
     await select(patC, p.matrices)
-    check(await value(patC, '#skill-outcome-input') === 'Multiply matrices' && await patC.$(`#task-edit-title-${newTask.id}`) === null && (await graph(patC)).length === 0, 'the kept work was applied without being asked')
+    check(await outcome(patC) === 'Multiply matrices' && !(newTask.id in await boardTitles(patC)) && (await graph(patC)).length === 0, 'the kept work was applied without being asked')
     pass('recovery after interruption', `tab B closed without a prompt; a new tab shows rev ${r0 + 1} (tab A's goal, original outcome) and offers the kept work based on rev ${r0} with the same 4 changes`)
 
     // 3. Reapplying is refused by the backend when the merge forms a cycle with a connection saved meanwhile; the work stays kept.
     await select(patA, p.vectors)
+    await openSkillView(patA, 'prerequisites')
     await setValue(patA, '#connect-skill-select', p.matrices)
     await patA.click('#btn-add-prerequisite')
     await waitForSaved(patA, r0 + 2)
@@ -403,6 +426,7 @@ async function main() {
     pass('rejected reapplication', `tab A connected Matrices → Vectors (rev ${r0 + 2}); reapplying the kept Vectors → Matrices → "${refusal.slice(0, 80)}…"; PostgreSQL unchanged, the work still kept, the editor shows rev ${r0 + 2}`)
 
     // 4. The owner removes the conflicting connection, then reapplies: one new validated save holding both sides' work.
+    await openSkillView(patC, 'prerequisites')
     await patC.click(`#disconnect-${p.matrices}-${p.vectors}`)
     await waitForSaved(patC, r0 + 3)
     await closeEditorPanels(patC)
@@ -426,7 +450,8 @@ async function main() {
     const shown = await offset(patC, p.vectors, p.matrices)
     check(Math.abs(shown.x - (480 - keptVectors.x) * zoom) <= 2 && Math.abs(shown.y - (160 - keptVectors.y) * zoom) <= 2, `card offset after reload ${JSON.stringify(shown)} at zoom ${zoom}`)
     await select(patC, p.matrices)
-    check(await value(patC, '#skill-outcome-input') === 'Multiply and invert matrices' && await value(patC, `#task-edit-title-${newTask.id}`) === 'New Task' && await value(patC, `#task-edit-title-${p.matrixTask}`) === 'Matrix drills' &&
+    const reloadedTitles = await boardTitles(patC)
+    check(await outcome(patC) === 'Multiply and invert matrices' && reloadedTitles[newTask.id] === 'New Task' && reloadedTitles[p.matrixTask] === 'Matrix drills' &&
       same(await graph(patC), [`${p.vectors}>${p.matrices}`]), 'the reloaded editor and Task panel disagree with the stored Path')
     pass('reapplied as a new save', `after removing Matrices → Vectors (rev ${r0 + 3}), reapplying saved rev ${r0 + 4}: tab A's goal + tab B's outcome, Task ${newTask.id.slice(0, 8)}…, moved card and connection; after reload the canvas offset, Task panel and graph match PostgreSQL`)
 
@@ -480,7 +505,9 @@ async function main() {
     await waitForSaved(carla, rd + 1)
     await drag(carlaB, la.matrices, 60, 70)
     await select(carlaB, la.vectors)
-    await setValue(carlaB, `#task-xp-reward-${la.drills}`, '30')
+    await openTask(carlaB, la.drills)
+    await setValue(carlaB, `#board-task-xp-reward-${la.drills}`, '30')
+    await closeSummaryBoard(carlaB)
     await waitForState(carlaB, 'conflict')
     check(same(await texts(carlaB, '#conflict-changes li'), ['Set the reward of “Vector drills” to 30 XP', 'Moved the card “Matrices”']) && (await keptKeys(carlaB, draftPrefix)).length === 1, `Draft conflict changes: ${await texts(carlaB, '#conflict-changes li')}`)
     const draftMine = (await keptRecords(carlaB, draftPrefix))[0].mine
@@ -518,7 +545,10 @@ async function main() {
     await carlaB.waitForFunction(() => document.querySelector('#kept-work [data-kept-entry]') === null)
     // Showing the accepted Draft clears the selection, as loading any accepted document does.
     await select(carlaB, la.vectors)
-    check(await carlaB.$('#save-conflict') === null && await value(carlaB, '#path-goal-input') === 'Draft goal from tab 1' && await value(carlaB, `#task-xp-reward-${la.drills}`) === '30', 'the reapplied Draft is not shown')
+    await openTask(carlaB, la.drills)
+    const reappliedReward = await value(carlaB, `#board-task-xp-reward-${la.drills}`)
+    await closeSummaryBoard(carlaB)
+    check(await carlaB.$('#save-conflict') === null && await value(carlaB, '#path-goal-input') === 'Draft goal from tab 1' && reappliedReward === '30', 'the reapplied Draft is not shown')
     const draft = await ok(carla, `/coach/learning-paths/${la.pathId}`)
     check(draft.learningPath.revision === rd + 2 && draft.learningPath.goal === 'Draft goal from tab 1' && draft.application.skills[0].tasks[0].xpReward === 30 && draft.draft.id === draftId && draft.versions.length === 1 &&
       same(draft.editor.cards.find((c: any) => c.id === la.matrices).position, movedMatrices),
@@ -644,6 +674,7 @@ async function main() {
 
     await openEnrollment(carla, enrollment)
     await select(carla, la.vectors)
+    await openTask(carla, la.drills)
     await carla.waitForSelector(`${reviewPanel(la.drills)}[data-target-revision="1"]`)
     await typeInto(carla, `#task-review-feedback-${la.drills}`, 'Correct: well done.')
     const storedReviews = async () => [...await sql`select v.decision from submission_reviews v join submission_revisions r on r.id = v.revision_id join submissions s on s.id = r.submission_id where s.enrollment_id = ${enrollment}`]
@@ -663,10 +694,11 @@ async function main() {
     await openPath(patA, pathUrl, 2, r0 + 4)
     await patA.waitForFunction(() => (document.querySelector('#path-xp') as HTMLElement | null)?.dataset.xp === '0')
     await select(patA, p.vectors)
+    await openTask(patA, p.vectorTask)
     await patA.setOfflineMode(true)
-    await patA.click(`#task-completion-btn-${p.vectorTask}`)
+    await patA.click(`#board-task-completion-btn-${p.vectorTask}`)
     await patA.waitForSelector('#learning-error')
-    check((await data(patA, '#path-xp')).xp === '0' && (await data(patA, `#task-learning-${p.vectorTask}`)).completed === 'false', 'the offline completion was shown as done')
+    check((await data(patA, '#path-xp')).xp === '0' && (await data(patA, `#board-task-learning-${p.vectorTask}`)).completed === 'false', 'the offline completion was shown as done')
     await patA.setOfflineMode(false)
     check((await ok(patA, `/personal/learning-paths/${p.path}/learning-state`)).learningState.xp === 0, 'the offline completion was stored')
     await clickOutsideDetails(patA, '#learning-retry-btn')

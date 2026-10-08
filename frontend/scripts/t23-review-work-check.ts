@@ -23,7 +23,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type BrowserContext, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
-import { closeEditorPanels, openCoachReview, openSkillList, readCardProgress, readSkillStatus, waitAwaitingReview } from './editor-navigation'
+import { closeEditorPanels, openCoachReview, openSkillList, readCardProgress, readSkillStatus, waitAwaitingReview, openTask } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -46,6 +46,12 @@ function check(condition: unknown, message: string): asserts condition {
 const resend = startResendStandIn()
 
 /** The latest emailed link to `to` with a subject starting `subject`, waiting for its delivery. */
+/** Shows one Task's own controls when they are not on screen: a learner's board details or the Coach's Tasks view, one Task at a time. */
+async function at(page: Page, taskId: string) {
+  if (!await page.$(`#task-learning-${taskId}`)) await openTask(page, taskId)
+  // A Task just opened reads its private draft first; its controls settle once that read answers.
+  if (await page.$(`#task-work-${taskId}`)) await page.waitForSelector(`#task-work-${taskId}:not([data-draft-state="loading"])`)
+}
 async function emailedLink(to: string, subject: string, after = 0) {
   for (let i = 0; i < 100; i++) {
     const fresh = resend.sent.slice(after).filter((e) => e.to.some((a) => a.toLowerCase() === to.toLowerCase()) && e.subject.startsWith(subject))
@@ -142,8 +148,12 @@ async function keyboardSelect(page: Page, index: number, id: string) {
   await waitSelected(page, id)
 }
 const work = (taskId: string) => `#task-work-${taskId}`
-const draftReady = (page: Page, taskId: string) => page.waitForSelector(`${work(taskId)}[data-draft-state="ready"]`)
+async function draftReady(page: Page, taskId: string) {
+  await at(page, taskId)
+  await page.waitForSelector(`${work(taskId)}[data-draft-state="ready"]`)
+}
 async function history(page: Page, taskId: string, revisions: number) {
+  await at(page, taskId)
   await page.waitForSelector(`#task-history-${taskId}[data-state="${revisions === 0 ? 'none' : 'ready'}"][data-revisions="${revisions}"]`)
   return page.$$eval(`#task-history-${taskId} li[id^="revision-"]`, (els) => els.map((el) => ({
     number: Number((el as HTMLElement).dataset.revisionNumber),
@@ -153,6 +163,7 @@ async function history(page: Page, taskId: string, revisions: number) {
   })))
 }
 async function waitStatus(page: Page, taskId: string, kind: string) {
+  await at(page, taskId)
   await page.waitForSelector(`${work(taskId)}[data-status="${kind}"]`).catch(async () => {
     throw new Error(`task ${taskId} did not reach status ${kind} (status ${(await data(page, work(taskId))).status}: ${await text(page, work(taskId))})`)
   })
@@ -208,6 +219,7 @@ async function inviteAndAccept(coach: Page, learner: Page, versionId: string, em
 
 const reviewPanel = (taskId: string) => `#task-review-${taskId}`
 async function waitReview(page: Page, taskId: string, kind: string) {
+  await at(page, taskId)
   await page.waitForSelector(`${reviewPanel(taskId)}[data-status="${kind}"]`).catch(async () => {
     const panel = await page.$(reviewPanel(taskId))
     throw new Error(`review of ${taskId} did not reach ${kind} (${panel ? `${JSON.stringify(await data(page, reviewPanel(taskId)))}: ${await text(page, reviewPanel(taskId))}` : 'no review panel'})`)
@@ -221,6 +233,7 @@ async function revisit(page: Page) {
 }
 /** The learner sends a Task's work from her sidebar: the draft text replaced or extended, then Send. */
 async function sendFromUi(page: Page, taskId: string, input: string, replace = false) {
+  await at(page, taskId)
   await page.bringToFront()
   await draftReady(page, taskId)
   await typeInto(page, `#task-work-text-${taskId}`, input, replace)
@@ -318,11 +331,15 @@ async function main() {
     await openEnrollment(lena, enrollment)
     await canvasSelect(lena, la.vectors)
     await draftReady(lena, la.drills)
+    await at(lena, la.drills)
     await lena.click(`#task-work-add-url-${la.drills}`)
+    await at(lena, la.drills)
     await typeInto(lena, `#task-work-url-${la.drills}-0`, 'https://notes.example/vectors-v1')
     check(await sendFromUi(lena, la.drills, 'Exercise 1: u + v = (3, 1)') === 1, 'Lena\'s first send is not Revision 1')
     const secret = 'Private scratch: exercise 2 is not ready'
+    await at(lena, la.drills)
     await typeInto(lena, `#task-work-text-${la.drills}`, `\n${secret}`)
+    await at(lena, la.drills)
     await lena.click(`#task-work-save-${la.drills}`)
     await waitStatus(lena, la.drills, 'saved')
     await act(carla)
@@ -339,29 +356,42 @@ async function main() {
     await canvasSelect(carla, la.vectors)
     let revisions = await history(carla, la.drills, 1)
     check(revisions[0].status === 'pending' && revisions[0].text.includes('Exercise 1: u + v = (3, 1)') && revisions[0].text.includes('https://notes.example/vectors-v1') && revisions[0].note === 'Awaiting your Review.', `Carla's view of Revision 1: ${JSON.stringify(revisions)}`)
+    await at(carla, la.drills)
     let panel = await data(carla, reviewPanel(la.drills))
+    await at(carla, la.drills)
     check(panel.targetRevision === '1' && (await text(carla, `#task-review-target-${la.drills}`)).startsWith('Deciding Revision 1'), `the review does not target Revision 1: ${JSON.stringify(panel)}`)
     await history(carla, la.reading, 0)
+    await at(carla, la.reading)
     check(await carla.$(`#task-review-none-${la.reading}`) !== null, 'a Task without sent work offers a decision')
     check(await carla.$('[data-task-work]') === null && !(await carla.evaluate(() => document.body.innerText)).includes(secret), 'Carla\'s page shows draft fields or Lena\'s private draft')
     pass('find and inspect', 'Version page lists Lena (1 awaiting Review) and Pia (0) → Lena\'s Enrollment names her and queues drills Revision 1 → canvas click on Vectors shows its exact text and link, the Review targets Revision 1; no draft fields or private draft text')
 
     // 2. Changes Requested needs feedback; the decision is shown once the backend confirms it.
+    await at(carla, la.drills)
     check(panel.canRequestChanges === 'false' && panel.canApprove === 'true' && (await text(carla, `#task-review-hint-${la.drills}`)).includes('needs feedback'), `Changes Requested is offered without feedback: ${JSON.stringify(panel)}`)
+    await at(carla, la.drills)
     await typeInto(carla, `#task-review-feedback-${la.drills}`, '   ')
+    await at(carla, la.drills)
     check((await data(carla, reviewPanel(la.drills))).canRequestChanges === 'false', 'blank feedback allows Changes Requested')
     const blank = await api(carla, `${taskRoute(la.drills)}/submission/revisions/${(await revisionIds(la.drills))[0]}/review`, 'POST', { decision: 'changes_requested', feedback: '  ' })
     check(blank.status === 422 && blank.body?.error === 'invalid_review' && (await storedReviews(la.drills)).length === 0, `Changes Requested without feedback answered ${blank.status}`)
     const feedback1 = 'Show the working for exercise 1, step by step.'
+    await at(carla, la.drills)
     await typeInto(carla, `#task-review-feedback-${la.drills}`, feedback1, true)
+    await at(carla, la.drills)
     check((await data(carla, reviewPanel(la.drills))).canRequestChanges === 'true', 'feedback did not enable Changes Requested')
+    await at(carla, la.drills)
     await carla.click(`#task-review-request-changes-${la.drills}`)
     await waitReview(carla, la.drills, 'recorded')
+    await at(carla, la.drills)
     await carla.waitForSelector(`${reviewPanel(la.drills)}[data-refresh="read"]`)
+    await at(carla, la.drills)
     check((await text(carla, `#task-review-status-${la.drills}`)).startsWith('Changes Requested of Revision 1 recorded, confirmed by Gurow') && (await data(carla, reviewPanel(la.drills))).confirmedBy === 'answer', `status after Changes Requested: ${await text(carla, `#task-review-status-${la.drills}`)}`)
+    await at(carla, la.drills)
     await carla.waitForSelector(`#task-history-${la.drills} li[data-revision-number="1"][data-status="changes_requested"]`)
     await waitAwaitingReview(carla, 0)
     revisions = await history(carla, la.drills, 1)
+    await at(carla, la.drills)
     check(revisions[0].text.includes(`Feedback: ${feedback1}`) && await carla.$(`#task-review-none-${la.drills}`) !== null && await value(carla, `#task-review-feedback-${la.drills}`).catch(() => '') === '', 'the recorded feedback is not shown, or a decision is still offered')
     check(same(await storedReviews(la.drills), [[1, 'changes_requested', feedback1, false]]) && (await data(carla, '#enrollment-xp')).xp === '0', `stored after Changes Requested: ${JSON.stringify(await storedReviews(la.drills))}`)
     pass('changes requested', 'Request changes disabled (hint) for empty and blank feedback, the API answers 422 and stores nothing; with feedback → "Changes Requested of Revision 1 recorded, confirmed by Gurow", the history shows the feedback, the queue is empty, XP 0')
@@ -369,6 +399,7 @@ async function main() {
     // 3. Lena reads the feedback and sends a correction while she has Access.
     await act(lena)
     await revisit(lena)
+    await at(lena, la.drills)
     await lena.waitForSelector(`#task-history-${la.drills} li[data-revision-number="1"][data-status="changes_requested"]`)
     revisions = await history(lena, la.drills, 1)
     check(revisions[0].text.includes(`Feedback: ${feedback1}`) && revisions[0].note === 'Your Coach asked for changes; send a correction as a new revision.', `Lena's view of the feedback: ${JSON.stringify(revisions)}`)
@@ -381,35 +412,47 @@ async function main() {
     await revisit(carla)
     // Read before the stale case is set up: reading the Skill list reopens the summary (UX01, #47).
     const beforeStale = await progress(carla)
+    await at(carla, la.drills)
     await carla.waitForSelector(`${reviewPanel(la.drills)}[data-target-revision="2"]`)
+    await at(carla, la.drills)
     await typeInto(carla, `#task-review-feedback-${la.drills}`, 'Correct now.')
     // Lena sends again from another device meanwhile; Carla's page is not told.
     const third = await ok(lena, `${taskRoute(la.drills)}/submission/revisions`, 'POST', { text: 'Exercise 1: u + v = (3, 1), with a sketch', urls: ['https://notes.example/sketch'] })
     check(third.revision.revisionNumber === 3, 'Lena\'s second correction is not Revision 3')
+    await at(carla, la.drills)
     check((await data(carla, reviewPanel(la.drills))).targetRevision === '2', 'Carla\'s page moved on before deciding; the stale case was not set up')
+    await at(carla, la.drills)
     await carla.click(`#task-review-approve-${la.drills}`)
     await waitReview(carla, la.drills, 'refused')
     const refused = await text(carla, `#task-review-status-${la.drills}`)
     check(refused.startsWith('Not recorded: the learner sent a newer revision, which replaced Revision 2 before your decision') && refused.includes('Nothing changed') && refused.includes('Your feedback is kept'), `stale decision status: ${refused}`)
+    await at(carla, la.drills)
     await carla.waitForSelector(`${reviewPanel(la.drills)}[data-refresh="read"]`)
+    await at(carla, la.drills)
     check((await text(carla, `#task-review-status-${la.drills}`)).endsWith('The history and progress shown were read again.'), `refusal after the read: ${await text(carla, `#task-review-status-${la.drills}`)}`)
+    await at(carla, la.drills)
     await carla.waitForSelector(`#task-history-${la.drills} li[data-revision-number="2"][data-status="superseded"]`)
+    await at(carla, la.drills)
     await carla.waitForSelector(`${reviewPanel(la.drills)}[data-target-revision="3"]`)
     await carla.waitForFunction(() => (document.querySelector('#enrollment-records') as HTMLElement).dataset.reading === 'false')
     revisions = await history(carla, la.drills, 3)
     check(same(revisions.map((r) => r.status), ['changes_requested', 'superseded', 'pending']) && revisions[1].note.includes('Replaced by Revision 3'), `history after the stale decision: ${JSON.stringify(revisions.map((r) => [r.status, r.note]))}`)
+    await at(carla, la.drills)
     check(await value(carla, `#task-review-feedback-${la.drills}`) === 'Correct now.' && same(await progress(carla), beforeStale) && same(await progress(carla), { xp: '0', vectors: ['open', 'not-mastered'], matrices: ['locked', 'not-mastered'] }), `after the stale decision: ${JSON.stringify(await progress(carla))}`)
     check(same(await storedReviews(la.drills), [[1, 'changes_requested', feedback1, false]]) && (await xpEvents()).length === 0 && (await masteryEvents()).length === 0, 'the stale decision stored a Review, XP or Mastery')
     pass('stale decision', 'Lena sent Revision 3 while Carla\'s page showed Revision 2 → Approve Revision 2 → "Not recorded: … replaced Revision 2 before your decision … Nothing changed", history re-read (2 superseded, 3 awaiting), feedback kept; XP 0, no Mastery, no Review, XP or Mastery rows stored')
 
     // 5. An Approval is shown only after the backend confirms it; reward, Mastery and the dependent Access follow, without spending XP.
+    await at(carla, la.drills)
     await typeInto(carla, `#task-review-feedback-${la.drills}`, 'Correct now: well done.', true)
     faults.holding = true
+    await at(carla, la.drills)
     await carla.click(`#task-review-approve-${la.drills}`)
     await waitReview(carla, la.drills, 'recording')
     for (let i = 0; i < 50 && !faults.hold; i++) await new Promise((r) => setTimeout(r, 20))
     check(faults.hold, 'the Approval request was not held')
     await new Promise((r) => setTimeout(r, 400))
+    await at(carla, la.drills)
     check(same(await progress(carla), { xp: '0', vectors: ['open', 'not-mastered'], matrices: ['locked', 'not-mastered'] }) && (await data(carla, `#task-learning-${la.drills}`)).approved === 'false' && (await text(carla, `#task-review-status-${la.drills}`)).startsWith('Recording Approval of Revision 3'), 'progress or Approval was shown before the backend confirmed it')
     check((await storedReviews(la.drills)).length === 1, 'the held Approval reached the backend')
     // The records read after the decision is held, then fails: the decision is confirmed, its progress is not claimed.
@@ -419,16 +462,24 @@ async function main() {
     await waitReview(carla, la.drills, 'recorded')
     for (let i = 0; i < 100 && !faults.heldRecords; i++) await new Promise((r) => setTimeout(r, 20))
     check(faults.heldRecords, 'the records read after the Approval was not held')
+    await at(carla, la.drills)
     let decided = await text(carla, `#task-review-status-${la.drills}`)
+    await at(carla, la.drills)
     check((await data(carla, reviewPanel(la.drills))).refresh === 'reading' && decided.startsWith('Approval of Revision 3 recorded, confirmed by Gurow') && decided.includes('Reading the resulting XP, Mastery and Access') && !decided.includes('derived them after it') && (await data(carla, '#enrollment-xp')).xp === '0', `while the records are read: ${decided}`)
     await faults.heldRecords!.abort('connectionreset')
+    await at(carla, la.drills)
     await carla.waitForSelector(`${reviewPanel(la.drills)}[data-refresh="failed"]`)
+    await at(carla, la.drills)
     decided = await text(carla, `#task-review-status-${la.drills}`)
     check(decided.includes('could not be read, so what is shown above may be out of date') && !decided.includes('derived them after it') && (await data(carla, '#enrollment-xp')).xp === '0' && await carla.$('#enrollment-records-error') !== null, `after the failed records read: ${decided}`)
+    await at(carla, la.drills)
     await carla.click(`#task-review-reread-${la.drills}`)
+    await at(carla, la.drills)
     await carla.waitForSelector(`${reviewPanel(la.drills)}[data-refresh="read"]`)
+    await at(carla, la.drills)
     check((await text(carla, `#task-review-status-${la.drills}`)).includes('XP, Mastery and Access above are as Gurow derived them after it'), 'the progress claim is missing after a successful read')
     await carla.waitForSelector('#enrollment-xp[data-xp="20"]')
+    await at(carla, la.drills)
     await carla.waitForSelector(`#task-learning-${la.drills}[data-approved="true"][data-xp-contribution="20"]`)
     check(same(await progress(carla), { xp: '20', vectors: ['open', 'mastered'], matrices: ['open', 'not-mastered'] }), `Carla's progress after Approval: ${JSON.stringify(await progress(carla))}`)
     await carla.waitForSelector(`#task-xp-history-${la.drills}[data-events="1"]`)
@@ -438,6 +489,7 @@ async function main() {
     await lena.waitForSelector('#enrollment-xp[data-xp="20"]')
     check(same(await progress(lena), { xp: '20', vectors: ['open', 'mastered'], matrices: ['open', 'not-mastered'] }) && (await text(lena, '#skill-mastery-state')) === 'Mastered', `Lena's progress after Approval: ${JSON.stringify(await progress(lena))}`)
     revisions = await history(lena, la.drills, 3)
+    await at(lena, la.drills)
     check(revisions[2].status === 'approval' && revisions[2].text.includes('Feedback: Correct now: well done.') && (await text(lena, `#task-learning-${la.drills}`)).includes('approved, contributes 20 XP'), 'Lena does not see the Approval and its reward')
     await keyboardSelect(lena, 1, la.matrices)
     check((await text(lena, '#skill-access-state')) === 'Open' && (await data(lena, '#enrollment-xp')).xp === '20', 'Matrices did not open, or opening it spent XP')
@@ -448,18 +500,24 @@ async function main() {
     check(await sendFromUi(lena, la.drills, '\nAlso: the dot product is commutative.') === 4, 'the revision after the Approval is not Revision 4')
     await act(carla)
     await revisit(carla)
+    await at(carla, la.drills)
     await carla.waitForSelector(`${reviewPanel(la.drills)}[data-target-revision="4"]`)
     revisions = await history(carla, la.drills, 4)
+    await at(carla, la.drills)
     check(revisions[3].note === 'Awaiting your Review. It does not inherit the Approval of Revision 3, which counts whatever you decide here.' && (await text(carla, `#task-review-target-${la.drills}`)).includes('The Approval of Revision 3 keeps counting'), `Carla's note on Revision 4: ${revisions[3].note}`)
     const feedback4 = 'Prove commutativity from the definition.'
+    await at(carla, la.drills)
     await typeInto(carla, `#task-review-feedback-${la.drills}`, feedback4)
+    await at(carla, la.drills)
     await carla.click(`#task-review-request-changes-${la.drills}`)
     await waitReview(carla, la.drills, 'recorded')
+    await at(carla, la.drills)
     await carla.waitForSelector(`#task-history-${la.drills} li[data-revision-number="4"][data-status="changes_requested"]`)
     await carla.waitForFunction(() => (document.querySelector('#enrollment-records') as HTMLElement).dataset.reading === 'false')
     check(same(await progress(carla), { xp: '20', vectors: ['open', 'mastered'], matrices: ['open', 'not-mastered'] }), 'Changes Requested on a newer revision removed the earlier Approval\'s progress')
     await act(lena)
     await revisit(lena)
+    await at(lena, la.drills)
     await lena.waitForSelector(`#task-history-${la.drills} li[data-revision-number="4"][data-status="changes_requested"]`)
     revisions = await history(lena, la.drills, 4)
     check(revisions[3].note === 'Your Coach asked for changes to this revision; the Approval of Revision 3 still counts.' && revisions[3].text.includes(feedback4) && (await data(lena, '#enrollment-xp')).xp === '20', `Lena's view of Revision 4: ${JSON.stringify(revisions[3])}`)
@@ -467,22 +525,31 @@ async function main() {
     check(await sendFromUi(lena, la.drills, '\nProof: u·v = Σ uᵢvᵢ = Σ vᵢuᵢ = v·u.') === 5, 'the proof is not Revision 5')
     await act(carla)
     await revisit(carla)
+    await at(carla, la.drills)
     await carla.waitForSelector(`${reviewPanel(la.drills)}[data-target-revision="5"]`)
     faults.commitThenDrop = 1
+    await at(carla, la.drills)
     await carla.click(`#task-review-approve-${la.drills}`)
     await waitReview(carla, la.drills, 'recorded')
+    await at(carla, la.drills)
     check(faults.commitThenDrop === 0 && (await data(carla, reviewPanel(la.drills))).confirmedBy === 'history' && (await text(carla, `#task-review-status-${la.drills}`)).includes('the answer was lost, but the history shows it'), `lost Approval answer: ${await text(carla, `#task-review-status-${la.drills}`)}`)
+    await at(carla, la.drills)
     await carla.waitForSelector(`#task-history-${la.drills} li[data-revision-number="5"][data-status="approval"]`)
     // A third Approval comes from another tab while this page still offers Revision 6: refused here, nothing doubles.
     check(await sendFromUi(lena, la.drills, '\nTypo fixed.') === 6, 'the typo fix is not Revision 6')
     await act(carla)
     await revisit(carla)
+    await at(carla, la.drills)
     await carla.waitForSelector(`${reviewPanel(la.drills)}[data-target-revision="6"]`)
     await ok(carla, `${taskRoute(la.drills)}/submission/revisions/${(await revisionIds(la.drills))[5]}/review`, 'POST', { decision: 'approval' })
+    await at(carla, la.drills)
     await typeInto(carla, `#task-review-feedback-${la.drills}`, 'One more fix, please.')
+    await at(carla, la.drills)
     await carla.click(`#task-review-request-changes-${la.drills}`)
     await waitReview(carla, la.drills, 'refused')
+    await at(carla, la.drills)
     check((await text(carla, `#task-review-status-${la.drills}`)).includes('Revision 6 already has a decision (perhaps from another tab)'), `already decided: ${await text(carla, `#task-review-status-${la.drills}`)}`)
+    await at(carla, la.drills)
     await carla.waitForSelector(`#task-history-${la.drills} li[data-revision-number="6"][data-status="approval"]`)
     await carla.waitForFunction(() => (document.querySelector('#enrollment-records') as HTMLElement).dataset.reading === 'false')
     check(same(await progress(carla), { xp: '20', vectors: ['open', 'mastered'], matrices: ['open', 'not-mastered'] }) && (await data(carla, `#task-xp-history-${la.drills}`)).events === '1', 'three Approvals changed the reward or Mastery')
@@ -522,6 +589,7 @@ async function main() {
     await noGpu.keyboard.press('Enter')
     await waitSelected(noGpu, la.matrices)
     await noGpu.waitForFunction((id: string) => document.activeElement?.id === id, {}, `task-review-feedback-${la.matrixDrills}`)
+    await at(noGpu, la.matrixDrills)
     check((await data(noGpu, reviewPanel(la.matrixDrills))).targetRevision === '1' && (await text(noGpu, `#task-history-${la.matrixDrills}`)).includes('Matrix drills 11–20: all answers with working'), 'the queued revision did not open beside its contents')
     await noGpu.keyboard.type('Clear and complete.')
     await noGpu.keyboard.press('Tab')

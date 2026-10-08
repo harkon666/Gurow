@@ -20,7 +20,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type BrowserContext, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
-import { openSkillList, readCardProgress } from './editor-navigation'
+import { openSkillList, readCardProgress, openTask, openSkillView } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -43,6 +43,12 @@ function check(condition: unknown, message: string): asserts condition {
 const resend = startResendStandIn()
 
 /** The latest emailed link to `to` with a subject starting `subject`, waiting for its delivery. */
+/** Shows one Task's own controls when they are not on screen: a learner's board details or the Coach's Tasks view, one Task at a time. */
+async function at(page: Page, taskId: string) {
+  if (!await page.$(`#task-learning-${taskId}`)) await openTask(page, taskId)
+  // A Task just opened reads its private draft first; its controls settle once that read answers.
+  if (await page.$(`#task-work-${taskId}`)) await page.waitForSelector(`#task-work-${taskId}:not([data-draft-state="loading"])`)
+}
 async function emailedLink(to: string, subject: string, after = 0) {
   for (let i = 0; i < 100; i++) {
     const fresh = resend.sent.slice(after).filter((e) => e.to.some((a) => a.toLowerCase() === to.toLowerCase()) && e.subject.startsWith(subject))
@@ -117,8 +123,12 @@ async function keyboardSelect(page: Page, index: number, id: string) {
   await waitSelected(page, id)
 }
 const work = (taskId: string) => `#task-work-${taskId}`
-const draftReady = (page: Page, taskId: string) => page.waitForSelector(`${work(taskId)}[data-draft-state="ready"]`)
+async function draftReady(page: Page, taskId: string) {
+  await at(page, taskId)
+  await page.waitForSelector(`${work(taskId)}[data-draft-state="ready"]`)
+}
 async function history(page: Page, taskId: string, revisions: number) {
+  await at(page, taskId)
   await page.waitForSelector(`#task-history-${taskId}[data-state="${revisions === 0 ? 'none' : 'ready'}"][data-revisions="${revisions}"]`)
   return page.$$eval(`#task-history-${taskId} li[id^="revision-"]`, (els) => els.map((el) => ({
     number: Number((el as HTMLElement).dataset.revisionNumber),
@@ -128,6 +138,7 @@ async function history(page: Page, taskId: string, revisions: number) {
   })))
 }
 async function waitStatus(page: Page, taskId: string, kind: string) {
+  await at(page, taskId)
   await page.waitForSelector(`${work(taskId)}[data-status="${kind}"]`).catch(async () => {
     throw new Error(`task ${taskId} did not reach status ${kind} (status ${(await data(page, work(taskId))).status}: ${await text(page, work(taskId))})`)
   })
@@ -183,6 +194,7 @@ async function inviteAndAccept(coach: Page, learner: Page, versionId: string, em
 
 /** The learner sends a Task's work from her sidebar: the draft text replaced or extended, then Send. */
 async function sendFromUi(page: Page, taskId: string, input: string, replace = false) {
+  await at(page, taskId)
   await page.bringToFront()
   await draftReady(page, taskId)
   await typeInto(page, `#task-work-text-${taskId}`, input, replace)
@@ -207,8 +219,15 @@ async function revisit(page: Page) {
 }
 /** The lines explaining what a revocation changed, as shown under the revision. */
 const effect = (page: Page, revisionId: string) => page.$$eval(`#revision-revocation-${revisionId} .revocation-effect li`, (els) => els.map((el) => el.textContent?.trim() ?? ''))
-const xpLines = (page: Page, taskId: string) => page.$$eval(`#task-xp-history-${taskId} li`, (els) => els.map((el) => (el.textContent ?? '').split(' · ')[0]))
-const masteryLines = (page: Page) => page.$$eval('#skill-mastery-history li', (els) => els.map((el) => (el.textContent ?? '').split(' · ')[0]))
+const xpLines = async (page: Page, taskId: string) => {
+  await at(page, taskId)
+  return page.$$eval(`#task-xp-history-${taskId} li`, (els) => els.map((el) => (el.textContent ?? '').split(' · ')[0]))
+}
+/** The selected Skill's Mastery history, from its History view. */
+const masteryLines = async (page: Page) => {
+  await openSkillView(page, 'history')
+  return page.$$eval('#skill-mastery-history li', (els) => els.map((el) => (el.textContent ?? '').split(' · ')[0]))
+}
 
 async function main() {
   if (!process.argv.includes('--skip-build')) {
@@ -401,6 +420,7 @@ async function main() {
     ]
     await carla.waitForSelector(`#revision-${r2}[data-status="approval_revoked"]`)
     check(same(await effect(carla, r2), finalEffect), `Carla's effect of the final revocation: ${JSON.stringify(await effect(carla, r2))}`)
+    await at(carla, la.drills)
     await carla.waitForSelector(`#task-learning-${la.drills}[data-approved="false"][data-xp-contribution="0"]`)
     check(same(await xpLines(carla, la.drills), ['Awarded +20 XP: Approval of Revision 1', 'Corrected −20 XP: the Approval of Revision 2 was revoked']), `drills XP history: ${JSON.stringify(await xpLines(carla, la.drills))}`)
     check(same(await masteryLines(carla), ['Mastered: Approval of “Vector drills” Revision 1', 'Mastery revoked: the Approval of “Vector drills” Revision 2 was revoked']), `Vectors Mastery history: ${JSON.stringify(await masteryLines(carla))}`)
@@ -433,8 +453,11 @@ async function main() {
     await act(carla)
     await revisit(carla)
     await keyboardSelect(carla, 0, la.vectors)
+    await at(carla, la.drills)
     await carla.waitForSelector(`#task-review-${la.drills}[data-target-revision="3"]`)
+    await at(carla, la.drills)
     await carla.click(`#task-review-approve-${la.drills}`)
+    await at(carla, la.drills)
     await carla.waitForSelector(`#task-review-${la.drills}[data-status="recorded"][data-refresh="read"]`)
     await carla.waitForSelector('#enrollment-xp[data-xp="35"]')
     check(same(await progress(carla), { xp: '35', vectors: ['open', 'mastered'], matrices: ['open', 'mastered'] }), `Carla after the restoring Approval: ${JSON.stringify(await progress(carla))}`)

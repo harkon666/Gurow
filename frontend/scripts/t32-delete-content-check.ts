@@ -20,7 +20,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
-import { closeEditorPanels } from './editor-navigation'
+import { closeEditorPanels, closeSummaryBoard, openSkillActions, openSkillView, openTask } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -143,6 +143,7 @@ async function cardPoint(page: Page, id: string) {
 }
 /** Selects a Skill by clicking its card on the WebGPU canvas. */
 async function select(page: Page, id: string) {
+  await closeSummaryBoard(page)
   const point = await cardPoint(page, id)
   await page.mouse.click(point.x, point.y)
   await page.waitForFunction((want: string) => document.querySelector('#selected-skill-id')?.textContent?.trim() === want, {}, id)
@@ -150,6 +151,7 @@ async function select(page: Page, id: string) {
 /** Deletes the selected Skill from the editor and waits for its card to leave the canvas. */
 async function deleteSkill(page: Page, id: string) {
   await select(page, id)
+  await openSkillActions(page)
   check((await page.$eval('#delete-skill-btn', (el) => (el as HTMLButtonElement).disabled)) === false, `deleting ${id} is disabled: ${await page.$eval('#delete-skill-btn', (el) => el.getAttribute('title'))}`)
   await page.click('#delete-skill-btn')
   await page.waitForFunction((want: string) => !document.getElementById(`card-label-${want}`), {}, id)
@@ -235,9 +237,13 @@ async function main() {
 
     // 1. A Skill with learning history offers no deletion; its Tasks can be archived instead.
     await select(ada, id.ownership)
+    await openSkillActions(ada)
     await ada.waitForSelector('#skill-delete-blocked')
     check(await ada.$('#delete-skill-btn') === null && (await text(ada, '#skill-delete-blocked')).includes('has learning history, so it cannot be deleted'), `Ownership offers deletion: ${await text(ada, '#skill-delete-blocked').catch(() => 'no notice')}`)
-    check(await ada.$(`#task-archive-${task.borrow}`) !== null, 'the completed Task cannot be archived')
+    await openTask(ada, task.borrow)
+    await ada.waitForFunction((id: string) => document.querySelector(`#board-task-archive-${id}`) || document.querySelector('#card-delete-btn'), {}, task.borrow)
+    check(await ada.$(`#board-task-archive-${task.borrow}`) !== null, 'the completed Task cannot be archived')
+    await closeSummaryBoard(ada)
     pass('history keeps a Skill', `Ownership (its Task completed) shows "${(await text(ada, '#skill-delete-blocked')).slice(0, 60)}…" and offers archiving its Task instead of deletion`)
 
     // 2. An unused Skill is deleted with its Task, card and connections, and saved.
@@ -277,6 +283,7 @@ async function main() {
 
     // 4. A connection is removed, brought back by undo, and reload shows what was saved.
     await select(ada, id.traits)
+    await openSkillView(ada, 'prerequisites')
     await ada.click(`#disconnect-${id.traits}-${id.async}`)
     await waitForSaved(ada, ++revision)
     check(!edgesOf(await ok(ada, route)).includes(`${id.traits}>${id.async}`), 'the removed connection is still stored')
@@ -311,6 +318,7 @@ async function main() {
     await ada.reload({ waitUntil: 'networkidle0' })
     await openEditor(ada, `${ORIGIN}/paths/${pathId}`, 4)
     await select(ada, id.async)
+    await openSkillActions(ada)
     await ada.waitForSelector('#skill-delete-blocked')
     pass('history refuses a deletion', `an Access Override granted elsewhere before the save: "Not saved: the change was refused" (Skill “Async” has learning history…), the card stays deleted locally and the store unchanged; one Undo brings Async back and saves at revision ${revision}; after reload Async offers no deletion`)
 
@@ -383,6 +391,7 @@ async function main() {
     await openEditor(carla, `${ORIGIN}/coach/paths/${la.path}`, 3)
     await waitForSaved(carla, draftRevision)
     await select(carla, la.matrices)
+    await openSkillActions(carla)
     await carla.waitForSelector('#skill-delete-blocked')
     check((await text(carla, '#skill-delete-blocked')).includes('is part of a published Version, so it cannot be deleted'), `Matrices: ${await text(carla, '#skill-delete-blocked')}`)
     await deleteSkill(carla, la.eigen)
@@ -401,10 +410,12 @@ async function main() {
     // 8. An undo that no longer passes the Draft rules is refused, and the local work stays.
     await select(carla, la.vectors)
     // Remove the other required dependent first; otherwise the optional toggle is correctly blocked.
+    await openSkillView(carla, 'prerequisites')
     await carla.click(`#disconnect-${la.vectors}-${la.matrices}`)
     await waitForSaved(carla, ++draftRevision)
     await carla.click(`#disconnect-${la.vectors}-${la.eigen}`)
     await waitForSaved(carla, ++draftRevision)
+    await openSkillView(carla, 'edit')
     await carla.click('#skill-optional-input')
     await waitForSaved(carla, ++draftRevision)
     const optionalDraft: Doc = await ok(carla, coachRoute)

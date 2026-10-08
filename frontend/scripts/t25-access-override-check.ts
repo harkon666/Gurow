@@ -23,7 +23,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type BrowserContext, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
-import { openCoachReview, openSkillList, readSkillStatus } from './editor-navigation'
+import { openCoachReview, openSkillList, readSkillStatus, openTask, openSkillView, type SkillView } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -46,6 +46,12 @@ function check(condition: unknown, message: string): asserts condition {
 const resend = startResendStandIn()
 
 /** The latest emailed link to `to` with a subject starting `subject`, waiting for its delivery. */
+/** Shows one Task's own controls when they are not on screen: a learner's board details or the Coach's Tasks view, one Task at a time. */
+async function at(page: Page, taskId: string) {
+  if (!await page.$(`#task-learning-${taskId}`)) await openTask(page, taskId)
+  // A Task just opened reads its private draft first; its controls settle once that read answers.
+  if (await page.$(`#task-work-${taskId}`)) await page.waitForSelector(`#task-work-${taskId}:not([data-draft-state="loading"])`)
+}
 async function emailedLink(to: string, subject: string, after = 0) {
   for (let i = 0; i < 100; i++) {
     const fresh = resend.sent.slice(after).filter((e) => e.to.some((a) => a.toLowerCase() === to.toLowerCase()) && e.subject.startsWith(subject))
@@ -120,8 +126,12 @@ async function keyboardSelect(page: Page, index: number, id: string) {
   await waitSelected(page, id)
 }
 const work = (taskId: string) => `#task-work-${taskId}`
-const draftReady = (page: Page, taskId: string) => page.waitForSelector(`${work(taskId)}[data-draft-state="ready"]`)
+async function draftReady(page: Page, taskId: string) {
+  await at(page, taskId)
+  await page.waitForSelector(`${work(taskId)}[data-draft-state="ready"]`)
+}
 async function history(page: Page, taskId: string, revisions: number) {
+  await at(page, taskId)
   await page.waitForSelector(`#task-history-${taskId}[data-state="${revisions === 0 ? 'none' : 'ready'}"][data-revisions="${revisions}"]`)
   return page.$$eval(`#task-history-${taskId} li[id^="revision-"]`, (els) => els.map((el) => ({
     number: Number((el as HTMLElement).dataset.revisionNumber),
@@ -131,6 +141,7 @@ async function history(page: Page, taskId: string, revisions: number) {
   })))
 }
 async function waitStatus(page: Page, taskId: string, kind: string) {
+  await at(page, taskId)
   await page.waitForSelector(`${work(taskId)}[data-status="${kind}"]`).catch(async () => {
     throw new Error(`task ${taskId} did not reach status ${kind} (status ${(await data(page, work(taskId))).status}: ${await text(page, work(taskId))})`)
   })
@@ -183,6 +194,7 @@ async function inviteAndAccept(coach: Page, learner: Page, versionId: string, em
 }
 /** The learner sends a Task's work from her sidebar: the draft text replaced or extended, then Send. */
 async function sendFromUi(page: Page, taskId: string, input: string, replace = false) {
+  await at(page, taskId)
   await page.bringToFront()
   await draftReady(page, taskId)
   await typeInto(page, `#task-work-text-${taskId}`, input, replace)
@@ -205,7 +217,14 @@ async function waitOverride(page: Page, skillId: string, kind: string, extra = '
   })
 }
 /** The Override Records of the selected Skill, as listed in its Access section. */
-const overrideLines = (page: Page) => page.$$eval('#skill-override-history li', (els) => els.map((el) => ({ action: (el as HTMLElement).dataset.action, text: el.textContent?.trim() ?? '' })))
+const overrideLines = async (page: Page) => {
+  // The records are listed in the Skill's History; return to the view that was open.
+  const view = await page.$eval('#skill-detail-panel', (el) => (el as HTMLElement).dataset.view as SkillView)
+  await openSkillView(page, 'history')
+  const lines = await page.$$eval('#skill-override-history li', (els) => els.map((el) => ({ action: (el as HTMLElement).dataset.action, text: el.textContent?.trim() ?? '' })))
+  await openSkillView(page, view)
+  return lines
+}
 const lockReasons = (page: Page) => page.$$eval('#lock-reasons li', (els) => els.map((el) => el.textContent?.trim() ?? ''))
 /** Whether any control in the Access section offers to reactivate the Enrollment. */
 const offersReactivation = (page: Page) => page.$$eval('#skill-access button', (els) => els.some((el) => /reactivat/i.test(el.textContent ?? '')))
@@ -331,22 +350,30 @@ async function main() {
     // 2. Carla grants it from Lena's Enrollment page: a reason is required, nothing shows before the backend confirms.
     await openEnrollment(carla, enrollment)
     await keyboardSelect(carla, 1, la.second)
+    await openSkillView(carla, 'edit')
     await carla.waitForSelector(`${control(la.second)}[data-action="grant"]`)
+    await openSkillView(carla, 'edit')
     await carla.click(`#override-open-${la.second}`)
     await carla.waitForFunction((id: string) => document.activeElement?.id === id, {}, `override-reason-${la.second}`)
+    await openSkillView(carla, 'edit')
     const outlook = await text(carla, `#override-outlook-${la.second}`)
     check(outlook.includes('For this learner and Skill only, it waives: Requires Mastery of “Vectors”; Needs 20 more XP') && outlook.includes('XP and Mastery do not change, and no other Enrollment or learner is affected.'), `grant outlook: ${outlook}`)
+    await openSkillView(carla, 'edit')
     check((await data(carla, control(la.second))).canRecord === 'false' && (await text(carla, `#override-hint-${la.second}`)).includes('needs a brief reason'), 'a grant without a reason is offered')
     await carla.keyboard.type('   ')
+    await openSkillView(carla, 'edit')
     check((await data(carla, control(la.second))).canRecord === 'false', 'a grant with a blank reason is offered')
     await typeInto(carla, `#override-reason-${la.second}`, 'Lena passed linear algebra at her previous school.', true)
+    await openSkillView(carla, 'edit')
     await carla.waitForSelector(`${control(la.second)}[data-can-record="true"]`)
     faults.holding = true
+    await openSkillView(carla, 'edit')
     await carla.click(`#override-confirm-${la.second}`)
     await waitOverride(carla, la.second, 'recording')
     for (let i = 0; i < 50 && !faults.hold; i++) await new Promise((r) => setTimeout(r, 20))
     check(faults.hold, 'the grant request was not held')
     await new Promise((r) => setTimeout(r, 400))
+    await openSkillView(carla, 'edit')
     check((await text(carla, `#override-status-${la.second}`)) === 'Granting the Access Override…' && (await text(carla, '#skill-access-state')) === 'Locked' && await carla.$('#skill-override') === null && await carla.$('#skill-override-history') === null, `shown before confirmation: ${await text(carla, '#skill-access')}`)
     check((await storedOverrides()).length === 0, 'the held grant reached the backend')
     faults.holding = false
@@ -355,6 +382,7 @@ async function main() {
     const [granted] = await storedOverrides()
     check(granted && same({ ...granted, id: '', occurred: '' }, { id: '', enrollment, skill: la.second, coach: carlaId, learner: lenaId, action: 'grant', grant: null, reason: 'Lena passed linear algebra at her previous school.', occurred: '' }), `stored grant: ${JSON.stringify(granted)}`)
     const grantedAt = await carla.evaluate((at: string) => new Date(at).toLocaleString(), (await state(carla)).overrideHistory[0].occurredAt)
+    await openSkillView(carla, 'edit')
     const recorded = await text(carla, `#override-status-${la.second}`)
     check(recorded.includes('Recorded by Gurow: Access Override granted by you (carla) · “Matrices” for lena, in this Enrollment only') && recorded.includes(grantedAt) && recorded.includes('Reason: Lena passed linear algebra at her previous school.') && recorded.includes('Access is shown as Gurow derived it after this change.'), `Carla's recorded grant: ${recorded}`)
     let records = await overrideLines(carla)
@@ -374,8 +402,11 @@ async function main() {
     check(await lena.$('[data-access-override-control]') === null, 'Lena\'s page offers to change the override')
     const sent = await sendFromUi(lena, la.secondTask, 'Matrix drills 11–20, with working.')
     check(sent === 1, `Lena's Matrices work is Revision ${sent}`)
+    await at(lena, la.secondTask)
     await typeInto(lena, `#task-work-text-${la.secondTask}`, 'Notes for the next attempt', true)
+    await at(lena, la.secondTask)
     await lena.click(`#task-work-save-${la.secondTask}`)
+    await at(lena, la.secondTask)
     await lena.waitForSelector(`${work(la.secondTask)}[data-unsaved="false"]`)
     check(same(await progress(lena), { xp: '0', vectors: ['open', 'not-mastered'], matrices: ['override', 'not-mastered'] }) && same(await progressRows(), { xp: 0, mastery: 0 }), `Lena's progress under the override: ${JSON.stringify(await progress(lena))}`)
     const lenaVectorsStart = await api(lena, `${taskRoute(la.firstTask)}/start`, 'POST')
@@ -397,6 +428,7 @@ async function main() {
     await draftReady(lena, la.secondTask)
     check((await data(lena, '#enrollment-status')).status === 'inactive' && (await text(lena, '#skill-access-state')) === 'Locked' && same(await lockReasons(lena), ['This Enrollment is inactive: no Skill can be worked on until the Coach reactivates it']), `Lena's inactive Matrices: ${await text(lena, '#skill-access')}`)
     check((await text(lena, '#skill-override-inactive')).startsWith('It does not reactivate this Enrollment') && !(await offersReactivation(lena)), `Lena's override while inactive: ${await text(lena, '#skill-override')}`)
+    await at(lena, la.secondTask)
     check((await data(lena, work(la.secondTask))).canSend === 'false' && (await text(lena, `#task-work-blocked-${la.secondTask}`)).startsWith('This Enrollment is inactive'), 'Lena can send while inactive')
     const inactiveStart = await api(lena, `${taskRoute(la.secondTask)}/start`, 'POST')
     const inactiveSend = await api(lena, `${taskRoute(la.secondTask)}/submission/revisions`, 'POST', { text: 'Sent while inactive', urls: [] })
@@ -418,22 +450,31 @@ async function main() {
     const ottoRevoke = await api(otto, revokeRoute(la.second, grantId), 'POST', { reason: 'Another Workspace' })
     check(lenaRevoke.status === 403 && ottoRevoke.status === 404 && (await storedOverrides()).length === 1, `Lena/Otto revocation answered ${lenaRevoke.status}/${ottoRevoke.status}`)
     await act(carla)
+    await openSkillView(carla, 'edit')
     await carla.waitForSelector(`${control(la.second)}[data-action="revoke"]`)
+    await openSkillView(carla, 'edit')
     await carla.click(`#override-open-${la.second}`)
     await carla.waitForFunction((id: string) => document.activeElement?.id === id, {}, `override-reason-${la.second}`)
+    await openSkillView(carla, 'edit')
     const revokeText = await text(carla, `#override-outlook-${la.second}`)
     check(revokeText.includes('Access returns to the ordinary rules, which lock “Matrices” now: Requires Mastery of “Vectors”; Needs 20 more XP') && revokeText.includes('Work already sent stays in the history and remains reviewable'), `revoke outlook: ${revokeText}`)
+    await openSkillView(carla, 'edit')
     check((await data(carla, control(la.second))).canRecord === 'false', 'a revocation without a reason is offered')
     faults.commitThenDrop = 1
     await carla.keyboard.type('Back to the ordinary route: Vectors first.')
+    await openSkillView(carla, 'edit')
     await carla.waitForSelector(`${control(la.second)}[data-can-record="true"]`)
+    await openSkillView(carla, 'edit')
     await carla.click(`#override-confirm-${la.second}`)
     await waitOverride(carla, la.second, 'recorded', '[data-refresh="read"]')
+    await openSkillView(carla, 'edit')
     const lost = await text(carla, `#override-status-${la.second}`)
+    await openSkillView(carla, 'edit')
     check(faults.commitThenDrop === 0 && (await data(carla, control(la.second))).confirmedBy === 'history' && lost.includes('the answer was lost, but the Override Records show it') && lost.includes('Access Override revoked by you (carla)'), `lost revocation answer: ${lost}`)
     const stored = await storedOverrides()
     check(stored.length === 2 && stored[1].action === 'revoke' && stored[1].grant === grantId && stored[1].coach === carlaId && stored[1].reason === 'Back to the ordinary route: Vectors first.', `stored revocation: ${JSON.stringify(stored)}`)
     check((await text(carla, '#skill-access-state')) === 'Locked' && same(await lockReasons(carla), lockedMatrices) && await carla.$('#skill-override') === null, `Carla's Matrices after the revocation: ${await text(carla, '#skill-access')}`)
+    await openSkillView(carla, 'edit')
     await carla.waitForSelector(`${control(la.second)}[data-action="grant"]`)
     pass('revoke', 'Lena 403, Otto 404; revoke outlook names the ordinary locks and that sent work stays reviewable; reason required; the answer was dropped after commit and the Override Records confirmed it ("the answer was lost…") with exactly one revoke record naming the grant; Matrices Locked with its ordinary reasons')
 
@@ -447,6 +488,7 @@ async function main() {
     check(same(records.map((r) => r.action), ['grant', 'revoke']) && records[1].text.includes('Access Override revoked by carla, Coach of this Workspace · “Matrices” for you') && records[1].text.includes('Reason: Back to the ordinary route: Vectors first.'), `Lena's Override Records: ${JSON.stringify(records)}`)
     const kept = await history(lena, la.secondTask, 1)
     check(kept[0].status === 'pending' && kept[0].text.includes('Matrix drills 11–20, with working.'), `Lena's sent work: ${JSON.stringify(kept)}`)
+    await at(lena, la.secondTask)
     check(await lena.$eval(`#task-work-text-${la.secondTask}`, (el) => (el as HTMLTextAreaElement).value) === 'Notes for the next attempt' && (await data(lena, work(la.secondTask))).canSend === 'false', 'Lena\'s draft was lost or she can still send')
     const lockedSend = await api(lena, `${taskRoute(la.secondTask)}/submission/revisions`, 'POST', { text: 'After revocation', urls: [] })
     check(lockedSend.status === 403 && lockedSend.body?.error === 'skill_locked', `send after revocation answered ${lockedSend.status}`)
@@ -454,8 +496,11 @@ async function main() {
     await openCoachReview(carla)
     await carla.waitForSelector(`#awaiting-review-${la.secondTask}[data-revision-number="1"]`)
     await carla.click(`#awaiting-review-${la.secondTask}`)
+    await at(carla, la.secondTask)
     await carla.waitForSelector(`#task-review-${la.secondTask}[data-target-revision="1"]`)
+    await at(carla, la.secondTask)
     await carla.click(`#task-review-approve-${la.secondTask}`)
+    await at(carla, la.secondTask)
     await carla.waitForSelector(`#task-review-${la.secondTask}[data-status="recorded"][data-refresh="read"]`)
     check(same(await progress(carla), { xp: '15', vectors: ['open', 'not-mastered'], matrices: ['locked', 'mastered'] }) && await carla.$('#skill-mastery-kept') !== null, `Carla after the later Review: ${JSON.stringify(await progress(carla))}`)
     check(same(await progressRows(), { xp: 1, mastery: 1 }), `XP/Mastery rows after the later Review: ${JSON.stringify(await progressRows())}`)
@@ -466,15 +511,20 @@ async function main() {
 
     // 7. A grant made elsewhere while this page still offers one is refused; everything survives reload; Otto's Workspace is untouched.
     await act(carla)
+    await openSkillView(carla, 'edit')
     await carla.click(`#override-open-${la.second}`)
     await typeInto(carla, `#override-reason-${la.second}`, 'Stale page reason')
     // Another tab or device grants meanwhile; this page is not refocused, so it still offers a grant.
     const elsewhere = await api(carla, grantRoute(la.second), 'POST', { reason: 'Exam retake allowed early.' })
+    await openSkillView(carla, 'edit')
     check(elsewhere.status === 201 && (await data(carla, control(la.second))).action === 'grant', `the grant elsewhere answered ${elsewhere.status}`)
+    await openSkillView(carla, 'edit')
     await carla.click(`#override-confirm-${la.second}`)
     await waitOverride(carla, la.second, 'refused', '[data-refresh="read"]')
+    await openSkillView(carla, 'edit')
     const refused = await text(carla, `#override-status-${la.second}`)
     check(refused.startsWith('Not recorded: an Access Override for this Skill is already in force (perhaps granted from another tab)') && refused.includes('Nothing changed'), `stale grant: ${refused}`)
+    await openSkillView(carla, 'edit')
     await carla.waitForSelector(`${control(la.second)}[data-action="revoke"][data-open="false"]`)
     check((await storedOverrides()).length === 3 && (await text(carla, '#skill-access-state')) === 'Open by Coach override', 'the refused grant was stored, or the grant made elsewhere is not shown')
     for (const page of [carla, lena]) {

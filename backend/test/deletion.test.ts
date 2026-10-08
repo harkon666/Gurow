@@ -143,7 +143,7 @@ it('AC2: learning history refuses the deletion and changes nothing, even when it
   expect((await json(request(personal(), 'learner'), 200)).learningPath.revision).toBe(doc.learningPath.revision)
   expect((await json(request(`${personal()}/learning-state`, 'learner'), 200)).learningState.historySkillIds).toEqual([skillB.id])
   expect(await json(request(`${personal()}/document`, 'learner', 'PUT', edit(doc, withoutSkill(skillB.id))), 409))
-    .toMatchObject({ error: 'skill_has_history', detail: 'Skill "Lifetimes" has learning history and cannot be deleted; its Tasks can be archived' })
+    .toMatchObject({ error: 'skill_has_history', detail: 'Skill "Lifetimes" has learning history and cannot be deleted; archive the Skill instead' })
   // A declared Mastery is history too.
   await json(request(`${personal()}/skills/${skillA.id}/mastery`, 'learner', 'PUT'), 200)
   expect(await json(request(`${personal()}/document`, 'learner', 'PUT', edit(doc, withoutSkill(skillA.id))), 409)).toMatchObject({ error: 'skill_has_history' })

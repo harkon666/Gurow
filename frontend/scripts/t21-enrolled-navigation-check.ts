@@ -23,7 +23,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type BrowserContext, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
-import { closeEditorPanels, openSkillList, readSkillStatus, clickOutsideDetails } from './editor-navigation'
+import { closeEditorPanels, closeSummaryBoard, openSkillList, openSummaryBoard, openTask, readSkillStatus, clickOutsideDetails } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -263,7 +263,12 @@ async function main() {
     const vectorsPoint = await cardPoint(lena, la.vectors)
     await lena.mouse.click(vectorsPoint.x, vectorsPoint.y)
     await waitSelected(lena, la.vectors)
-    check((await text(lena, '#skill-detail-panel')).includes('Add and scale vectors in R^n') && await text(lena, `#task-title-${la.drills}`) === 'Vector drills' && await text(lena, `#task-description-${la.drills}`) === 'Exercises 1–10' && await text(lena, `#task-badge-${la.reading}`) === 'Enrichment', 'the selected Skill does not show its outcome and Tasks')
+    // The learner reads a Task's definition on their board: its card and read-only details.
+    const outcomeShown = (await text(lena, '#skill-detail-panel')).includes('Add and scale vectors in R^n')
+    await openTask(lena, la.drills)
+    const definition = [await text(lena, '#card-definition-title'), await text(lena, '#card-definition-description'), await text(lena, `#board-card-${la.reading}`)]
+    await closeSummaryBoard(lena)
+    check(outcomeShown && definition[0] === 'Vector drills' && definition[1] === 'Exercises 1–10' && definition[2].includes('Enrichment'), `the selected Skill does not show its outcome and Tasks: ${JSON.stringify(definition)}`)
     pass('enrollment opens its Version', `invitation accepted → "Open Linear Algebra, Version 1" → canvas (WebGPU ready) and list show Vectors/Matrices; clicking Vectors shows its outcome and Tasks`)
 
     // 2. The Coach publishes Version 2 with a renamed Skill; the learner's Enrollment stays on Version 1.
@@ -289,7 +294,11 @@ async function main() {
     let s = await shown(lena)
     check(s.xp === '0' && s.access === 'locked' && s.mastery === 'not-mastered' && s.title === 'Matrices', `initial: ${JSON.stringify(s)}`)
     check(s.reasons.length === 2 && s.reasons[0] === 'Requires Mastery of “Vectors”' && s.reasons[1] === 'Needs 20 more XP: the threshold is 20 XP and this Enrollment has 0 XP', `lock reasons: ${s.reasons}`)
-    check((await text(lena, '#skill-detail-panel')).includes('Multiply matrices as linear maps') && await text(lena, `#task-title-${la.matrixDrills}`) === 'Matrix drills', 'the Locked Skill hides its outcome or Tasks')
+    const lockedOutcome = (await text(lena, '#skill-detail-panel')).includes('Multiply matrices as linear maps')
+    await openSummaryBoard(lena)
+    const lockedTask = await text(lena, `#board-card-title-${la.matrixDrills}`)
+    await closeSummaryBoard(lena)
+    check(lockedOutcome && lockedTask === 'Matrix drills', 'the Locked Skill hides its outcome or Tasks')
     // Work is sent through the API (T22 adds the UI); the Coach approves Vectors' Required Task.
     const route = (task: string) => `/enrollments/${lenaEnrollment}/tasks/${task}/submission`
     const vectorWork = (await ok(lena, `${route(la.drills)}/revisions`, 'POST', { text: 'Vector drill answers', urls: ['https://example.com/vectors'] })).revision.id
@@ -298,6 +307,7 @@ async function main() {
     await keyboardSelect(lena, 0, la.vectors)
     s = await shown(lena)
     check(s.xp === '20' && s.access === 'open' && s.mastery === 'mastered', `after Approval, Vectors: ${JSON.stringify(s)}`)
+    await openTask(lena, la.drills)
     await lena.waitForSelector(`#task-history-${la.drills}[data-state="ready"][data-revisions="1"]`)
     check((await text(lena, `#task-history-${la.drills}`)).includes('Approved') && (await data(lena, `#task-learning-${la.drills}`)).xpContribution === '20', 'the approved work or its contribution is not shown')
     await keyboardSelect(lena, 1, la.matrices)
@@ -311,11 +321,13 @@ async function main() {
     await keyboardSelect(lena, 1, la.matrices)
     s = await shown(lena)
     check(s.xp === '0' && s.access === 'locked' && s.mastery === 'not-mastered' && s.reasons.length === 2, `after revocation, Matrices: ${JSON.stringify(s)}`)
+    await openTask(lena, la.matrixDrills)
     await lena.waitForSelector(`#task-history-${la.matrixDrills}[data-state="ready"][data-revisions="1"]`)
     check((await text(lena, `#task-history-${la.matrixDrills}`)).includes('Matrix drill answers') && (await text(lena, `#task-history-${la.matrixDrills}`)).includes('Awaiting Review') && (await data(lena, `#task-learning-${la.matrixDrills}`)).started === 'true', 'the Locked Skill\'s submitted work is not reachable')
     await keyboardSelect(lena, 0, la.vectors)
     s = await shown(lena)
     check(s.access === 'open' && s.mastery === 'not-mastered', `after revocation, Vectors: ${JSON.stringify(s)}`)
+    await openTask(lena, la.drills)
     await lena.waitForSelector(`#task-history-${la.drills}[data-state="ready"]`)
     check((await text(lena, `#task-history-${la.drills}`)).includes('Approval revoked') && (await text(lena, `#task-history-${la.drills}`)).includes('Wrong exercise set'), 'the revoked Approval is not shown in the history')
     pass('Access, Mastery and XP', 'Matrices locked (Mastery of Vectors; 20 more XP) → Approval: 20 XP, Vectors mastered, Matrices open → revocation: 0 XP, Matrices locked again, its pending work and the revoked Approval stay readable')
@@ -333,14 +345,17 @@ async function main() {
       await lena.waitForFunction((n: number) => Number((document.querySelector('#enrollment-records') as HTMLElement | null)?.dataset.generation) > n, {}, before)
     }
     const chips = async () => ({ vectors: (await readSkillStatus(lena, `#skill-status-${la.vectors}`)).access, matrices: (await readSkillStatus(lena, `#skill-status-${la.matrices}`)).access })
+    // The Task stays open on the learner's board while the Coach acts.
+    await openTask(lena, la.drills)
+    await lena.waitForSelector(`#task-history-${la.drills}[data-state="ready"][data-revisions="1"]`)
     const secondWork = (await ok(lena, `${route(la.drills)}/revisions`, 'POST', { text: 'Corrected vector drills' })).revision.id
     await ok(carla, `${route(la.drills)}/revisions/${secondWork}/review`, 'POST', { decision: 'approval' })
     check((await shown(lena)).xp === '0', 'the open page changed before the learner returned to it')
     await returnToPage()
-    s = await shown(lena)
-    check(s.xp === '20' && s.title === 'Vectors' && s.access === 'open' && s.mastery === 'mastered' && (await chips()).matrices === 'open', `after the Coach's Approval, on return: ${JSON.stringify(s)} ${JSON.stringify(await chips())}`)
     await lena.waitForSelector(`#task-history-${la.drills}[data-state="ready"][data-revisions="2"]`)
     check((await text(lena, `#task-history-${la.drills}`)).includes('Corrected vector drills'), 'the shown Task history was not read again')
+    s = await shown(lena)
+    check(s.xp === '20' && s.title === 'Vectors' && s.access === 'open' && s.mastery === 'mastered' && (await chips()).matrices === 'open', `after the Coach's Approval, on return: ${JSON.stringify(s)} ${JSON.stringify(await chips())}`)
     await ok(carla, `/enrollments/${lenaEnrollment}/deactivate`, 'POST', { reason: 'Paused for the holidays' })
     await refreshButton()
     s = await shown(lena)
@@ -465,14 +480,19 @@ async function main() {
     await keyboardSelect(noGpu, 1, la.matrices)
     s = await shown(noGpu)
     check(s.title === 'Matrices' && s.access === 'locked' && s.reasons.length === 2 && s.xp === '0', `list-only Matrices: ${JSON.stringify(s)}`)
+    await openTask(noGpu, la.matrixDrills)
     await noGpu.waitForSelector(`#task-history-${la.matrixDrills}[data-state="ready"][data-revisions="1"]`)
-    check(await text(noGpu, `#task-title-${la.matrixDrills}`) === 'Matrix drills' && (await text(noGpu, `#task-history-${la.matrixDrills}`)).includes('Matrix drill answers'), 'the list-only view does not reach the Task details')
+    check(await text(noGpu, '#card-definition-title') === 'Matrix drills' && (await text(noGpu, `#task-history-${la.matrixDrills}`)).includes('Matrix drill answers'), 'the list-only view does not reach the Task details')
     await openSkillList(noGpu)
     await noGpu.focus('#skill-prerequisite-list')
     await noGpu.keyboard.press('Home')
     await noGpu.keyboard.press('Enter')
     await waitSelected(noGpu, la.vectors)
-    check(await text(noGpu, `#task-title-${la.drills}`) === 'Vector drills' && (await shown(noGpu)).mastery === 'not-mastered', 'ArrowUp did not reach Vectors and its Task')
+    const vectorsMastery = (await shown(noGpu)).mastery
+    await openTask(noGpu, la.drills)
+    const vectorsTask = await text(noGpu, '#card-definition-title')
+    await closeSummaryBoard(noGpu)
+    check(vectorsTask === 'Vector drills' && vectorsMastery === 'not-mastered', 'ArrowUp did not reach Vectors and its Task')
     check((await readOnlyControls(noGpu)).panelInputs === 0, 'the list-only view offers editing')
     pass('no WebGPU', 'list-only page: keyboard reaches Matrices (locked, both reasons, 0 XP) with its Task and submitted work, then Vectors and its Task; nothing editable')
 

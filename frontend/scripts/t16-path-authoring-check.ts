@@ -13,7 +13,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import path from 'node:path'
 import puppeteer, { type HTTPRequest, type Page } from 'puppeteer-core'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
-import { closeEditorPanels, openNewSkill } from './editor-navigation'
+import { addBoardTask, closeEditorPanels, closeSummaryBoard, editBoardTask, openNewSkill, openSkillView, openSummaryBoard } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -143,17 +143,28 @@ async function select(page: Page, id: string) {
   await page.mouse.click(point.x, point.y)
   await page.waitForFunction((want: string) => document.querySelector('#selected-skill-id')?.textContent?.trim() === want, {}, id)
 }
+/** Adds a Task to the selected Skill through its Task Board, where personal Tasks are authored. */
 async function addTask(page: Page, title: string, description: string) {
-  const before = await page.$$eval('[id^="task-edit-title-"]', (els) => els.map((el) => el.id))
-  await page.click('#add-task-btn')
-  await page.waitForFunction((n: number) => document.querySelectorAll('[id^="task-edit-title-"]').length === n, {}, before.length + 1)
-  const id = (await page.$$eval('[id^="task-edit-title-"]', (els) => els.map((el) => el.id))).find((x) => !before.includes(x))!.replace('task-edit-title-', '')
-  await setValue(page, `#task-edit-title-${id}`, title)
-  await setValue(page, `#task-edit-description-${id}`, description)
+  await openSummaryBoard(page)
+  const id = await addBoardTask(page, title, description)
+  await closeSummaryBoard(page)
   return id
+}
+/** The selected Skill's Task titles as its board shows them. */
+async function boardTitles(page: Page) {
+  await openSummaryBoard(page)
+  const titles = await page.$$eval('[id^="board-card-title-"]', (els) => Object.fromEntries(els.map((el) => [el.id.replace('board-card-title-', ''), el.textContent ?? ''])))
+  await closeSummaryBoard(page)
+  return titles as Record<string, string>
+}
+/** The selected Skill's learning outcome, from its Edit view. */
+async function outcomeOf(page: Page) {
+  await openSkillView(page, 'edit')
+  return fieldValue(page, '#skill-outcome-input')
 }
 async function connect(page: Page, from: string, to: string) {
   await select(page, from)
+  await openSkillView(page, 'prerequisites')
   await page.select('#connect-skill-select', to)
   await page.click('#btn-add-dependent')
 }
@@ -217,7 +228,7 @@ async function main() {
     page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()) })
     // Every reload and navigation here happens with the document saved; an unsaved-work prompt is a failure.
     const dialogs: string[] = []
-    page.on('dialog', (dialog) => { dialogs.push(dialog.type()); void dialog.accept() })
+    page.on('dialog', (dialog) => { dialogs.push(dialog.type()); console.log(`  [dialog] ${dialog.type()} at ${page.url()}`); void dialog.accept() })
     current = page
     await page.setViewport({ width: 1400, height: 860, deviceScaleFactor: 1 })
 
@@ -307,10 +318,11 @@ async function main() {
     const reloadedStatus = await saveState(page)
     check(reloadedStatus.state === 'saved' && reloadedStatus.revision === revisionAfterDrag, `reloaded status ${JSON.stringify(reloadedStatus)}`)
     await select(page, lifetimes)
-    check(await fieldValue(page, `#task-edit-title-${lifetimesTask}`) === 'Annotate lifetimes', 'Lifetimes did not open its own Task')
-    check(await page.$(`#task-edit-title-${ownershipTask}`) === null, 'Lifetimes shows Ownership\'s Task')
+    const lifetimesTitles = await boardTitles(page)
+    check(lifetimesTitles[lifetimesTask] === 'Annotate lifetimes', 'Lifetimes did not open its own Task')
+    check(!(ownershipTask in lifetimesTitles), 'Lifetimes shows Ownership\'s Task')
     await select(page, ownership)
-    check(await fieldValue(page, `#task-edit-title-${ownershipTask}`) === 'Borrow exercises' && await fieldValue(page, '#skill-outcome-input') === 'Explain moves and borrows', 'Ownership did not reopen with its Task and outcome')
+    check((await boardTitles(page))[ownershipTask] === 'Borrow exercises' && await outcomeOf(page) === 'Explain moves and borrows', 'Ownership did not reopen with its Task and outcome')
     check(await fieldValue(page, '#path-goal-input') === 'Ship a small allocator', 'the goal did not reopen')
     pass('coherent reload', `same ${beforeReload.length} card positions under the restored camera; each card opens its own Skill outcome and Task; no selection, undo disabled`)
 
@@ -375,13 +387,16 @@ async function main() {
     await waitForSaved(other, revisionAfterDrag + 2)
     await page.bringToFront()
     await select(page, ownership)
-    await setValue(page, `#task-edit-title-${ownershipTask}`, 'Edit from the stale tab')
+    await openSummaryBoard(page)
+    await editBoardTask(page, ownershipTask, { title: 'Edit from the stale tab' })
+    await closeSummaryBoard(page)
     await waitForState(page, 'conflict')
     await page.waitForSelector('#save-conflict')
+    await openSkillView(page, 'edit')
     await setValue(page, '#skill-outcome-input', 'Still editing locally')
     await new Promise((r) => setTimeout(r, 900))
     check((await saveState(page)).state === 'conflict', 'autosave resumed after the conflict')
-    check(await fieldValue(page, `#task-edit-title-${ownershipTask}`) === 'Edit from the stale tab' && await fieldValue(page, '#skill-outcome-input') === 'Still editing locally', 'the local work was not kept')
+    check(await fieldValue(page, '#skill-outcome-input') === 'Still editing locally' && (await boardTitles(page))[ownershipTask] === 'Edit from the stale tab', 'the local work was not kept')
     let accepted = await readDoc(page, pathA)
     const acceptedTask = accepted.application.skills.find((s) => s.id === ownership)!
     check(accepted.learningPath.revision === revisionAfterDrag + 2 && accepted.learningPath.goal === 'Goal from the second tab' &&
@@ -392,7 +407,7 @@ async function main() {
     await waitForSaved(page, revisionAfterDrag + 2)
     check(await fieldValue(page, '#path-goal-input') === 'Goal from the second tab', 'loading the saved version kept the stale goal')
     await select(page, ownership)
-    check(await fieldValue(page, `#task-edit-title-${ownershipTask}`) === 'Borrow exercises', 'loading the saved version kept the stale Task title')
+    check((await boardTitles(page))[ownershipTask] === 'Borrow exercises', 'loading the saved version kept the stale Task title')
     // Going back to this tab's earlier accepted goal is a real edit: the backend must hold it, not just the status.
     await closeEditorPanels(page)
     await setValue(page, '#path-goal-input', 'Goal A from this tab')

@@ -1,5 +1,5 @@
 import puppeteer from 'puppeteer-core'
-import { closeEditorPanels } from './editor-navigation'
+import { closeEditorPanels, openSkillView } from './editor-navigation'
 import { spawn, execSync, execFileSync } from 'child_process'
 import path from 'path'
 import fs from 'fs'
@@ -168,6 +168,7 @@ async function main() {
       await releaseWasm()
       await startupPage.waitForSelector('#card-label-skill-rust-basics')
       await startupPage.click('#card-label-skill-rust-basics')
+      await openSkillView(startupPage, 'tasks')
       await startupPage.type('#task-edit-title-task-rust-toolchain', ' after initialization')
       await startupPage.waitForFunction(() => (document.querySelector('#checkpoint-status-badge') as HTMLElement | null)?.dataset.state === 'saved')
       if (await startupPage.$('#checkpoint-error-alert')) throw new Error('Initialization click created an orphan Skill')
@@ -210,6 +211,7 @@ async function main() {
       throw new Error(`Expected selected skill id 'skill-rust-basics', got '${selId}'`)
     }
 
+    await openSkillView(page, 'tasks')
     await page.waitForSelector('#task-edit-title-task-rust-toolchain')
     const initialTaskTitle = await page.$eval(
       '#task-edit-title-task-rust-toolchain',
@@ -389,6 +391,7 @@ async function main() {
       throw new Error(`Expected selected skill '${createdCard.id}', got '${selectedCreatedId}'`)
     }
     const createdTask = createdSkillPayload.tasks[0]
+    await openSkillView(page, 'tasks')
     const displayedCreatedTask = await page.$eval(`#task-edit-title-${createdTask.id}`, (el: HTMLInputElement) => el.value)
     if (displayedCreatedTask !== createdTask.title) throw new Error('New Skill displays the wrong Task')
     console.log(`  Selected new skill in panel with its Task: "${selectedCreatedId}"`)
@@ -404,6 +407,7 @@ async function main() {
       (els: Element[], firstId: string) => els.map(el => el.id.replace('card-label-', '')).find(id => id !== firstId), createdCard.id)
     await closeEditorPanels(page)
     await page.click(`#card-label-${createdCard.id}`)
+    await openSkillView(page, 'prerequisites')
     await page.waitForSelector('#connect-skill-select', { visible: true })
     const availableTargets = await page.$$eval('#connect-skill-select option', (els: HTMLOptionElement[]) => els.map(el => el.value))
     if (!availableTargets.includes(secondCreatedId)) throw new Error('New Skill missing from connection targets')
@@ -418,6 +422,7 @@ async function main() {
     // Connect Rust Fundamentals -> WebGPU Pipeline
     await closeEditorPanels(page)
     await page.click('#card-label-skill-rust-basics')
+    await openSkillView(page, 'prerequisites')
     await page.waitForSelector('#connect-skill-select')
     await page.select('#connect-skill-select', 'skill-wgpu-pipeline')
     await page.click('#btn-add-dependent')
@@ -592,6 +597,7 @@ async function main() {
     await page.click('#card-label-skill-rust-basics')
     await page.waitForSelector('#selected-skill-title')
 
+    await openSkillView(page, 'tasks')
     const restoredTaskTitle = await page.$eval(
       '#task-edit-title-task-rust-toolchain',
       (el: any) => el.value
@@ -624,6 +630,7 @@ async function main() {
     }
 
     // Verify restored connections in panel
+    await openSkillView(page, 'prerequisites')
     await page.waitForSelector('#outgoing-prerequisites-list')
     const restoredOutgoing = await page.$eval(
       '#outgoing-prerequisites-list',
@@ -673,6 +680,7 @@ async function main() {
     await closeEditorPanels(page)
     await page.click('#card-label-skill-rust-basics')
     await page.waitForSelector('#selected-skill-title')
+    await openSkillView(page, 'tasks')
 
     // Simulate typing in task title on the fallback fixture while alert is active
     await page.evaluate(() => {
@@ -746,6 +754,7 @@ async function main() {
     await closeEditorPanels(page)
     await page.click('#card-label-skill-rust-basics')
     await page.waitForSelector('#selected-skill-title')
+    await openSkillView(page, 'tasks')
     await page.evaluate(() => {
       const titleInput = document.querySelector(
         '#task-edit-title-task-rust-toolchain'

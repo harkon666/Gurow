@@ -109,8 +109,17 @@ export function useTaskBoards<L>({ scope, store, enabled, tasksOf, savedTasksOf,
     setView(null)
   }, [])
 
-  /** Tells every board that this tab's document was accepted (saved, reloaded or reapplied). */
-  const documentAccepted = useCallback(() => { for (const sync of syncs.current.values()) sync.documentAccepted() }, [])
+  /**
+   * Tells every board that this tab's document was accepted (saved, reloaded or reapplied). A
+   * closed board whose intents wait for this tab's Tasks reads the board again, so they are sent
+   * once the backend holds those Tasks instead of waiting until the board is reopened.
+   */
+  const documentAccepted = useCallback(() => {
+    for (const [skillId, sync] of syncs.current) {
+      sync.documentAccepted()
+      if (skillId !== openRef.current && sync.view().pending > 0) void sync.refresh()
+    }
+  }, [])
 
   return { openId, view, sync: openId ? syncs.current.get(openId) ?? null : null, open, close, pending, documentAccepted }
 }

@@ -462,10 +462,10 @@ export async function main() {
     check(same(await storedBoard(V), settled) && same(arrangement(await shownBoard(learner)), arrangement(settled)), 'a Review outcome moved a card')
     await closeBoard(learner)
     // The Skill summary shows the same two facts.
-    await learner.waitForSelector(`#task-review-state-${reading}`)
-    const summary = await cardReview(learner, reading, 'task-review-state')
+    await learner.waitForSelector(`#summary-review-state-${reading}`)
+    const summary = await cardReview(learner, reading, 'summary-review-state')
     check(summary.latest === 'pending' && summary.revision === '3' && summary.counting === '', `the summary review state is wrong: ${JSON.stringify(summary)}`)
-    const drillsSummary = await cardReview(learner, drills, 'task-review-state')
+    const drillsSummary = await cardReview(learner, drills, 'summary-review-state')
     check(drillsSummary.latest === 'pending' && drillsSummary.counting === '1', `the summary does not keep the earlier Approval apart: ${JSON.stringify(drillsSummary)}`)
     pass('AC4/AC5/AC6 work is sent only from the details; send → Changes Requested (Coach UI, no board there) → corrected send → Approval (+5 XP) → newer pending (earlier Approval still counts) → revocation (XP corrected); the card stays in Finished throughout; cards and summary show both facts')
 

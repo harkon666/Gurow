@@ -284,12 +284,12 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
           tasksLabel="Tasks / Review"
           tasksRequest={coach ? focusTaskId : null}
           editLabel="Manage Access"
-          learning={selected && <EnrolledSkillLearning view={view} skillId={selected.id} skillTitles={skillTitles} taskTitles={taskTitles} coach={coach} enrollmentId={enrollmentId} names={overrideNames} onRecordsStale={loadRecords} />}
+          learning={selected && <><EnrolledSkillLearning view={view} skillId={selected.id} skillTitles={skillTitles} taskTitles={taskTitles} coach={coach} enrollmentId={enrollmentId} names={overrideNames} onRecordsStale={loadRecords} />{learner && <SummaryTaskReviews tasks={selected.tasks} records={shown} />}</>}
           settings={coach && selected && <EnrolledSkillLearning section="settings" view={view} skillId={selected.id} skillTitles={skillTitles} taskTitles={taskTitles} coach={coach} enrollmentId={enrollmentId} names={overrideNames} onRecordsStale={loadRecords} />}
           history={selected && <EnrolledSkillLearning section="history" view={view} skillId={selected.id} skillTitles={skillTitles} taskTitles={taskTitles} coach={coach} enrollmentId={enrollmentId} names={overrideNames} onRecordsStale={loadRecords} />}
-          // While the board is open, a Task's work and history live in its card details instead, so one
-          // private draft is never edited in two places; the summary reads it again when the board closes.
-          renderTaskExtra={(taskId) => boards.openId ? null : (
+          // The summary's Tasks view exists only where there is no board (the Coach's Review): a learner
+          // works on a Task in their board's card details, so one private draft is never edited in two places.
+          renderTaskExtra={(taskId) => (
             <EnrolledTaskLearning
               key={taskId}
               accountId={accountId}
@@ -372,6 +372,27 @@ const LATEST_TONE: Record<TaskReviewState['latest']['kind'], string> = {
   approval: 'text-emerald-300 border-emerald-800/70',
   approval_revoked: 'text-red-300 border-red-900/70',
   superseded: 'text-slate-400 border-slate-700',
+}
+
+/**
+ * The learner's Skill summary lists each Task's review state (UX05 AC5), read-only: the same
+ * two facts as its board card, whatever its column. Work is sent from the board's Task details.
+ */
+function SummaryTaskReviews({ tasks, records }: { tasks: PathSkill['tasks']; records: EnrollmentLearningState | null }) {
+  if (tasks.length === 0) return null
+  return (
+    <section id="summary-task-reviews" aria-labelledby="summary-task-reviews-heading" className="space-y-1.5">
+      <h4 id="summary-task-reviews-heading" className="text-xs font-semibold uppercase tracking-wider text-slate-400">Review state</h4>
+      <ul className="space-y-1.5">
+        {tasks.map((task) => (
+          <li key={task.id} className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-200">
+            <span className="min-w-0 break-words">{task.title}</span>
+            <ReviewStateBadges id={`summary-review-state-${task.id}`} review={taskReviewState(records, task.id)} />
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
 }
 
 /** The two review facts of one Task, as separate badges; nothing until the records are read. */

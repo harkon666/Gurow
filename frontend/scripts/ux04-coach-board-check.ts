@@ -25,7 +25,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type BrowserContext, type HTTPRequest, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
-import { selectSkillFromList } from './editor-navigation'
+import { closeSummaryBoard, openCardDetails, openSkillView, selectSkillFromList } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -325,14 +325,22 @@ export async function main() {
     board = await synced(coach, V)
     check(same(arrangement(board), [`Ideas:${examples}`, 'In preparation:', `Ready:${drills},${reading}`]), `drag across columns: ${JSON.stringify(arrangement(board))}`)
     check((await storedDoc()).application.skills.every((s: any) => s.tasks.every((t: any) => s.id === V ? [drills, reading, examples].includes(t.id) : t.id === matrix)), 'a board move changed a Task\'s Skill')
-    // The Draft's other authoring controls are still reachable from the summary.
+    // The Draft's Skill rules are in the summary's Edit view; each Task's Required setting and reward in its board details.
     await closeBoard(coach)
-    check(await visible(coach, '#draft-rules') && await visible(coach, `#task-edit-required-${drills}`), 'Skill rules or the Required setting became unreachable')
-    // The summary, mounted behind the board meanwhile, shows the values the board's details saved.
-    const summaryReward = await coach.$eval(`#task-xp-reward-${examples}`, (el) => (el as HTMLInputElement).value)
-    const summaryRequired = await coach.$eval(`#task-edit-required-${examples}`, (el) => (el as HTMLInputElement).checked)
-    const summaryTitle = await coach.$eval(`#task-edit-title-${examples}`, (el) => (el as HTMLInputElement).value)
-    check(summaryReward === '15' && !summaryRequired && summaryTitle === 'Solved examples', `the summary shows stale Task values after board edits: reward ${summaryReward}, required ${summaryRequired}, title ${summaryTitle}`)
+    await openSkillView(coach, 'edit')
+    check(await visible(coach, '#draft-rules'), 'Skill rules became unreachable')
+    await openSkillView(coach, 'summary')
+    // Reopened details show the values the earlier details saved through the Draft.
+    await activate(coach, '#open-board-btn')
+    await coach.waitForSelector('#task-board[open] #board-columns > section')
+    await openCardDetails(coach, drills)
+    check(await visible(coach, `#board-task-required-${drills}`), 'the Required setting became unreachable')
+    await openCardDetails(coach, examples)
+    const shownReward = await coach.$eval(`#board-task-xp-reward-${examples}`, (el) => (el as HTMLInputElement).value)
+    const shownRequired = await coach.$eval(`#board-task-required-${examples}`, (el) => (el as HTMLInputElement).checked)
+    const shownTitle = await coach.$eval('#card-edit-title', (el) => (el as HTMLInputElement).value)
+    check(shownReward === '15' && !shownRequired && shownTitle === 'Solved examples', `reopened details show stale Task values: reward ${shownReward}, required ${shownRequired}, title ${shownTitle}`)
+    await closeSummaryBoard(coach)
     pass('AC2 required title with feedback; description; blank-title edit refused; Required→Enrichment and reward saved through the Draft and shown on the card; keyboard and pointer moves persist; Task Skills unchanged; Draft rules reachable')
 
     // ---- AC3: add, rename, reorder and remove columns; the last column stays; reload restores everything.
@@ -436,10 +444,12 @@ export async function main() {
     await coach.waitForSelector('#save-status[data-state="saved"]')
     check(!(await storedTasks(V)).some((t) => t.id === reading) && !(await storedBoard(V)).some((c) => c.taskIds.includes(reading)), 'the archived Task stayed in the Draft or on its board')
     check(same(await versionContent(v1.id), v1Before) && same(await learnerState(), learnerBefore), 'archival changed Version 1 or the learner')
-    if (await visible(coach, '#btn-close-card-details')) await activate(coach, '#btn-close-card-details')
-    await closeBoard(coach)
+    // Archiving reloads the Draft (closing the board when it clears the selection); its history keeps the Task.
+    await closeSummaryBoard(coach)
     await selectSkillFromList(coach, V)
+    await openSkillView(coach, 'history')
     await coach.waitForSelector(`#retained-task-${reading}`)
+    await openSkillView(coach, 'summary')
     // The other tab still shows the archived Task: its move conflicts, and reapplying cannot bring it back.
     current = other
     await other.bringToFront()

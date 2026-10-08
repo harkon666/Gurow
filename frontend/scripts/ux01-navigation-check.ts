@@ -21,6 +21,7 @@ import { createServer } from 'node:net'
 import path from 'node:path'
 import puppeteer, { type Browser, type HTTPRequest, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
+import { closeSummaryBoard, editBoardTask, openSkillView, openTask } from './editor-navigation'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
@@ -144,7 +145,12 @@ async function shell(page: Page, author: boolean) {
   await page.waitForFunction(() => document.activeElement?.id === 'btn-skill-list')
 }
 async function closeDetails(page: Page) {
-  await page.keyboard.press('Escape')
+  // Escape returns from a summary view (Edit, prerequisites, History) to the summary, then closes it.
+  for (let i = 0; i < 3 && await visible(page, '#skill-detail-panel'); i++) {
+    const view = await page.$eval('#skill-detail-panel', (el) => (el as HTMLElement).dataset.view)
+    await page.keyboard.press('Escape')
+    if (view !== 'summary') await page.waitForSelector('#skill-detail-panel[data-view="summary"]')
+  }
   await page.waitForFunction(() => !document.querySelector('#skill-detail-panel')?.getClientRects().length)
   await page.waitForFunction(() => document.activeElement?.id === 'btn-skill-list')
 }
@@ -164,13 +170,22 @@ async function select(page: Page, title: string, task: string, outcome?: string)
   await page.keyboard.press('Enter')
   await page.waitForSelector('#skill-detail-panel', { visible: true })
   check((await text(page, '#selected-skill-title')) === title, `search selected the wrong Skill, wanted ${title}`)
-  await page.waitForSelector(`#task-container-${task}`, { visible: true })
-  if (outcome) {
-    const shown = await value(page, '#skill-outcome-input').catch(() => text(page, '#skill-detail-panel'))
-    check(shown.includes(outcome), 'summary lost the learning outcome')
-  }
-  check(await visible(page, '#skill-prerequisites-section'), 'summary lost relationships')
+  if (outcome) check((await text(page, '#skill-detail-panel')).includes(outcome), 'summary lost the learning outcome')
+  check(/Requires/.test(await text(page, '#skill-detail-panel')), 'summary lost relationships')
   check(!await visible(page, '#skill-prerequisite-list'), 'list remains open behind the selected summary')
+  // Its Tasks are reachable from the summary: on its board where the context has one, otherwise in its Tasks view.
+  await openTask(page, task)
+  await closeSummaryBoard(page)
+  await openSkillView(page, 'summary')
+}
+/** Edits the selected Skill's learning outcome in its Edit view: a document edit saved like any other. */
+async function editOutcome(page: Page, next: string) {
+  await openSkillView(page, 'edit')
+  await setValue(page, '#skill-outcome-input', next)
+}
+async function shownOutcome(page: Page) {
+  await openSkillView(page, 'edit')
+  return value(page, '#skill-outcome-input')
 }
 async function narrow(page: Page, title: string, task: string) {
   if (await visible(page, '#skill-detail-panel')) await closeDetails(page)
@@ -301,12 +316,15 @@ async function main() {
     await owner.keyboard.press('ArrowDown')
     await owner.keyboard.press('Enter')
     await owner.waitForFunction(() => document.querySelector('#selected-skill-title')?.textContent === 'UX01 scratch')
+    // Deletion is an infrequent Skill action, behind the summary's Skill actions menu.
+    await tabActivate(owner, '#skill-actions-btn')
     await tabActivate(owner, '#delete-skill-btn')
     await saved(owner, ++revision)
     check(!(await ok(owner, personalRoute)).application.skills.some((s: any) => s.id === scratch.id), 'authorized unused-Skill deletion did not persist')
     await select(owner, 'Vectors', p.ta, 'Add vectors confidently')
     await cleanChrome(owner, [pathId, p.a, p.b, p.ta, p.tb], true)
     await select(owner, 'Matrices', p.tb, 'Compose linear maps')
+    await openSkillView(owner, 'prerequisites')
     check((await text(owner, '#incoming-prerequisites-list')).includes('Vectors'), 'selected Matrices has wrong prerequisites')
     // Rejected connections must explain the problem without exposing engine IDs,
     // in either the summary or the canvas toast behind it.
@@ -328,7 +346,7 @@ async function main() {
     await narrow(owner, 'Vectors', p.ta)
     pass('AC1/3/4 personal: closed labeled shell, searchable keyboard selection of two Skills, correct Tasks/relationships, focus return and full-screen details')
 
-    // A real Task edit is held in transit: saving cannot be confused with saved.
+    // A real document edit (the learning outcome) is held in transit: saving cannot be confused with saved.
     await select(owner, 'Vectors', p.ta)
     let held: HTTPRequest | null = null
     let hold = true
@@ -338,11 +356,11 @@ async function main() {
       void request.continue()
     }
     owner.on('request', intercept)
-    await setValue(owner, `#task-edit-title-${p.ta}`, 'Saved through the summary')
+    await editOutcome(owner, 'Saved through the summary')
     const savingText = await state(owner, 'saving')
     for (let i = 0; i < 100 && !held; i++) await pause(20)
     check(held, 'saving state was not backed by a held write')
-    check((await ok(owner, personalRoute)).application.skills.find((s: any) => s.id === p.a).tasks.find((t: any) => t.id === p.ta).title === 'Vector drills', 'held save reached PostgreSQL')
+    check((await ok(owner, personalRoute)).application.skills.find((s: any) => s.id === p.a).outcome === 'Add vectors confidently', 'held save reached PostgreSQL')
     hold = false
     await (held as HTTPRequest).continue()
     await saved(owner, ++revision)
@@ -351,11 +369,11 @@ async function main() {
     await owner.setRequestInterception(false)
 
     await owner.setOfflineMode(true)
-    await setValue(owner, `#task-edit-title-${p.ta}`, 'Recovered after offline save')
+    await editOutcome(owner, 'Recovered after offline save')
     const failedText = await state(owner, 'failed')
     await owner.setOfflineMode(false)
-    check((await ok(owner, personalRoute)).application.skills.find((s: any) => s.id === p.a).tasks.find((t: any) => t.id === p.ta).title === 'Saved through the summary', 'offline edit was stored')
-    check(await value(owner, `#task-edit-title-${p.ta}`) === 'Recovered after offline save', 'failed save lost local Task')
+    check((await ok(owner, personalRoute)).application.skills.find((s: any) => s.id === p.a).outcome === 'Saved through the summary', 'offline edit was stored')
+    check(await shownOutcome(owner) === 'Recovered after offline save', 'failed save lost local Task')
     await closeDetails(owner)
     await activate(owner, '#retry-save-btn')
     await saved(owner, ++revision)
@@ -364,39 +382,42 @@ async function main() {
     const accepted = await ok(owner, personalRoute)
     await ok(owner, `${personalRoute}/document`, 'PUT', { ...payload(accepted), goal: 'Accepted elsewhere' })
     await select(owner, 'Vectors', p.ta)
-    await setValue(owner, `#task-edit-title-${p.ta}`, 'Reapplied Task')
+    await editOutcome(owner, 'Reapplied Task')
     const conflictText = await state(owner, 'conflict')
-    check(conflictText !== failedText && await value(owner, `#task-edit-title-${p.ta}`) === 'Reapplied Task', 'conflict indistinguishable or local Task lost')
-    check((await ok(owner, personalRoute)).application.skills.find((s: any) => s.id === p.a).tasks.find((t: any) => t.id === p.ta).title === 'Recovered after offline save', 'stale save overwrote accepted Task')
+    check(conflictText !== failedText && await shownOutcome(owner) === 'Reapplied Task', 'conflict indistinguishable or local Task lost')
+    check((await ok(owner, personalRoute)).application.skills.find((s: any) => s.id === p.a).outcome === 'Recovered after offline save', 'stale save overwrote accepted Task')
     await closeDetails(owner)
     await activate(owner, '#reapply-mine-btn')
     revision += 2
     await saved(owner, revision)
     const merged = await ok(owner, personalRoute)
-    check(merged.learningPath.goal === 'Accepted elsewhere' && merged.application.skills.find((s: any) => s.id === p.a).tasks.find((t: any) => t.id === p.ta).title === 'Reapplied Task', 'reapply did not preserve accepted goal and local Task')
+    check(merged.learningPath.goal === 'Accepted elsewhere' && merged.application.skills.find((s: any) => s.id === p.a).outcome === 'Reapplied Task', 'reapply did not preserve accepted goal and local Task')
     await open(owner, `/paths/${pathId}`)
     await select(owner, 'Vectors', p.ta)
-    check(await value(owner, `#task-edit-title-${p.ta}`) === 'Reapplied Task', 'newly loaded summary lost reapplied Task')
+    check(await shownOutcome(owner) === 'Reapplied Task', 'newly loaded summary lost reapplied Task')
     check(await value(owner, '#path-goal-input') === 'Accepted elsewhere', 'newly loaded Path lost accepted goal')
     pass('AC5 saving/failed/conflict: real persisted writes, failed local work, actual Retry/Reapply, semantic reload')
 
     // A real backend validation rejection, not a mocked response.
-    const refusedTitle = 'x'.repeat(201) // API limit is 200; empty Task titles are valid drafts.
-    await setValue(owner, `#task-edit-title-${p.ta}`, refusedTitle)
+    const refusedTitle = 'x'.repeat(2001) // API limit is 2,000; an empty outcome is a valid draft.
+    await editOutcome(owner, refusedTitle)
     await state(owner, 'rejected')
-    check(await value(owner, `#task-edit-title-${p.ta}`) === refusedTitle, 'refused draft was discarded')
-    check((await ok(owner, personalRoute)).application.skills.find((s: any) => s.id === p.a).tasks.find((t: any) => t.id === p.ta).title === 'Reapplied Task', 'rejected save changed backend state')
+    check(await shownOutcome(owner) === refusedTitle, 'refused draft was discarded')
+    check((await ok(owner, personalRoute)).application.skills.find((s: any) => s.id === p.a).outcome === 'Reapplied Task', 'rejected save changed backend state')
     await closeDetails(owner)
     await activate(owner, '#retry-save-btn')
     await state(owner, 'rejected')
     await select(owner, 'Vectors', p.ta)
-    await setValue(owner, `#task-edit-title-${p.ta}`, 'Validated Task')
+    await editOutcome(owner, 'Validated Task')
     await saved(owner, ++revision)
-    await setValue(owner, `#task-reward-${p.ta}`, '7')
-    await activate(owner, `#task-reward-${p.ta}-set`)
+    // A personal Task's reward and completion are worked in its board details.
+    await openTask(owner, p.ta)
+    await setValue(owner, `#board-task-reward-${p.ta}`, '7')
+    await activate(owner, `#board-task-reward-${p.ta}-set`)
     await owner.waitForFunction(() => !document.querySelector('#learning-pending'))
-    await tabActivate(owner, `#task-completion-btn-${p.ta}`)
-    await owner.waitForSelector(`#task-learning-${p.ta}[data-completed="true"]`)
+    await tabActivate(owner, `#board-task-completion-btn-${p.ta}`)
+    await owner.waitForSelector(`#board-task-learning-${p.ta}[data-completed="true"]`)
+    await closeSummaryBoard(owner)
     check((await ok(owner, `${personalRoute}/learning-state`)).learningState.xp === 7, 'summary completion/reward did not change actual Path XP')
     pass('AC2/5 real rejected save stays local and retries honestly; corrected save, reward setting and completion persist')
 
@@ -411,9 +432,11 @@ async function main() {
     await open(coach, `/coach/paths/${coachPath}`)
     await shell(coach, true)
     await select(coach, 'Vectors', c.ta, 'Add vectors confidently')
-    await setValue(coach, `#task-edit-title-${c.ta}`, 'Coach-authored Task')
+    await openTask(coach, c.ta)
+    await editBoardTask(coach, c.ta, { title: 'Coach-authored Task' })
     await saved(coach, draftSeed.learningPath.revision + 1)
-    check(await visible(coach, `#task-edit-required-${c.ta}`), 'Draft Required/Enrichment setting became unreachable')
+    check(await visible(coach, `#board-task-required-${c.ta}`), 'Draft Required/Enrichment setting became unreachable')
+    await closeSummaryBoard(coach)
     await cleanChrome(coach, [coachPath, c.a, c.b, c.ta, c.tb], true)
     await narrow(coach, 'Matrices', c.tb)
     const savedDraft = await ok(coach, `/coach/learning-paths/${coachPath}`)
@@ -435,12 +458,14 @@ async function main() {
     await select(learner, 'Matrices', c.tb, 'Compose linear maps')
     await select(learner, 'Vectors', c.ta, 'Add vectors confidently')
     check(!await visible(learner, `#task-edit-title-${c.ta}`) && !await visible(learner, '#delete-skill-btn'), 'learner can edit official definitions')
+    await openTask(learner, c.ta)
     await learner.waitForSelector(`#task-work-${c.ta}[data-draft-state="ready"]`)
     await setValue(learner, `#task-work-text-${c.ta}`, 'UX01 evidence: (1, 2) + (2, 3) = (3, 5)')
     await tabActivate(learner, `#task-work-send-${c.ta}`)
     await learner.waitForSelector(`#task-work-${c.ta}[data-status="sent"]`)
     await learner.waitForSelector(`#task-history-${c.ta}[data-revisions="1"]`)
     check(/Revision\s+1/.test(await text(learner, `#task-history-${c.ta}`)), 'Submission Revision history was hidden with technical save revisions')
+    await closeSummaryBoard(learner)
     await cleanChrome(learner, [enrollment, version.id, c.a, c.b, c.ta], true)
     await narrow(learner, 'Vectors', c.ta)
     pass('AC1/2/3/4/6 learner without WebGPU: permitted shell, two Skills and Tasks, actual Submission, meaningful Version/Revision and narrow details')
@@ -472,15 +497,15 @@ async function main() {
     const beforeFailure = await ok(owner, personalRoute)
     await failRenderer(owner)
     await select(owner, 'Vectors', p.ta)
-    check(await value(owner, `#task-edit-title-${p.ta}`) === 'Validated Task', 'renderer failure lost CPU Task')
-    await setValue(owner, `#task-edit-title-${p.ta}`, 'Edited with renderer down')
+    check(await shownOutcome(owner) === 'Validated Task', 'renderer failure lost CPU Task')
+    await editOutcome(owner, 'Edited with renderer down')
     await saved(owner, ++revision)
     await retryRenderer(owner, '#path-editor')
     const afterFailure = await ok(owner, personalRoute)
     check(same(beforeFailure.editor, afterFailure.editor), 'renderer failure/retry mutated cards or prerequisites')
     await open(owner, `/paths/${pathId}`)
     await select(owner, 'Vectors', p.ta)
-    check(await value(owner, `#task-edit-title-${p.ta}`) === 'Edited with renderer down', 'reloaded document lost edit made during failure')
+    check(await shownOutcome(owner) === 'Edited with renderer down', 'reloaded document lost edit made during failure')
     pass('AC6 injected failure: CPU Task/graph survive, list edits persist, actual renderer Retry and semantic reload')
 
     const gpuLearner = await newPage(browser, errors)
@@ -489,6 +514,7 @@ async function main() {
     await open(gpuLearner, `/enrollments/${enrollment}`, '#enrolled-version')
     await failRenderer(gpuLearner)
     await select(gpuLearner, 'Vectors', c.ta)
+    await openTask(gpuLearner, c.ta)
     await gpuLearner.waitForSelector(`#task-work-${c.ta}[data-draft-state="ready"]`)
     await setValue(gpuLearner, `#task-work-text-${c.ta}`, 'Revision two sent while renderer is unavailable')
     await tabActivate(gpuLearner, `#task-work-send-${c.ta}`)
@@ -500,6 +526,7 @@ async function main() {
     await open(coach, `/enrollments/${enrollment}`, '#enrolled-version')
     await failRenderer(coach)
     await select(coach, 'Vectors', c.ta)
+    await openTask(coach, c.ta)
     await coach.waitForSelector(`#task-review-${c.ta}[data-target-revision="2"]`)
     await tabActivate(coach, `#task-review-approve-${c.ta}`)
     await coach.waitForSelector(`#task-review-${c.ta}[data-status="recorded"][data-refresh="read"]`)
@@ -507,6 +534,7 @@ async function main() {
     await retryRenderer(coach, '#enrolled-version')
     await open(gpuLearner, `/enrollments/${enrollment}`, '#enrolled-version')
     await select(gpuLearner, 'Vectors', c.ta)
+    await openTask(gpuLearner, c.ta)
     await gpuLearner.waitForSelector(`#task-history-${c.ta}[data-revisions="2"]`)
     check((await text(gpuLearner, `#task-history-${c.ta}`)).includes('Revision two sent while renderer is unavailable'), 'reload lost Submission sent during renderer failure')
     pass('AC6 renderer-down learner and Coach: keyboard Submission Revision 2 and Approval, retry both renderers, history after reload, no duplicate XP')

@@ -14,7 +14,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import path from 'node:path'
 import puppeteer, { type Page } from 'puppeteer-core'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
-import { closeEditorPanels, openNewSkill, openSkillList } from './editor-navigation'
+import { addBoardTask, closeEditorPanels, closeSummaryBoard, openCardDetails, openNewSkill, openSkillList, openSkillView, openSummaryBoard, openTask } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -119,18 +119,19 @@ async function select(page: Page, id: string) {
 }
 /** Adds a Task to the selected Skill with its Draft rules. */
 async function addTask(page: Page, title: string, required: boolean, xpReward: number) {
-  const before = await page.$$eval('[id^="task-edit-title-"]', (els) => els.map((el) => el.id))
-  await page.click('#add-task-btn')
-  await page.waitForFunction((n: number) => document.querySelectorAll('[id^="task-edit-title-"]').length === n, {}, before.length + 1)
-  const id = (await page.$$eval('[id^="task-edit-title-"]', (els) => els.map((el) => el.id))).find((x) => !before.includes(x))!.replace('task-edit-title-', '')
-  await setValue(page, `#task-edit-title-${id}`, title)
-  check(await checked(page, `#task-edit-required-${id}`), 'a new Draft Task does not start as Required')
-  if (!required) await page.click(`#task-edit-required-${id}`)
-  await setValue(page, `#task-xp-reward-${id}`, String(xpReward))
+  // Draft Tasks are authored on the Skill's preparation board; Required and reward are set in their details.
+  await openSummaryBoard(page)
+  const id = await addBoardTask(page, title)
+  await openCardDetails(page, id)
+  check(await checked(page, `#board-task-required-${id}`), 'a new Draft Task does not start as Required')
+  if (!required) await page.click(`#board-task-required-${id}`)
+  await setValue(page, `#board-task-xp-reward-${id}`, String(xpReward))
+  await closeSummaryBoard(page)
   return id
 }
 async function connect(page: Page, from: string, to: string) {
   await select(page, from)
+  await openSkillView(page, 'prerequisites')
   await page.select('#connect-skill-select', to)
   await page.click('#btn-add-dependent')
 }
@@ -207,12 +208,15 @@ async function main() {
     await addTask(page, 'Vector exercises', true, 20)
     await addTask(page, 'Read chapter 1', false, 5)
     const matrices = await addSkill(page, 'Matrices', 'Multiply matrices')
+    await openSkillView(page, 'edit')
     await setValue(page, '#skill-threshold-input', '20')
     await addTask(page, 'Matrix exercises', true, 30)
     const history = await addSkill(page, 'History of algebra', 'Place results in history')
+    await openSkillView(page, 'edit')
     await page.click('#skill-optional-input')
     await addTask(page, 'Essay', false, 10)
     const eigen = await addSkill(page, 'Eigenvalues', 'Find eigenvalues')
+    await openSkillView(page, 'edit')
     await setValue(page, '#skill-threshold-input', '50')
     await connect(page, vectors, matrices)
     await connect(page, matrices, eigen)
@@ -243,6 +247,7 @@ async function main() {
     check(optionalRefusal.includes('Optional Skill “History of algebra” cannot be a Prerequisite of required Skill “Matrices”'), `optional refusal: ${optionalRefusal}`)
     check(JSON.stringify(await graph(page)) === JSON.stringify(graphBefore), 'the forbidden connection reached the graph')
     await select(page, vectors)
+    await openSkillView(page, 'edit')
     await page.click('#skill-optional-input')
     await page.waitForFunction(() => document.querySelector('#cycle-rejection-alert')?.textContent?.includes('“Vectors” cannot be a Prerequisite of required Skill “Matrices”'))
     check(!(await checked(page, '#skill-optional-input')), 'Vectors became Optional although it leads to a required Skill')
@@ -293,13 +298,21 @@ async function main() {
     await page.reload({ waitUntil: 'networkidle0' })
     await openEditor(page, 4)
     await select(page, history)
+    await openSkillView(page, 'edit')
     check(await checked(page, '#skill-optional-input'), 'History of algebra is no longer Optional after reload')
     await select(page, matrices)
+    await openSkillView(page, 'edit')
     check(await fieldValue(page, '#skill-threshold-input') === '20', 'Matrices lost its threshold')
     await select(page, vectors)
     const vectorTasks = doc.application.skills[0].tasks
-    check(await checked(page, `#task-edit-required-${vectorTasks[0].id}`) && !(await checked(page, `#task-edit-required-${vectorTasks[1].id}`)), 'Required/Enrichment did not reopen')
-    check(await fieldValue(page, `#task-xp-reward-${vectorTasks[0].id}`) === '20' && await fieldValue(page, `#task-xp-reward-${vectorTasks[1].id}`) === '5', 'rewards did not reopen')
+    const reopened: [boolean, string][] = []
+    for (const task of vectorTasks) {
+      await openTask(page, task.id)
+      reopened.push([await checked(page, `#board-task-required-${task.id}`), await fieldValue(page, `#board-task-xp-reward-${task.id}`)])
+    }
+    await closeSummaryBoard(page)
+    check(reopened[0][0] && !reopened[1][0], 'Required/Enrichment did not reopen')
+    check(reopened[0][1] === '20' && reopened[1][1] === '5', 'rewards did not reopen')
     check(JSON.stringify(await graph(page)) === JSON.stringify(graphBefore), 'Prerequisites did not reopen')
     const personalCalls = coachRequests.filter((request) => request.includes('/personal/'))
     check(personalCalls.length === 0, `coach pages read personal data: ${personalCalls}`)

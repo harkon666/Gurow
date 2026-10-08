@@ -22,7 +22,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type BrowserContext, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
-import { closeEditorPanels, openCoachReview, openSkillList, readSkillStatus } from './editor-navigation'
+import { closeEditorPanels, openCoachReview, openSkillList, readSkillStatus, openTask, closeSummaryBoard, openSkillView } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -45,6 +45,12 @@ function check(condition: unknown, message: string): asserts condition {
 const resend = startResendStandIn()
 
 /** The latest emailed link to `to` with a subject starting `subject`, waiting for its delivery. */
+/** Shows one Task's own controls when they are not on screen: a learner's board details or the Coach's Tasks view, one Task at a time. */
+async function at(page: Page, taskId: string) {
+  if (!await page.$(`#task-learning-${taskId}`)) await openTask(page, taskId)
+  // A Task just opened reads its private draft first; its controls settle once that read answers.
+  if (await page.$(`#task-work-${taskId}`)) await page.waitForSelector(`#task-work-${taskId}:not([data-draft-state="loading"])`)
+}
 async function emailedLink(to: string, subject: string, after = 0) {
   for (let i = 0; i < 100; i++) {
     const fresh = resend.sent.slice(after).filter((e) => e.to.some((a) => a.toLowerCase() === to.toLowerCase()) && e.subject.startsWith(subject))
@@ -119,8 +125,12 @@ async function keyboardSelect(page: Page, index: number, id: string) {
   await waitSelected(page, id)
 }
 const work = (taskId: string) => `#task-work-${taskId}`
-const draftReady = (page: Page, taskId: string) => page.waitForSelector(`${work(taskId)}[data-draft-state="ready"]`)
+async function draftReady(page: Page, taskId: string) {
+  await at(page, taskId)
+  await page.waitForSelector(`${work(taskId)}[data-draft-state="ready"]`)
+}
 async function history(page: Page, taskId: string, revisions: number) {
+  await at(page, taskId)
   await page.waitForSelector(`#task-history-${taskId}[data-state="${revisions === 0 ? 'none' : 'ready'}"][data-revisions="${revisions}"]`)
   return page.$$eval(`#task-history-${taskId} li[id^="revision-"]`, (els) => els.map((el) => ({
     number: Number((el as HTMLElement).dataset.revisionNumber),
@@ -129,6 +139,7 @@ async function history(page: Page, taskId: string, revisions: number) {
   })))
 }
 async function waitStatus(page: Page, taskId: string, kind: string) {
+  await at(page, taskId)
   await page.waitForSelector(`${work(taskId)}[data-status="${kind}"]`).catch(async () => {
     throw new Error(`task ${taskId} did not reach status ${kind} (status ${(await data(page, work(taskId))).status}: ${await text(page, work(taskId))})`)
   })
@@ -188,6 +199,7 @@ async function accept(learner: Page, link: string) {
 }
 /** The learner sends a Task's work from her sidebar: the draft text replaced, then Send. */
 async function sendFromUi(page: Page, taskId: string, input: string) {
+  await at(page, taskId)
   await draftReady(page, taskId)
   await typeInto(page, `#task-work-text-${taskId}`, input, true)
   await page.$eval(`#task-work-send-${taskId}`, (el) => el.scrollIntoView({ block: 'center' }))
@@ -215,7 +227,10 @@ async function lifecycleLines(page: Page) {
   return page.$$eval('#lifecycle-history li', (els) => els.map((el) => ({ action: (el as HTMLElement).dataset.action, text: el.textContent?.trim() ?? '' })))
 }
 const lockReasons = (page: Page) => page.$$eval('#lock-reasons li', (els) => els.map((el) => el.textContent?.trim() ?? ''))
-const textareaValue = (page: Page, taskId: string) => page.$eval(`#task-work-text-${taskId}`, (el) => ({ value: (el as HTMLTextAreaElement).value, disabled: (el as HTMLTextAreaElement).disabled }))
+const textareaValue = async (page: Page, taskId: string) => {
+  await at(page, taskId)
+  return page.$eval(`#task-work-text-${taskId}`, (el) => ({ value: (el as HTMLTextAreaElement).value, disabled: (el as HTMLTextAreaElement).disabled }))
+}
 
 async function main() {
   if (!process.argv.includes('--skip-build')) {
@@ -311,10 +326,14 @@ async function main() {
     await keyboardSelect(lena, 0, la.vectors)
     const sent = await sendFromUi(lena, la.drills, 'Vector drills 1–10, with working.')
     check(sent === 1, `Lena's drills are Revision ${sent}`)
+    await at(lena, la.drills)
     await typeInto(lena, `#task-work-text-${la.drills}`, 'Private notes for the drills', true)
+    await at(lena, la.drills)
     await lena.click(`#task-work-save-${la.drills}`)
+    await at(lena, la.drills)
     await lena.waitForSelector(`${work(la.drills)}[data-unsaved="false"]`)
     await draftReady(lena, la.extension)
+    await at(lena, la.extension)
     check((await data(lena, work(la.extension))).startBlocked === 'false' && !(await textareaValue(lena, la.extension)).disabled, 'the untouched extension cannot be started while active')
     check((await text(lena, '#participation-open')) === 'Stop participating…' && (await data(lena, PARTICIPATION)).action === 'deactivate', `Lena's participation control: ${await text(lena, PARTICIPATION)}`)
     pass('active work', 'Lena sends Vector drills Revision 1 from the UI and saves a private draft "Private notes for the drills"; the untouched Vector extension is editable; her page offers "Stop participating…"')
@@ -353,13 +372,17 @@ async function main() {
     await draftReady(lena, la.drills)
     await draftReady(lena, la.extension)
     check((await text(lena, '#skill-access-state')) === 'Locked' && same(await lockReasons(lena), [INACTIVE_REASON]), `Lena's inactive Vectors: ${await text(lena, '#skill-access')}`)
+    await at(lena, la.drills)
     check((await data(lena, work(la.drills))).canSend === 'false' && (await text(lena, `#task-work-blocked-${la.drills}`)).startsWith('This Enrollment is inactive'), 'Lena can send while inactive')
     const draft = await textareaValue(lena, la.drills)
     check(draft.value === 'Private notes for the drills' && !draft.disabled, `Lena's draft while inactive: ${JSON.stringify(draft)}`)
+    await at(lena, la.drills)
     await typeInto(lena, `#task-work-text-${la.drills}`, ' (kept)')
+    await at(lena, la.drills)
     await lena.click(`#task-work-save-${la.drills}`)
     await waitStatus(lena, la.drills, 'saved')
     const extension = await textareaValue(lena, la.extension)
+    await at(lena, la.extension)
     check((await data(lena, work(la.extension))).startBlocked === 'true' && extension.disabled && (await text(lena, `#task-work-start-blocked-${la.extension}`)).includes('a new Task cannot be started'), `the extension while inactive: ${JSON.stringify(extension)}`)
     const kept = await history(lena, la.drills, 1)
     check(kept[0].status === 'pending' && kept[0].text.includes('Vector drills 1–10, with working.'), `Lena's sent work while inactive: ${JSON.stringify(kept)}`)
@@ -384,8 +407,11 @@ async function main() {
     await openCoachReview(carla)
     await carla.waitForSelector(`#awaiting-review-${la.drills}[data-revision-number="1"]`)
     await carla.click(`#awaiting-review-${la.drills}`)
+    await at(carla, la.drills)
     await carla.waitForSelector(`#task-review-${la.drills}[data-target-revision="1"]`)
+    await at(carla, la.drills)
     await carla.click(`#task-review-approve-${la.drills}`)
+    await at(carla, la.drills)
     await carla.waitForSelector(`#task-review-${la.drills}[data-status="recorded"][data-refresh="read"]`)
     check(same(await progress(carla), { status: 'inactive', xp: '20', vectors: ['locked', 'not-mastered'], matrices: ['locked', 'not-mastered'] }), `Carla after the Review: ${JSON.stringify(await progress(carla))}`)
     check(same(await progressRows(), { xp: 1, mastery: 0 }) && (await storedEnrollment()).status === 'inactive' && (await storedLifecycle()).length === 1, 'the Review changed participation or recorded no progress')
@@ -456,6 +482,7 @@ async function main() {
     check(same(await progress(lena), { status: 'active', xp: '20', vectors: ['open', 'not-mastered'], matrices: ['override', 'not-mastered'] }) && await lena.$('#participation-inactive') === null, `Lena resumed: ${JSON.stringify(await progress(lena))}`)
     await keyboardSelect(lena, 0, la.vectors)
     check((await history(lena, la.drills, 1))[0].status === 'approval' && (await textareaValue(lena, la.drills)).value === 'Private notes for the drills (kept)', 'Lena\'s approved work or draft was lost')
+    await at(lena, la.extension)
     await lena.waitForSelector(`${work(la.extension)}[data-start-blocked="false"]`)
     check(await sendFromUi(lena, la.extension, 'Exercise 11, solved two ways.') === 1, 'Lena could not send the extension after reactivation')
     await keyboardSelect(lena, 1, la.matrices)
@@ -484,8 +511,11 @@ async function main() {
     await openCoachReview(carla)
     await carla.waitForSelector(`#awaiting-review-${la.extension}[data-revision-number="1"]`)
     await carla.click(`#awaiting-review-${la.extension}`)
+    await at(carla, la.extension)
     await carla.waitForSelector(`#task-review-${la.extension}[data-target-revision="1"]`)
+    await at(carla, la.extension)
     await carla.click(`#task-review-approve-${la.extension}`)
+    await at(carla, la.extension)
     await carla.waitForSelector(`#task-review-${la.extension}[data-status="recorded"][data-refresh="read"]`)
     check(same(await progress(carla), { status: 'inactive', xp: '25', vectors: ['locked', 'mastered'], matrices: ['locked', 'not-mastered'] }) && (await storedEnrollment()).status === 'inactive' && same(await progressRows(), { xp: 2, mastery: 1 }), `Carla after the later Review: ${JSON.stringify(await progress(carla))}`)
     await act(lena)
@@ -542,7 +572,11 @@ async function main() {
       if (page === carla) check(await reachable(carla, '#participation-confirm') && await reachable(carla, '#participation-reason'), 'the reactivation form cannot be reached')
       await keyboardSelect(page, 1, la.matrices)
       await history(page, la.matrixDrills, 1)
-      check(await reachable(page, `#task-history-${la.matrixDrills} li[id^="revision-"]`) && await reachable(page, '#skill-mastery'), 'the learning history cannot be reached beside a long participation history')
+      // The Task's history (in its details) and the Skill's Mastery (in its summary) are each reachable.
+      const taskHistoryReachable = await reachable(page, `#task-history-${la.matrixDrills} li[id^="revision-"]`)
+      await closeSummaryBoard(page)
+      await openSkillView(page, 'summary')
+      check(taskHistoryReachable && await reachable(page, '#skill-mastery'), 'the learning history cannot be reached beside a long participation history')
       await page.setViewport({ width: 1400, height: 900, deviceScaleFactor: 1 })
     }
     pass('long history', 'with 23 records of up to 480 characters on a 560px-high window, the participation block (records open, and Carla\'s reactivation form open) stays within 40% of the window; its latest record, the reason field and Confirm, the Matrix drills revision and the Mastery section can each be scrolled to and reached')

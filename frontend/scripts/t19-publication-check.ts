@@ -15,7 +15,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import path from 'node:path'
 import puppeteer, { type Page } from 'puppeteer-core'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
-import { closeEditorPanels, openNewSkill } from './editor-navigation'
+import { addBoardTask, closeEditorPanels, closeSummaryBoard, editBoardTask, openCardDetails, openNewSkill, openSkillView, openSummaryBoard } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -116,18 +116,19 @@ async function select(page: Page, id: string) {
   await page.mouse.click(point.x, point.y)
   await page.waitForFunction((want: string) => document.querySelector('#selected-skill-id')?.textContent?.trim() === want, {}, id)
 }
+/** Adds a Draft Task through the Skill's preparation board, with its Required setting and reward from its details. */
 async function addTask(page: Page, title: string, required: boolean, xpReward: number) {
-  const before = await page.$$eval('[id^="task-edit-title-"]', (els) => els.map((el) => el.id))
-  await page.click('#add-task-btn')
-  await page.waitForFunction((n: number) => document.querySelectorAll('[id^="task-edit-title-"]').length === n, {}, before.length + 1)
-  const id = (await page.$$eval('[id^="task-edit-title-"]', (els) => els.map((el) => el.id))).find((x) => !before.includes(x))!.replace('task-edit-title-', '')
-  await setValue(page, `#task-edit-title-${id}`, title)
-  if (!required) await page.click(`#task-edit-required-${id}`)
-  await setValue(page, `#task-xp-reward-${id}`, String(xpReward))
+  await openSummaryBoard(page)
+  const id = await addBoardTask(page, title)
+  await openCardDetails(page, id)
+  if (!required) await page.click(`#board-task-required-${id}`)
+  await setValue(page, `#board-task-xp-reward-${id}`, String(xpReward))
+  await closeSummaryBoard(page)
   return id
 }
 async function connect(page: Page, from: string, to: string) {
   await select(page, from)
+  await openSkillView(page, 'prerequisites')
   await page.select('#connect-skill-select', to)
   await page.click('#btn-add-dependent')
 }
@@ -201,9 +202,11 @@ async function main() {
     await addTask(page, 'Vector proofs', true, 30)
     await addTask(page, 'Read chapter 1', false, 50)
     const matrices = await addSkill(page, 'Matrices', 'Multiply matrices')
+    await openSkillView(page, 'edit')
     await setValue(page, '#skill-threshold-input', '100')
     await addTask(page, 'Matrix drills', true, 10)
     const history = await addSkill(page, 'History of algebra', 'Place results in history')
+    await openSkillView(page, 'edit')
     await page.click('#skill-optional-input')
     await addTask(page, 'Essay', true, 50)
     await connect(page, vectors, matrices)
@@ -230,6 +233,7 @@ async function main() {
 
     // 3. Repair the route in the editor and publish: Version 1 becomes read-only.
     await select(page, matrices)
+    await openSkillView(page, 'edit')
     await setValue(page, '#skill-threshold-input', '60')
     await waitForSaved(page)
     check(await page.$('#publication-problems') === null, 'the old refusal is still shown for a changed Draft')
@@ -264,8 +268,11 @@ async function main() {
     const prepared = await readPath(page, pathId)
     check(prepared.draft?.versionNumber === 2 && content(prepared) === content(published), 'the new Draft is not a copy of Version 1')
     await select(page, vectors)
+    await openSkillView(page, 'edit')
     await setValue(page, '#skill-outcome-input', 'Add and scale vectors')
-    await setValue(page, `#task-edit-title-${drills}`, 'Vector drills')
+    await openSummaryBoard(page)
+    await editBoardTask(page, drills, { title: 'Vector drills' })
+    await closeSummaryBoard(page)
     await closeEditorPanels(page)
     await setValue(page, '#path-goal-input', 'Solve linear systems by elimination')
     await waitForSaved(page)

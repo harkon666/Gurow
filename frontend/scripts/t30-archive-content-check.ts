@@ -21,7 +21,7 @@ import path from 'node:path'
 import puppeteer, { type Browser, type HTTPRequest, type Page } from 'puppeteer-core'
 import { startResendStandIn } from '../../backend/test/support/resend-stand-in'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
-import { closeEditorPanels, readSkillStatus, selectSkillFromList } from './editor-navigation'
+import { addBoardTask, closeEditorPanels, closeSummaryBoard, openSkillView, openSummaryBoard, openTask, readSkillStatus, selectSkillFromList } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -149,13 +149,26 @@ async function drag(page: Page, id: string, dx: number, dy: number) {
   await page.mouse.up()
 }
 
-const taskIds = (page: Page) => page.$$eval('[id^="task-container-"]', (els) => els.map((el) => el.id.replace('task-container-', '')))
-/** Starts archiving a Task from the editor: the button, then the in-place confirmation. */
+/** The selected Skill's editable Tasks: the cards of its Task Board. */
+async function taskIds(page: Page) {
+  if (!await page.$('#task-board[open]')) await openSummaryBoard(page)
+  const ids = await page.$$eval('#board-columns [data-card-id]', (els) => els.map((el) => (el as HTMLElement).dataset.cardId!))
+  await closeSummaryBoard(page)
+  return ids
+}
+/** Whether a Task's board details offer archival (rather than deletion), once eligibility is known. */
+async function offersArchive(page: Page, taskId: string) {
+  await openTask(page, taskId)
+  await page.waitForFunction((id: string) => document.querySelector(`#board-task-archive-${id}`) || document.querySelector('#card-delete-btn'), {}, taskId)
+  return await page.$(`#board-task-archive-${taskId}`) !== null
+}
+/** Starts archiving a Task from its board details: the button, then the in-place confirmation. */
 async function startArchive(page: Page, taskId: string) {
-  await page.$eval(`#task-archive-${taskId}`, (el) => el.scrollIntoView({ block: 'center' }))
-  await page.click(`#task-archive-${taskId}`)
-  await page.waitForSelector(`#task-archive-confirm-${taskId}`)
-  await page.click(`#task-archive-confirm-btn-${taskId}`)
+  await openTask(page, taskId)
+  await page.waitForSelector(`#board-task-archive-${taskId}`)
+  await page.click(`#board-task-archive-${taskId}`)
+  await page.waitForSelector(`#board-task-archive-confirm-${taskId}`)
+  await page.click(`#board-task-archive-confirm-btn-${taskId}`)
 }
 async function archiveFromUi(page: Page, taskId: string) {
   await startArchive(page, taskId)
@@ -168,7 +181,13 @@ async function archived(page: Page) {
   check(status.outcome === 'done', `archiving answered: ${await text(page, '#archive-status')}`)
   return text(page, '#archive-status')
 }
-const retainedText = (page: Page, taskId: string) => text(page, `#retained-task-${taskId}`)
+/** An archived Task as the Skill's History lists it. */
+async function retainedText(page: Page, taskId: string) {
+  await closeSummaryBoard(page)
+  await openSkillView(page, 'history')
+  await page.waitForSelector(`#retained-task-${taskId}`)
+  return text(page, `#retained-task-${taskId}`)
+}
 
 /** Linear Algebra, published through Carla's API: Vectors (20-XP Required drills, Enrichment reading) before Matrices. */
 async function publishLinearAlgebra(page: Page, workspaceId: string) {
@@ -257,15 +276,34 @@ async function main() {
     await openEditor(pat, pathUrl, 2)
     const revisionBefore = (await saveState(pat)).revision
     await select(pat, id.ownership)
-    await pat.waitForSelector(`#task-learning-${id.borrow}[data-completed="true"]`)
-    // Archiving waits for the document to be saved.
+    await openTask(pat, id.borrow)
+    await pat.waitForSelector(`#board-task-learning-${id.borrow}[data-completed="true"]`)
+    await closeSummaryBoard(pat)
+    // Archiving waits for the document to be saved: its save is held while the archive control is read.
+    let heldSave: HTTPRequest | null = null
+    const holdSave = (request: HTTPRequest) => {
+      if (request.isInterceptResolutionHandled()) return
+      if (request.method() === 'PUT' && request.url().endsWith('/document') && heldSave === null) heldSave = request
+      else void request.continue()
+    }
+    await pat.setRequestInterception(true)
+    pat.on('request', holdSave)
+    await openSkillView(pat, 'edit')
     await setValue(pat, '#skill-outcome-input', 'Explain moves, borrows and drops')
-    check(await pat.$eval(`#task-archive-${id.borrow}`, (el) => (el as HTMLButtonElement).disabled), 'archiving is offered with unsaved changes')
+    await openTask(pat, id.borrow)
+    await pat.waitForSelector(`#board-task-archive-${id.borrow}`)
+    check(await pat.$eval(`#board-task-archive-${id.borrow}`, (el) => (el as HTMLButtonElement).disabled), 'archiving is offered with unsaved changes')
+    for (let i = 0; i < 100 && heldSave === null; i++) await new Promise((r) => setTimeout(r, 50))
+    pat.off('request', holdSave)
+    await (heldSave as HTTPRequest | null)?.continue()
+    await pat.setRequestInterception(false)
     await waitForSaved(pat)
     // Cancelling the confirmation archives nothing.
-    await pat.click(`#task-archive-${id.borrow}`)
-    await pat.click(`#task-archive-cancel-${id.borrow}`)
-    check(await pat.$(`#task-container-${id.borrow}`) !== null && await pat.$('#archive-status') === null, 'a cancelled archival changed something')
+    await pat.waitForFunction((id: string) => !(document.querySelector(`#board-task-archive-${id}`) as HTMLButtonElement | null)?.disabled, {}, id.borrow)
+    await pat.click(`#board-task-archive-${id.borrow}`)
+    await pat.click(`#board-task-archive-cancel-${id.borrow}`)
+    check(await pat.$(`#board-card-${id.borrow}`) !== null && await pat.$('#archive-status') === null, 'a cancelled archival changed something')
+    await closeEditorPanels(pat)
     // A move to undo later, saved first.
     await drag(pat, id.lifetimes, 120, 60)
     await waitForSaved(pat)
@@ -287,7 +325,7 @@ async function main() {
     for (let i = 0; i < 100 && held === null; i++) await new Promise((r) => setTimeout(r, 50))
     check(held !== null, 'the archival was not sent')
     pat.on('request', record)
-    const locked = await pat.evaluate(() => ['#path-goal-input', '#editor-add-card-btn', '#editor-canvas', '#skill-outcome-input'].map((sel) => Boolean(document.querySelector(sel)?.closest('[inert]'))))
+    const locked = await pat.evaluate(() => ['#path-goal-input', '#editor-add-card-btn', '#editor-canvas', '#skill-detail-panel'].map((sel) => Boolean(document.querySelector(sel)?.closest('[inert]'))))
     check((await data(pat, '#path-editor')).reapplying === 'true' && locked.every(Boolean), `the editor is not locked while archiving: ${locked}`)
     await pat.keyboard.down('Control')
     await pat.keyboard.press('z')
@@ -314,8 +352,8 @@ async function main() {
     await pat.waitForFunction(() => document.querySelector('#kept-work [data-kept-entry]') === null)
     await selectSkillFromList(pat, id.ownership)
     check(JSON.stringify(await taskIds(pat)) === JSON.stringify([id.chapter]), `Ownership's editable Tasks: ${await taskIds(pat)}`)
-    await pat.waitForSelector(`#retained-task-${id.borrow}`)
     check(await retainedText(pat, id.borrow) === 'Borrow checker exercises · Completed · 20 XP still counted', `retained: ${await retainedText(pat, id.borrow)}`)
+    await openSkillView(pat, 'summary')
     check((await data(pat, '#path-xp')).xp === '20' && (await data(pat, '#skill-mastery')).mastery === 'declared', 'archiving changed XP or Mastery')
     check((await readSkillStatus(pat, `#skill-status-${id.lifetimes}`)).access !== 'locked', 'Lifetimes locked after archiving')
     pass('personal archival', `"Borrow checker exercises" archived from rev ${savedRevision} (rev ${savedRevision + 1}, started at ${revisionBefore}); it leaves the editable Tasks and is listed as retained, Completed · 20 XP still counted; XP 20, declared Mastery and Lifetimes' Access unchanged; blocked while unsaved, cancel archives nothing; while the request was held the editor was locked, no save was sent, and the Ctrl+Z it still received was kept as "Moved the card “Lifetimes”"`)
@@ -324,8 +362,10 @@ async function main() {
     await pat.reload({ waitUntil: 'networkidle0' })
     await openEditor(pat, pathUrl, 2)
     await select(pat, id.ownership)
-    await pat.waitForSelector(`#retained-task-${id.borrow}`)
-    check(JSON.stringify(await taskIds(pat)) === JSON.stringify([id.chapter]) && await fieldValue(pat, '#skill-outcome-input') === 'Explain moves, borrows and drops', 'the archived state did not reload')
+    await retainedText(pat, id.borrow)
+    await openSkillView(pat, 'edit')
+    const reloadedOutcome = await fieldValue(pat, '#skill-outcome-input')
+    check(JSON.stringify(await taskIds(pat)) === JSON.stringify([id.chapter]) && reloadedOutcome === 'Explain moves, borrows and drops', 'the archived state did not reload')
     const doc: Doc = await ok(pat, at)
     const records = (await ok(pat, `${at}/learning-state`)).learningState
     const archivedRecord = records.tasks.find((t: any) => t.taskId === id.borrow)
@@ -391,24 +431,27 @@ async function main() {
     const coachUrl = `${ORIGIN}/coach/paths/${la.pathId}`
     await carla.goto(coachUrl, { waitUntil: 'networkidle0' })
     await carla.waitForSelector('#published-version')
-    check(await carla.$('[id^="task-archive-"]') === null, 'published content offers archival')
+    check(await carla.$('[id^="task-archive-"], [id^="board-task-archive-"]') === null, 'published content offers archival')
     await carla.click('#prepare-draft-btn')
     await carla.waitForSelector('#path-editor[data-gpu-status="ready"]', { timeout: 20000 })
     await carla.waitForFunction(() => document.querySelectorAll('[id^="card-label-"]').length === 2)
     await select(carla, la.vectors)
-    await carla.waitForSelector(`#task-archive-${la.reading}`)
-    const before6 = await taskIds(carla)
-    await carla.click('#add-task-btn')
-    await carla.waitForFunction((n: number) => document.querySelectorAll('[id^="task-container-"]').length === n, {}, before6.length + 1)
-    const draftOnly = (await taskIds(carla)).find((x) => !before6.includes(x))!
+    check(await offersArchive(carla, la.reading), 'a published Task is not offered for archival')
+    await closeSummaryBoard(carla)
+    await openSummaryBoard(carla)
+    const draftOnly = await addBoardTask(carla, 'New Task')
+    await closeSummaryBoard(carla)
     await waitForSaved(carla)
-    check(await carla.$(`#task-archive-${draftOnly}`) === null && await carla.$(`#task-archive-${la.drills}`) !== null, 'archival is offered for a Task only this Draft holds, or not for a published one')
+    check(!await offersArchive(carla, draftOnly) && await offersArchive(carla, la.drills), 'archival is offered for a Task only this Draft holds, or not for a published one')
+    await closeSummaryBoard(carla)
     const draftRevision = (await saveState(carla)).revision
     const coachNotice = await archiveFromUi(carla, la.reading)
     check(coachNotice === 'Archived “Read chapter 1” from this Draft. Version 1 and its learners\' work keep it.', `notice: ${coachNotice}`)
     await waitForSaved(carla)
+    // Archiving reloads the Draft, which clears the selection: return to Vectors.
+    await closeEditorPanels(carla)
+    await select(carla, la.vectors)
     check((await saveState(carla)).revision === draftRevision + 1 && !(await taskIds(carla)).includes(la.reading), 'the Draft still holds the archived Task')
-    await carla.waitForSelector(`#retained-task-${la.reading}`)
     check(await retainedText(carla, la.reading) === 'Read chapter 1 · Archived from a Draft · Version 1 keeps it with its learners\' work', `retained: ${await retainedText(carla, la.reading)}`)
     const notPublished = await api(carla, `/coach/learning-paths/${la.pathId}/draft/tasks/${draftOnly}/archive`, 'POST', { expectedRevision: draftRevision + 1 })
     check(notPublished.status === 409 && notPublished.body.error === 'task_not_published', `archiving a Draft-only Task: ${JSON.stringify(notPublished)}`)
@@ -422,7 +465,7 @@ async function main() {
     await carla.waitForSelector('#path-editor[data-gpu-status="ready"]', { timeout: 20000 })
     await carla.waitForFunction(() => document.querySelectorAll('[id^="card-label-"]').length === 2)
     await select(carla, la.vectors)
-    await carla.waitForSelector(`#retained-task-${la.reading}`)
+    await retainedText(carla, la.reading)
     check(!(await taskIds(carla)).includes(la.reading), 'the archived Task came back after reload')
     pass('draft archival', `"Read chapter 1" archived from the Version 2 Draft (rev ${draftRevision} → ${draftRevision + 1}) and listed as kept by Version 1, also after reload; a Draft-only Task offers no archival (API 409 task_not_published); deleting published "Vector drills" 409 task_has_history`)
 
@@ -435,12 +478,13 @@ async function main() {
     check(noDraft.status === 409 && noDraft.body.error === 'no_open_draft', `archiving without a Draft: ${JSON.stringify(noDraft)}`)
     await carla.goto(`${ORIGIN}/coach/versions/${la.versionId}`, { waitUntil: 'networkidle0' })
     await carla.waitForFunction(() => document.querySelectorAll('[id^="card-label-"]').length === 2, { timeout: 20000 })
-    check(await carla.$('[id^="task-archive-"]') === null, 'a published Version page offers archival')
+    check(await carla.$('[id^="task-archive-"], [id^="board-task-archive-"]') === null, 'a published Version page offers archival')
     await act(lena)
     await lena.goto(`${ORIGIN}/enrollments/${enrollment}`, { waitUntil: 'networkidle0' })
     await lena.waitForSelector('#enrolled-version[data-gpu-status="ready"]', { timeout: 20000 })
     await lena.waitForFunction(() => (document.querySelector('#enrollment-xp') as HTMLElement | null)?.dataset.xp === '20')
     await select(lena, la.vectors)
+    await openTask(lena, la.reading)
     await lena.waitForSelector(`#task-history-${la.reading}[data-revisions="1"]`)
     check((await text(lena, `#task-history-${la.reading}`)).includes('Chapter 1 notes'), 'Lena\'s sent work for the archived Task is not shown')
     check(JSON.stringify((await ok(lena, `/enrollments/${enrollment}/learning-state`)).learningState) === JSON.stringify(lenaBefore), 'Lena\'s records changed')
@@ -460,9 +504,8 @@ async function main() {
     await carla.waitForSelector('#path-editor[data-gpu-status="ready"]', { timeout: 20000 })
     await carla.waitForFunction(() => document.querySelectorAll('[id^="card-label-"]').length === 2)
     await select(carla, la.vectors)
-    await carla.waitForSelector(`#retained-task-${la.reading}`)
     check(await retainedText(carla, la.reading) === 'Read chapter 1 · Archived from a Draft · Version 1 keeps it with its learners\' work', `Draft 3 retained: ${await retainedText(carla, la.reading)}`)
-    check(!(await taskIds(carla)).includes(la.reading) && await carla.$(`#task-archive-${la.drills}`) !== null, 'Draft 3 holds the archived Task, or cannot archive a published one')
+    check(!(await taskIds(carla)).includes(la.reading) && await offersArchive(carla, la.drills), 'Draft 3 holds the archived Task, or cannot archive a published one')
     pass('next Draft', 'the Version 3 Draft, prepared after Version 2 left the Task out, still lists "Read chapter 1" as kept by Version 1')
 
     check(errors.length === 0, `page errors: ${errors.join('; ')}`)

@@ -15,7 +15,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import path from 'node:path'
 import puppeteer, { type HTTPRequest, type Page } from 'puppeteer-core'
 import { resolveChromiumExecutable, waitForServerReady } from './benchmark/browser'
-import { closeEditorPanels, openSkillList, openNewSkill, readSkillStatus, clickOutsideDetails } from './editor-navigation'
+import { addBoardTask, closeEditorPanels, closeSummaryBoard, openCardDetails, openSkillList, openNewSkill, openSkillView, openSummaryBoard, readSkillStatus, clickOutsideDetails, type SkillView } from './editor-navigation'
 
 const FRONTEND = path.resolve(import.meta.dir, '..')
 const BACKEND = path.resolve(FRONTEND, '../backend')
@@ -119,31 +119,55 @@ async function select(page: Page, id: string) {
   await page.mouse.click(point.x, point.y)
   await page.waitForFunction((want: string) => document.querySelector('#selected-skill-id')?.textContent?.trim() === want, {}, id)
 }
+/** Adds a Task to the selected Skill through its Task Board, where personal Tasks are authored. */
 async function addTask(page: Page, title: string) {
-  const before = await page.$$eval('[id^="task-edit-title-"]', (els) => els.map((el) => el.id))
-  await page.click('#add-task-btn')
-  await page.waitForFunction((n: number) => document.querySelectorAll('[id^="task-edit-title-"]').length === n, {}, before.length + 1)
-  const id = (await page.$$eval('[id^="task-edit-title-"]', (els) => els.map((el) => el.id))).find((x) => !before.includes(x))!.replace('task-edit-title-', '')
-  await setValue(page, `#task-edit-title-${id}`, title)
+  await openSummaryBoard(page)
+  const id = await addBoardTask(page, title)
+  await closeSummaryBoard(page)
   return id
+}
+/** One view of the selected Skill's summary (Access and Mastery, Edit settings, History), with the board closed. */
+async function atView(page: Page, view: SkillView) {
+  await closeSummaryBoard(page)
+  await openSkillView(page, view)
+}
+/** A personal Task's own controls (reward, completion), in its board details. */
+async function atTask(page: Page, taskId: string) {
+  if (!await page.$('#task-board[open]')) await openSummaryBoard(page)
+  await openCardDetails(page, taskId)
+  await page.waitForSelector(`#board-task-learning-${taskId}`)
+}
+async function toggleCompletion(page: Page, taskId: string) {
+  await atTask(page, taskId)
+  await page.click(`#board-task-completion-btn-${taskId}`)
+}
+async function clickInView(page: Page, view: SkillView, selector: string) {
+  await atView(page, view)
+  await page.click(selector)
 }
 
 /** The panel's view of the selected Skill and the Path, as text and data attributes. */
-const shown = (page: Page) => page.evaluate(() => {
-  const q = (s: string) => document.querySelector(s) as HTMLElement | null
-  return {
-    xp: q('#path-xp')?.dataset.xp ?? null,
-    access: q('#skill-access')?.dataset.access ?? null,
-    accessText: q('#skill-access-state')?.textContent ?? null,
-    reasons: [...document.querySelectorAll('#lock-reasons li')].map((li) => li.textContent ?? ''),
-    mastery: q('#skill-mastery')?.dataset.mastery ?? null,
-    history: [...document.querySelectorAll('#xp-history li')].map((li) => li.textContent ?? ''),
-    pending: q('#learning-pending') !== null,
-    error: q('#learning-error')?.textContent ?? null,
-  }
-})
+const shown = async (page: Page) => {
+  await atView(page, 'history')
+  const history = await page.$$eval('#xp-history li', (els) => els.map((li) => li.textContent ?? ''))
+  await atView(page, 'summary')
+  return { ...await page.evaluate(() => {
+    const q = (s: string) => document.querySelector(s) as HTMLElement | null
+    return {
+      xp: q('#path-xp')?.dataset.xp ?? null,
+      access: q('#skill-access')?.dataset.access ?? null,
+      accessText: q('#skill-access-state')?.textContent ?? null,
+      reasons: [...document.querySelectorAll('#lock-reasons li')].map((li) => li.textContent ?? ''),
+      mastery: q('#skill-mastery')?.dataset.mastery ?? null,
+      pending: q('#learning-pending') !== null,
+      error: q('#learning-error')?.textContent ?? null,
+    }
+  }), history }
+}
 /** Waits until no action is pending, then until the shown records match. */
 async function waitShown(page: Page, want: { xp?: number; access?: string; mastery?: string }) {
+  // Access and Mastery are shown together in the summary view.
+  await atView(page, 'summary')
   await page.waitForFunction((w: { xp?: number; access?: string; mastery?: string }) => {
     const q = (s: string) => document.querySelector(s) as HTMLElement | null
     if (q('#learning-pending')) return false
@@ -152,9 +176,16 @@ async function waitShown(page: Page, want: { xp?: number; access?: string; maste
       (w.mastery === undefined || q('#skill-mastery')?.dataset.mastery === w.mastery)
   }, { timeout: 10000 }, want).catch(async () => { throw new Error(`expected ${JSON.stringify(want)}, page shows ${JSON.stringify(await shown(page))}`) })
 }
-const contribution = (page: Page, task: string) => text(page, `#task-contribution-${task}`)
+const contribution = async (page: Page, task: string) => {
+  await atTask(page, task)
+  return text(page, `#board-task-contribution-${task}`)
+}
 /** Sets a number through its own Set button and waits for the backend to confirm it. */
-async function setNumber(page: Page, id: string, value: number, confirmed = true) {
+async function setNumber(page: Page, number: string, value: number, confirmed = true) {
+  // A Task's reward is set in its board details; a Skill's threshold in its Edit view.
+  let id = number
+  if (number.startsWith('task-reward-')) { await atTask(page, number.slice('task-reward-'.length)); id = `board-${number}` }
+  else if (number === 'xp-threshold-input') await atView(page, 'edit')
   await setValue(page, `#${id}`, String(value))
   await page.click(`#${id}-set`)
   // Set is disabled once the confirmed value equals the typed one and nothing is pending.
@@ -230,12 +261,13 @@ async function main() {
     const lifetimes = await addSkill(page, 'Lifetimes', 'Annotate lifetimes in signatures')
     const annotate = await addTask(page, 'Annotate a parser')
     await select(page, ownership)
+    await openSkillView(page, 'prerequisites')
     await page.select('#connect-skill-select', lifetimes)
     await page.click('#btn-add-dependent')
     await waitForState(page, 'saved')
-    await page.waitForFunction(() => (document.querySelector('[id^="task-learning-"]') as HTMLElement | null)?.dataset.tracked === 'true')
     let authoredRevision = (await saveState(page)).revision
-    await page.waitForSelector(`#task-learning-${borrow}[data-tracked="true"]`)
+    await atTask(page, borrow)
+    await page.waitForSelector(`#board-task-learning-${borrow}[data-tracked="true"]`)
     await waitShown(page, { xp: 0, access: 'open', mastery: 'unclaimed' })
     check((await readSkillStatus(page, `#skill-status-${lifetimes}`)).access === 'locked', 'the list does not show Lifetimes as locked')
     check(await attr(page, `#card-status-${lifetimes}`, 'data-locked') === 'true', 'the canvas label does not show Lifetimes as locked')
@@ -243,11 +275,15 @@ async function main() {
     await waitShown(page, { access: 'locked', mastery: 'unclaimed' })
     let view = await shown(page)
     check(JSON.stringify(view.reasons) === JSON.stringify(['Requires Mastery of “Ownership”, which is not declared']), `Lifetimes lock reasons: ${JSON.stringify(view.reasons)}`)
+    await atView(page, 'edit')
     check(await text(page, '#selected-skill-title') === 'Lifetimes' && await fieldValue(page, '#skill-outcome-input') === 'Annotate lifetimes in signatures', 'the locked Skill lost its title or outcome')
-    check(await page.$eval(`#task-completion-btn-${annotate}`, (el) => (el as HTMLButtonElement).disabled), 'a locked Skill\'s Task can be marked complete')
+    await atTask(page, annotate)
+    check(await page.$eval(`#board-task-completion-btn-${annotate}`, (el) => (el as HTMLButtonElement).disabled), 'a locked Skill\'s Task can be marked complete')
     // A threshold typed for one Skill but not set stays with it: another Skill with the same threshold shows its own.
+    await atView(page, 'edit')
     await setValue(page, '#xp-threshold-input', '100')
     await select(page, ownership)
+    await atView(page, 'edit')
     check(await fieldValue(page, '#xp-threshold-input') === '0' && await page.$eval('#xp-threshold-input-set', (el) => (el as HTMLButtonElement).disabled),
       `Ownership shows the threshold typed for Lifetimes: "${await fieldValue(page, '#xp-threshold-input')}"`)
     pass('separate states', `Path XP ${view.xp}; Ownership open/unclaimed; Lifetimes "${view.accessText}" because "${view.reasons[0]}", title and outcome kept, completion unavailable`)
@@ -257,14 +293,14 @@ async function main() {
     await setNumber(page, `task-reward-${borrow}`, 20)
     await waitShown(page, { xp: 0 })
     check(await contribution(page, borrow) === 'Not complete · contributes 0 XP', `incomplete Task shows ${await contribution(page, borrow)}`)
-    await page.click(`#task-completion-btn-${borrow}`)
+    await toggleCompletion(page, borrow)
     await waitShown(page, { xp: 20, mastery: 'unclaimed' })
     check(await contribution(page, borrow) === 'Complete · contributes 20 XP', `completed Task shows ${await contribution(page, borrow)}`)
     await setNumber(page, `task-reward-${borrow}`, 50)
     await waitShown(page, { xp: 50 })
-    await page.click(`#task-completion-btn-${borrow}`)
+    await toggleCompletion(page, borrow)
     await waitShown(page, { xp: 0 })
-    await page.click(`#task-completion-btn-${borrow}`)
+    await toggleCompletion(page, borrow)
     await waitShown(page, { xp: 50, mastery: 'unclaimed' })
     // An incomplete Task's reward edit leaves its contribution at zero.
     await setNumber(page, `task-reward-${chapter}`, 15)
@@ -295,7 +331,7 @@ async function main() {
     }
     await page.setRequestInterception(true)
     page.on('request', holdMastery)
-    await page.click('#mastery-btn')
+    await clickInView(page, 'summary', '#mastery-btn')
     for (let i = 0; i < 50 && heldMastery.request === null; i++) await new Promise((r) => setTimeout(r, 50))
     check(heldMastery.request, 'the Mastery declaration never reached the network')
     await closeEditorPanels(page)
@@ -319,9 +355,9 @@ async function main() {
     await setNumber(page, 'xp-threshold-input', 40)
     await waitShown(page, { xp: 50, access: 'open' })
     await setNumber(page, `task-reward-${annotate}`, 10)
-    await page.click(`#task-completion-btn-${annotate}`)
+    await toggleCompletion(page, annotate)
     await waitShown(page, { xp: 60 })
-    await page.click('#mastery-btn')
+    await clickInView(page, 'summary', '#mastery-btn')
     await waitShown(page, { xp: 60, mastery: 'declared' })
     s = await stored(page, pathA)
     check(s.xp === 60 && storedSkill(s, lifetimes).access && storedSkill(s, lifetimes).xpThreshold === 40 && storedSkill(s, lifetimes).mastery, `stored after unlock: ${JSON.stringify(storedSkill(s, lifetimes))}, XP ${s.xp}`)
@@ -329,7 +365,7 @@ async function main() {
 
     // 4. Relock: withdrawing the Prerequisite's Mastery, then falling below the threshold, keep work and Mastery.
     await select(page, ownership)
-    await page.click('#mastery-btn')
+    await clickInView(page, 'summary', '#mastery-btn')
     await waitShown(page, { mastery: 'unclaimed' })
     await select(page, lifetimes)
     await waitShown(page, { xp: 60, access: 'locked', mastery: 'declared' })
@@ -337,9 +373,9 @@ async function main() {
     check(JSON.stringify(view.reasons) === JSON.stringify(['Requires Mastery of “Ownership”, which is not declared']), `prerequisite relock reasons ${JSON.stringify(view.reasons)}`)
     check(await contribution(page, annotate) === 'Complete · contributes 10 XP', 'relocking dropped the started work')
     await select(page, ownership)
-    await page.click('#mastery-btn')
+    await clickInView(page, 'summary', '#mastery-btn')
     await waitShown(page, { mastery: 'declared' })
-    await page.click(`#task-completion-btn-${borrow}`)
+    await toggleCompletion(page, borrow)
     await waitShown(page, { xp: 10 })
     await select(page, lifetimes)
     await waitShown(page, { xp: 10, access: 'locked', mastery: 'declared' })
@@ -354,14 +390,15 @@ async function main() {
 
     // 5. An explicit bypass without a reason; XP and Mastery stay, and removing it relocks.
     const before = await stored(page, pathA)
-    await page.click('#access-override-btn')
+    await clickInView(page, 'edit', '#access-override-btn')
     await waitShown(page, { xp: 10, access: 'override', mastery: 'declared' })
     check((await shown(page)).reasons.length === 1, 'the waived requirement is no longer explained')
     s = await stored(page, pathA)
     check(storedSkill(s, lifetimes).access && s.xp === before.xp && JSON.stringify(s.xpHistory) === JSON.stringify(before.xpHistory) &&
       JSON.stringify(s.masteryHistory) === JSON.stringify(before.masteryHistory) && s.overrideHistory.map((r: any) => r.action).join() === 'grant', 'the bypass changed XP or Mastery')
-    check(!(await page.$eval(`#task-completion-btn-${annotate}`, (el) => (el as HTMLButtonElement).disabled)), 'the bypassed Skill still blocks its Task')
-    await page.click('#access-override-btn')
+    await atTask(page, annotate)
+    check(!(await page.$eval(`#board-task-completion-btn-${annotate}`, (el) => (el as HTMLButtonElement).disabled)), 'the bypassed Skill still blocks its Task')
+    await clickInView(page, 'edit', '#access-override-btn')
     await waitShown(page, { xp: 10, access: 'locked' })
     pass('bypass', 'no reason asked; Lifetimes "Open by override" with XP 10 and Mastery unchanged; removing the bypass relocks it')
 
@@ -378,10 +415,12 @@ async function main() {
         return original(input, init)
       }) as typeof fetch
     }, `/tasks/${chapter}/completion`)
-    await page.click(`#task-completion-btn-${chapter}`)
+    await toggleCompletion(page, chapter)
     await page.waitForSelector('#learning-error')
+    // Read on the board where it was attempted: reopening the board reads the records again, from the backend that holds it.
+    const unconfirmed = await contribution(page, chapter)
     view = await shown(page)
-    check(view.xp === '10' && await contribution(page, chapter) === 'Not complete · contributes 0 XP', `an unconfirmed completion was shown: ${JSON.stringify(view)}`)
+    check(view.xp === '10' && unconfirmed === 'Not complete · contributes 0 XP', `an unconfirmed completion was shown: ${unconfirmed} ${JSON.stringify(view)}`)
     check((await stored(page, pathA)).xp === 25, 'the lost completion did not reach the backend')
     await clickOutsideDetails(page, '#learning-retry-btn')
     await waitShown(page, { xp: 25 })
@@ -406,7 +445,7 @@ async function main() {
     await setNumber(page, `task-reward-${chapter}`, 25, false)
     await page.waitForSelector('#learning-error')
     const failure = await text(page, '#learning-error')
-    check(await contribution(page, chapter) === 'Complete · contributes 15 XP' && await fieldValue(page, `#task-reward-${chapter}`) === '25', 'the failed reward edit was shown as applied or the typed value was dropped')
+    check(await contribution(page, chapter) === 'Complete · contributes 15 XP' && await fieldValue(page, `#board-task-reward-${chapter}`) === '25', 'the failed reward edit was shown as applied or the typed value was dropped')
     check(storedTask(await stored(page, pathA), chapter).xpReward === 15, 'the failed write reached the backend')
     page.off('request', blockRewards)
     await page.setRequestInterception(false)
@@ -420,25 +459,28 @@ async function main() {
     // 8. Keyboard only, from the list: select a Skill, set its threshold, bypass and undo work.
     await keyboardSelect(page, 1, lifetimes)
     await waitShown(page, { access: 'locked' })
+    await atView(page, 'edit')
     await tabTo(page, '#xp-threshold-input')
     await page.keyboard.down('Control'); await page.keyboard.press('a'); await page.keyboard.up('Control')
     await page.keyboard.type('1000')
     await page.keyboard.press('Enter')
+    await page.waitForFunction(() => !document.querySelector('#learning-pending') && document.querySelector('#lock-reasons')?.textContent?.includes('Needs 965 more XP'))
     await waitShown(page, { access: 'locked' })
-    await page.waitForFunction(() => document.querySelector('#lock-reasons')?.textContent?.includes('Needs 965 more XP'))
     await openSkillList(page)
     check((await readSkillStatus(page, `#skill-status-${lifetimes}`)).access === 'locked' && (await text(page, `#skill-list-item-${lifetimes}`)).includes('Lifetimes'), 'the list lost the locked Skill')
     await keyboardSelect(page, 1, lifetimes)
+    await atView(page, 'edit')
     await tabTo(page, '#access-override-btn')
     await page.keyboard.press('Enter')
-    await waitShown(page, { access: 'override' })
+    await page.waitForFunction(() => !document.querySelector('#learning-pending') && (document.querySelector('#skill-access') as HTMLElement | null)?.dataset.access === 'override')
     await tabTo(page, '#access-override-btn')
     await page.keyboard.press('Enter')
     await waitShown(page, { access: 'locked' })
-    await tabTo(page, `#task-completion-btn-${annotate}`)
+    await atTask(page, annotate)
+    await tabTo(page, `#board-task-completion-btn-${annotate}`)
     await page.keyboard.press('Space')
-    await waitShown(page, { xp: 25 })
-    check(await page.$eval(`#task-completion-btn-${annotate}`, (el) => (el as HTMLButtonElement).disabled) && await page.$(`#task-locked-${annotate}`) !== null, 'a locked Skill offers completion after undo')
+    await page.waitForFunction(() => !document.querySelector('#learning-pending') && (document.querySelector('#path-xp') as HTMLElement | null)?.dataset.xp === '25')
+    check(await page.$eval(`#board-task-completion-btn-${annotate}`, (el) => (el as HTMLButtonElement).disabled) && await page.$(`#board-task-locked-${annotate}`) !== null, 'a locked Skill offers completion after undo')
     s = await stored(page, pathA)
     check(storedSkill(s, lifetimes).xpThreshold === 1000 && !storedTask(s, annotate).completed && storedSkill(s, lifetimes).mastery && s.xp === 25, 'keyboard actions were not stored')
     pass('keyboard and list', 'list ↓ Enter selected locked Lifetimes; Tab/Enter set threshold 1000 ("Needs 965 more XP"), toggled the bypass, and Space undid its Task (XP 25); Mastery stays declared')
@@ -452,9 +494,10 @@ async function main() {
     await addSkill(page, 'Shell voicings', 'Voice ii-V-I changes')
     const voicingTask = await addTask(page, 'Learn three voicings')
     await waitForState(page, 'saved')
-    await page.waitForSelector(`#task-learning-${voicingTask}[data-tracked="true"]`)
+    await atTask(page, voicingTask)
+    await page.waitForSelector(`#board-task-learning-${voicingTask}[data-tracked="true"]`)
     await setNumber(page, `task-reward-${voicingTask}`, 2000)
-    await page.click(`#task-completion-btn-${voicingTask}`)
+    await toggleCompletion(page, voicingTask)
     await waitShown(page, { xp: 2000 })
     await closeEditorPanels(page)
     await page.click('#back-to-workspace')
@@ -473,11 +516,12 @@ async function main() {
     await openEditor(page, 2)
     await select(page, lifetimes)
     await waitShown(page, { xp: 25, access: 'locked', mastery: 'declared' })
+    await atView(page, 'edit')
     check(await fieldValue(page, '#xp-threshold-input') === '1000' && await contribution(page, annotate) === 'Not complete · contributes 0 XP', 'Lifetimes reopened differently')
     check(JSON.stringify((await shown(page)).history) === JSON.stringify(recordBefore), 'the XP record of Lifetimes changed on reload')
     await select(page, ownership)
     await waitShown(page, { mastery: 'declared' })
-    check(await contribution(page, chapter) === 'Complete · contributes 25 XP' && await contribution(page, borrow) === 'Not complete · contributes 0 XP' && await fieldValue(page, `#task-reward-${borrow}`) === '50', 'Ownership reopened differently')
+    check(await contribution(page, chapter) === 'Complete · contributes 25 XP' && await contribution(page, borrow) === 'Not complete · contributes 0 XP' && await fieldValue(page, `#board-task-reward-${borrow}`) === '50', 'Ownership reopened differently')
     check(recordBefore.length === 2 && (await shown(page)).history.length === 7, `Ownership XP record after reload: ${JSON.stringify((await shown(page)).history)}`)
     check(JSON.stringify(await stored(page, pathA)) === JSON.stringify(beforeReload), 'reloading changed the records')
     check(await revisionOf(page, pathA) === authoredRevision && (await saveState(page)).revision === authoredRevision, `learning actions changed the document revision (${authoredRevision} → ${await revisionOf(page, pathA)})`)

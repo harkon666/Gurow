@@ -339,6 +339,7 @@ async function main() {
     await activate(owner, '#btn-skill-list')
     await owner.keyboard.type('Drag C')
     await owner.keyboard.press('Enter')
+    await activate(owner, '#manage-prerequisites-btn')
     await owner.waitForSelector('#incoming-prerequisites-list')
     const incoming = await text(owner, '#incoming-prerequisites-list')
     check(incoming.includes('Drag A') && incoming.includes('Drag B'), `C does not require A and B: ${incoming}`)
@@ -490,6 +491,9 @@ async function main() {
     await owner.keyboard.type('Drag B')
     await owner.keyboard.press('Enter')
     await owner.waitForFunction(() => document.querySelector('#selected-skill-title')?.textContent === 'Drag B')
+    // The detail action lives in the summary's Manage prerequisites view, reached by keyboard.
+    await activate(owner, '#manage-prerequisites-btn')
+    await owner.waitForSelector('#skill-detail-panel[data-view="prerequisites"]')
     await owner.select('#connect-skill-select', C)
     await activate(owner, '#btn-add-dependent')
     await owner.waitForFunction(() => /already exists/.test(document.querySelector('#cycle-rejection-alert')?.textContent ?? ''))
