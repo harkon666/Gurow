@@ -202,6 +202,8 @@ export async function main() {
       await page.mouse.move(card.x + 12, card.y + 8, { steps: 3 })
       await page.mouse.move(target.x, target.y, { steps: 12 })
       check(await page.$eval('#board-columns', (el) => (el as HTMLElement).dataset.dragging === 'true'), 'the card did not start dragging')
+      const onTop = await page.evaluate((id, point) => document.elementFromPoint(point.x, point.y)?.closest('[data-card-id]')?.getAttribute('data-card-id') === id, taskId, target)
+      check(onTop, 'the dragged card is clipped or painted behind the destination column')
       await page.mouse.up()
     }
     async function moveWithMenu(page: Page, taskId: string, columnName: string) {

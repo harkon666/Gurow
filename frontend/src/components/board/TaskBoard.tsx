@@ -102,7 +102,7 @@ export function TaskBoard(props: TaskBoardProps) {
   const [addingColumn, setAddingColumn] = useState(false)
   const [details, setDetails] = useState<string | null>(null)
   const [removing, setRemoving] = useState<string | null>(null)
-  const [drag, setDrag] = useState<{ taskId: string; dx: number; dy: number; target: { columnId: string; index: number } | null } | null>(null)
+  const [drag, setDrag] = useState<{ taskId: string; dx: number; dy: number; rect: { left: number; top: number; width: number; height: number }; target: { columnId: string; index: number } | null } | null>(null)
   /** The element to focus once the board re-renders after a keyboard action, and the one to use if it became unusable. */
   const focusNext = useRef<string | null>(null)
   const focusFallback = useRef<string | null>(null)
@@ -123,7 +123,7 @@ export function TaskBoard(props: TaskBoardProps) {
   const columnOf = (taskId: string) => columns.find((column) => column.taskIds.includes(taskId))
 
   // Pointer dragging: a card follows the pointer, the column and slot under it are the destination.
-  const pointer = useRef<{ taskId: string; id: number; x: number; y: number; dragging: boolean } | null>(null)
+  const pointer = useRef<{ taskId: string; id: number; x: number; y: number; dragging: boolean; rect: { left: number; top: number; width: number; height: number } } | null>(null)
   const dropTarget = (x: number, y: number, taskId: string) => {
     // The dragged card itself follows the pointer; the column under it is what counts.
     const element = document.elementsFromPoint(x, y).filter((el) => !el.closest(`[data-card-id="${taskId}"]`))
@@ -135,7 +135,8 @@ export function TaskBoard(props: TaskBoardProps) {
   }
   const onPointerDown = (event: ReactPointerEvent<HTMLElement>, taskId: string) => {
     if (event.button !== 0 || (event.target as HTMLElement).closest('button, input, textarea, select, a, label')) return
-    pointer.current = { taskId, id: event.pointerId, x: event.clientX, y: event.clientY, dragging: false }
+    const { left, top, width, height } = event.currentTarget.getBoundingClientRect()
+    pointer.current = { taskId, id: event.pointerId, x: event.clientX, y: event.clientY, dragging: false, rect: { left, top, width, height } }
     event.currentTarget.setPointerCapture(event.pointerId)
   }
   const onPointerMove = (event: ReactPointerEvent<HTMLElement>) => {
@@ -144,7 +145,7 @@ export function TaskBoard(props: TaskBoardProps) {
     const dx = event.clientX - p.x, dy = event.clientY - p.y
     if (!p.dragging && Math.hypot(dx, dy) < 6) return
     p.dragging = true
-    setDrag({ taskId: p.taskId, dx, dy, target: dropTarget(event.clientX, event.clientY, p.taskId) })
+    setDrag({ taskId: p.taskId, dx, dy, rect: p.rect, target: dropTarget(event.clientX, event.clientY, p.taskId) })
   }
   const endDrag = (event: ReactPointerEvent<HTMLElement>, drop: boolean) => {
     const p = pointer.current
@@ -279,7 +280,7 @@ export function TaskBoard(props: TaskBoardProps) {
                     const dragged = drag?.taskId === taskId
                     const completed = props.completed?.(taskId)
                     return (
-                      <li key={taskId} className="relative">
+                      <li key={taskId} className="relative" style={dragged ? { height: drag.rect.height, flexShrink: 0 } : undefined}>
                         {drag?.target?.columnId === column.id && drag.target.index === index && !dragged && <div data-drop-indicator className="absolute -top-1.5 inset-x-1 h-0.5 rounded bg-blue-400" />}
                         <article
                           id={`board-card-${taskId}`}
@@ -291,7 +292,9 @@ export function TaskBoard(props: TaskBoardProps) {
                           onPointerMove={onPointerMove}
                           onPointerUp={(e) => endDrag(e, true)}
                           onPointerCancel={(e) => endDrag(e, false)}
-                          style={dragged ? { transform: `translate(${drag.dx}px, ${drag.dy}px)`, zIndex: 20 } : undefined}
+                          // Fixed positioning escapes the column's scroll clipping while remaining
+                          // inside the modal top layer. Keep this node mounted for pointer capture.
+                          style={dragged ? { position: 'fixed', ...drag.rect, transform: `translate(${drag.dx}px, ${drag.dy}px)`, zIndex: 20 } : undefined}
                           className={`rounded-lg border bg-slate-950 p-2.5 select-none cursor-grab ${dragged ? 'opacity-80 shadow-2xl border-blue-500 cursor-grabbing' : 'border-slate-700 hover:border-slate-500'}`}
                         >
                           <div className="flex items-start justify-between gap-2">
