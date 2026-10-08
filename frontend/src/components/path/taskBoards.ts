@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ApiResult } from '../../lib/api'
 import type { Board, BoardColumn } from '../board/boardModel'
-import { BoardSync, type BoardSaveAnswer, type BoardView } from '../board/boardSync'
+import { BoardSync, storedIntents, type BoardSaveAnswer, type BoardView } from '../board/boardSync'
 
 const REFUSALS: Record<string, string> = {
   skill_locked: 'this Skill is locked, so a Task cannot enter the Completion Column',
@@ -13,12 +13,14 @@ const REFUSALS: Record<string, string> = {
   learning_path_not_found: 'this Path is not available to the signed-in Account',
   draft_published: 'this Draft was published, so its board can no longer change; reload the page to see the latest version',
   draft_not_found: 'this Draft is not available to the signed-in Account',
+  enrollment_not_found: 'this Enrollment is not available to the signed-in Account',
+  learner_only: 'only the Enrollment\'s learner arranges this board',
   unauthenticated: 'you are signed out',
 }
 
 /**
  * Where one context's boards are read and saved: a personal Path's (answering its
- * learning records too) or a Coach Draft's (ADR 0027, 0029).
+ * learning records too), a Coach Draft's or a learner's Enrollment's (ADR 0027, 0029, 0030).
  */
 export interface BoardStore<L> {
   read: (skillId: string) => Promise<ApiResult<{ board: Board }>>
@@ -31,9 +33,9 @@ export interface BoardStore<L> {
  * stays recoverable until the owner retries, reapplies or discards it. Only the open
  * board is shown; an accepted save, the first board read, or a board adopted with other
  * Tasks in its Completion Column calls `learningChanged`, since completion may have changed.
- * `scope` names the boards' owner (the Path, and the Draft); another scope starts afresh.
+ * `scope` names the boards' owner (the Path and Draft, or the Enrollment); another scope starts afresh.
  */
-export function useTaskBoards<L>({ scope, store, enabled, tasksOf, savedTasksOf, learningChanged }: {
+export function useTaskBoards<L>({ scope, store, enabled, tasksOf, savedTasksOf, learningChanged, keptKey }: {
   scope: string
   store: BoardStore<L>
   enabled: boolean
@@ -42,14 +44,19 @@ export function useTaskBoards<L>({ scope, store, enabled, tasksOf, savedTasksOf,
   /** A Skill's Task IDs in the document the backend last accepted from this tab. */
   savedTasksOf: (skillId: string) => string[]
   learningChanged: () => void
+  /**
+   * Where a Skill's unaccepted intents are kept in this tab across its reloads (its key names the
+   * Account, the boards' owner and the Skill); without it they live in this tab only (ADR 0028, 0030).
+   */
+  keptKey?: (skillId: string) => string
 }) {
   const syncs = useRef(new Map<string, BoardSync<L>>())
   const [openId, setOpenId] = useState<string | null>(null)
   const openRef = useRef<string | null>(null)
   const [view, setView] = useState<BoardView | null>(null)
   const [pending, setPending] = useState(false)
-  const latest = useRef({ store, tasksOf, savedTasksOf, learningChanged })
-  latest.current = { store, tasksOf, savedTasksOf, learningChanged }
+  const latest = useRef({ store, tasksOf, savedTasksOf, learningChanged, keptKey })
+  latest.current = { store, tasksOf, savedTasksOf, learningChanged, keptKey }
 
   const syncFor = useCallback((skillId: string) => {
     let sync = syncs.current.get(skillId)
@@ -74,6 +81,8 @@ export function useTaskBoards<L>({ scope, store, enabled, tasksOf, savedTasksOf,
       savedTaskIds: () => latest.current.savedTasksOf(skillId),
       onAccepted: () => latest.current.learningChanged(),
       onCompletionChanged: () => latest.current.learningChanged(),
+      // Each tab keeps its own intents (session storage survives the tab's reload), so no tab ever overwrites or clears another's.
+      kept: latest.current.keptKey && storedIntents(() => (typeof window === 'undefined' ? null : window.sessionStorage), latest.current.keptKey(skillId)),
       onView: (next) => {
         if (openRef.current === skillId) setView(next)
         setPending([...syncs.current.values()].some((s) => s.view().pending > 0))

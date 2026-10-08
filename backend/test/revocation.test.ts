@@ -67,7 +67,11 @@ it('AC2/3/5: multiple Approvals retain contribution and Mastery; final removal a
   const before = await state()
   expect((await revoke(first)).status).toBe(200)
   const retained = await state()
-  expect(retained).toEqual(before)
+  // Only the review summary (UX05) records the revoked revision; contribution and Mastery are retained.
+  const { taskReviews: reviewsAfter, ...retainedProgress } = retained
+  const { taskReviews: _, ...progressBefore } = before
+  expect(retainedProgress).toEqual(progressBefore)
+  expect(reviewsAfter.find((r: any) => r.taskId === fx.content.taskA.id).approvedRevisionNumbers).toEqual([2])
   expect((await revoke(first)).status).toBe(409)
   const competing = await Promise.all([revoke(second), revoke(second)])
   expect(competing.map((r) => r.status).sort()).toEqual([200, 409])
@@ -168,8 +172,8 @@ it('AC1/5/6: authority, exact context, invalid reasons and non-Approvals reject 
   expect((await revoke(pending)).status).toBe(404)
   await send()
   expect((await revoke(pending)).status).toBe(404)
-  // The revisions sent above legitimately await Review now (T23); every progress record is unchanged.
-  const progress = ({ awaitingReview: _, ...records }: any) => records
+  // The revisions sent above legitimately await Review now (T23) and are the newest (UX05); every progress record is unchanged.
+  const progress = ({ awaitingReview: _, taskReviews: __, ...records }: any) => records
   expect(progress(await state())).toEqual(progress(before))
   expect((await (await request(path())).json() as any).submission.revisions[0]).toEqual((history as any).submission.revisions[0])
 })

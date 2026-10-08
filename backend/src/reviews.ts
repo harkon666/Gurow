@@ -108,6 +108,35 @@ export async function listVersionEnrollments(db: Database, versionId: string, ac
   })
 }
 
+/**
+ * Each sent Task's review state in one Enrollment, as two separate facts (ADR 0002, 0030):
+ * the newest revision and its own status, and the revisions whose Approval still counts.
+ * A newer pending revision neither inherits an earlier Approval nor hides it, so a card or
+ * summary can show both. Only sent revisions are read; Submission Drafts never are.
+ */
+async function taskReviews(db: Reader, enrollmentId: string, ownerId: string) {
+  const rows = await db.select({ taskId: submissions.taskId, revision: submissionRevisions, review: submissionReviews }).from(submissionRevisions)
+    .innerJoin(submissions, eq(submissions.id, submissionRevisions.submissionId))
+    .leftJoin(submissionReviews, eq(submissionReviews.revisionId, submissionRevisions.id))
+    .where(eq(submissions.enrollmentId, enrollmentId))
+    .orderBy(asc(submissions.taskId), asc(submissionRevisions.revisionNumber))
+  const byTask = new Map<string, typeof rows>()
+  for (const row of rows) byTask.set(row.taskId, [...byTask.get(row.taskId) ?? [], row])
+  return [...byTask].map(([taskId, revisions]) => {
+    const latest = revisions[revisions.length - 1]
+    const review = latest.review
+    return {
+      taskId,
+      sentRevisions: revisions.length,
+      latestRevisionNumber: latest.revision.revisionNumber,
+      latestStatus: review ? (review.revokedAt ? 'approval_revoked' as const : review.decision) : latest.revision.supersededAt ? 'superseded' as const : 'pending' as const,
+      // The same validity rule as the derivation (access.ts).
+      approvedRevisionNumbers: revisions.filter(({ revision, review }) => review?.decision === 'approval' && !review.revokedAt && review.coachAccountId === ownerId && !revision.supersededAt)
+        .map(({ revision }) => revision.revisionNumber),
+    }
+  })
+}
+
 /** Only the learner and owning Coach can read progress, even while inactive.
  * The shared Enrollment lock prevents multiple evidence queries mixing states.
  */
@@ -122,6 +151,6 @@ export async function readLearningState(db: Database, enrollmentId: string, acco
     const [enrollment] = await tx.select().from(enrollments).where(eq(enrollments.id, enrollmentId)).for('update')
     const lifecycleHistory = await tx.select().from(enrollmentLifecycleRecords).where(eq(enrollmentLifecycleRecords.enrollmentId, enrollmentId)).orderBy(asc(enrollmentLifecycleRecords.sequence))
     const awaiting = (await awaitingReview(tx, [enrollmentId])).map(({ enrollmentId: _, ...revision }) => revision)
-    return { ...await deriveLearningState(tx, enrollmentId, enrollment.learningPathVersionId, context.ownerId, enrollment.status === 'active'), ...await readHistory(tx, enrollmentId), lifecycleHistory, taskStarts: await tx.select().from(taskStarts).where(eq(taskStarts.enrollmentId, enrollmentId)).orderBy(asc(taskStarts.taskId)), awaitingReview: awaiting }
+    return { ...await deriveLearningState(tx, enrollmentId, enrollment.learningPathVersionId, context.ownerId, enrollment.status === 'active'), ...await readHistory(tx, enrollmentId), lifecycleHistory, taskStarts: await tx.select().from(taskStarts).where(eq(taskStarts.enrollmentId, enrollmentId)).orderBy(asc(taskStarts.taskId)), awaitingReview: awaiting, taskReviews: await taskReviews(tx, enrollmentId, context.ownerId) }
   })
 }

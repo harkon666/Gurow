@@ -32,7 +32,8 @@ export type BoardStatus =
   | { kind: 'saving' }
   | { kind: 'refused'; detail: string }
   | { kind: 'failed'; detail: string }
-  | { kind: 'conflict'; current: Board }
+  /** `restored`: the intents were kept in this browser from before a reload, and the board changed since. */
+  | { kind: 'conflict'; current: Board; restored?: boolean }
   /** Intents that cannot apply to the accepted board; nothing is sent until each is redirected or discarded. */
   | { kind: 'unapplied'; ops: BoardOp[] }
 
@@ -53,6 +54,67 @@ export interface BoardView {
   boardColumns: BoardColumn[]
 }
 
+/** Intents kept in this browser so a reload does not lose them: the accepted revision they were based on, and the intents. */
+export interface KeptIntents { baseRevision: number; ops: BoardOp[] }
+
+/** Where a board keeps its unaccepted intents across reloads; `save(null)` forgets them. */
+export interface IntentStore {
+  load: () => KeptIntents | null
+  save: (kept: KeptIntents | null) => void
+}
+
+/** What a 'failed' status says about intents restored after a reload onto the board they were based on. */
+export const RESTORED_DETAIL = 'they were kept in this tab from before the page was reloaded'
+
+const OP_FIELDS: Record<BoardOp['kind'], string[]> = {
+  move: ['taskId', 'columnId'],
+  'add-column': ['columnId', 'name'],
+  'rename-column': ['columnId', 'name'],
+  'move-column': ['columnId'],
+  'remove-column': ['columnId', 'destinationId'],
+}
+const isOp = (value: unknown): value is BoardOp => {
+  if (typeof value !== 'object' || value === null) return false
+  const op = value as Record<string, unknown>
+  const fields = OP_FIELDS[op.kind as BoardOp['kind']]
+  return Boolean(fields) && fields.every((field) => typeof op[field] === 'string') &&
+    (op.kind !== 'move' && op.kind !== 'add-column' && op.kind !== 'move-column' || Number.isSafeInteger(op.index))
+}
+
+/**
+ * Keeps one board's intents in `storage` under `key`, which names the Account and the board's
+ * owner and Skill, so another Account or context never restores them. Given a tab's own storage
+ * (session storage), no other tab can overwrite or clear them. Anything
+ * unreadable is dropped rather than restored; unavailable storage keeps nothing.
+ */
+export function storedIntents(storage: () => Storage | null, key: string): IntentStore {
+  return {
+    load: () => {
+      try {
+        const raw = storage()?.getItem(key)
+        if (!raw) return null
+        let value: Partial<KeptIntents> | null = null
+        try { value = JSON.parse(raw) } catch { /* corrupt: dropped below */ }
+        if (value && Number.isSafeInteger(value.baseRevision) && value.baseRevision! >= 0 && Array.isArray(value.ops) && value.ops.length > 0 && value.ops.every(isOp)) {
+          return { baseRevision: value.baseRevision!, ops: value.ops }
+        }
+        storage()?.removeItem(key)
+      } catch {
+        // Unavailable storage: there is nothing to restore.
+      }
+      return null
+    },
+    save: (kept) => {
+      try {
+        if (kept) storage()?.setItem(key, JSON.stringify(kept))
+        else storage()?.removeItem(key)
+      } catch {
+        // Storage full or unavailable: the intents stay in this tab only.
+      }
+    },
+  }
+}
+
 export interface BoardSyncOptions<L> {
   read: () => Promise<{ ok: true; board: Board } | { ok: false; detail: string }>
   save: (expectedRevision: number, columns: BoardColumn[]) => Promise<BoardSaveAnswer<L>>
@@ -68,6 +130,12 @@ export interface BoardSyncOptions<L> {
    * whose Completion Column held other Tasks: completion may have changed since the records were read.
    */
   onCompletionChanged?: () => void
+  /**
+   * Keeps the intents not yet accepted in this browser, so a reload restores them for the owner to
+   * retry, reapply or discard; they are never sent on their own after a reload, since a save may
+   * already have reached the backend. Only for boards whose Tasks this tab cannot change (a learner's).
+   */
+  kept?: IntentStore
 }
 
 export class BoardSync<L = unknown> {
@@ -88,8 +156,19 @@ export class BoardSync<L = unknown> {
   private conflictEpoch = 0
   /** A save whose answer was lost: the backend may hold it, so only a backend answer can say "saved" again. */
   private uncertain = false
+  /** The revision restored intents were based on, until the first board read places them. */
+  private restoredBase: number | null = null
+  /** Whether this tab kept intents in storage, so only it forgets them there (another tab's stay). */
+  private keeps = false
 
-  constructor(private readonly options: BoardSyncOptions<L>) {}
+  constructor(private readonly options: BoardSyncOptions<L>) {
+    const kept = options.kept?.load()
+    if (kept) {
+      this.ops = kept.ops
+      this.restoredBase = kept.baseRevision
+      this.keeps = true
+    }
+  }
 
   view(): BoardView {
     if (!this.accepted) return { accepted: null, columns: [], status: this.status, pending: this.ops.length, loadError: this.loadError, goneTaskIds: [], boardColumns: [] }
@@ -146,6 +225,16 @@ export class BoardSync<L = unknown> {
     }
     this.loadError = null
     const board = result.board
+    if (this.restoredBase !== null && !this.accepted) {
+      // Restored after a reload: on the revision they were based on they are kept for Retry; on a
+      // newer board (perhaps holding their own lost save) the owner reapplies or discards them.
+      const base = this.restoredBase
+      this.restoredBase = null
+      this.adopt(board, epoch)
+      if (board.revision !== base) return this.conflict(board, epoch, true)
+      this.status = { kind: 'failed', detail: RESTORED_DETAIL }
+      return this.publish()
+    }
     if (this.status.kind === 'conflict') return this.conflict(board, epoch)
     const unchanged = this.accepted !== null && board.revision === this.accepted.revision
     const followable = this.status.kind === 'saved' || this.status.kind === 'waiting'
@@ -157,8 +246,8 @@ export class BoardSync<L = unknown> {
   }
 
   /** A newer board awaits the owner's decision; `epoch` says which of this tab's documents it was read after. */
-  private conflict(current: Board, epoch: number) {
-    this.status = { kind: 'conflict', current }
+  private conflict(current: Board, epoch: number, restored = false) {
+    this.status = { kind: 'conflict', current, ...(restored || (this.status.kind === 'conflict' && this.status.restored) ? { restored: true } : {}) }
     this.conflictEpoch = epoch
     this.publish()
   }
@@ -310,6 +399,23 @@ export class BoardSync<L = unknown> {
   close() { this.closed = true }
 
   private publish() {
-    if (!this.closed) this.options.onView(this.view())
+    if (this.closed) return
+    this.persist()
+    this.options.onView(this.view())
+  }
+
+  /** Keeps the intents not yet accepted, with the revision they are based on; forgets them once none remain. */
+  private persist() {
+    const store = this.options.kept
+    if (!store) return
+    if (this.ops.length > 0) {
+      const base = this.accepted?.revision ?? this.restoredBase
+      if (base === null) return
+      store.save({ baseRevision: base, ops: this.ops })
+      this.keeps = true
+    } else if (this.keeps) {
+      store.save(null)
+      this.keeps = false
+    }
   }
 }

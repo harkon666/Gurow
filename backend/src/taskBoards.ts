@@ -45,6 +45,19 @@ export const DRAFT_INITIAL_COLUMNS = [
   { name: 'Ready', completion: false },
 ] as const
 
+/**
+ * The columns a Learner's board starts with in one Enrollment (ADR 0030): working
+ * organization only, so none has a role. Done means finished working, not sent,
+ * approved or mastered; `approved` marks where Tasks that already hold a valid
+ * Approval are first placed, which is a placement, not a meaning of the column.
+ */
+export const LEARNER_INITIAL_COLUMNS = [
+  { name: 'Backlog', completion: false, approved: false },
+  { name: 'To Do', completion: false, approved: false },
+  { name: 'In Progress', completion: false, approved: false },
+  { name: 'Done', completion: false, approved: true },
+] as const
+
 type Parsed<T> = { ok: true; value: T } | { ok: false; detail: string }
 
 /**
@@ -112,8 +125,9 @@ export function sameArrangement(a: BoardColumn[], b: BoardColumn[]) {
 
 /**
  * Where an existing Task is first placed when its board is created: completed Tasks
- * in the Completion Column, all others in the first column, each keeping the given
- * (existing) order. Placement replays nothing: it only reads completion.
+ * in the Completion Column (or, on a learner's board, Tasks with a valid Approval in
+ * the column given for them), all others in the first column, each keeping the given
+ * (existing) order. Placement replays nothing: it only reads completion or evidence.
  */
 export function initialPlacement<T extends { id: string; completed: boolean }>(tasks: T[], columnIds: { first: string; completion: string | null }) {
   return tasks.map((task) => ({ taskId: task.id, columnId: task.completed && columnIds.completion ? columnIds.completion : columnIds.first }))

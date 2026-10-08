@@ -45,12 +45,14 @@ export interface TaskBoardProps {
   onDiscardUnapplied: () => void
   onReload: () => void
   onClose: () => void
-  onAddTask: (columnId: string, title: string, description: string) => void
-  onEditTask: (taskId: string, change: { title: string; description: string }) => void
-  /** Removal of one Task: deletion with undo when eligible, otherwise the context's archival. */
-  removal: (taskId: string) => { kind: 'delete'; onDelete: () => void } | { kind: 'archive'; control: ReactNode } | { kind: 'unknown' }
+  /** Offers adding a Task to a column; absent where the board's owner cannot author Tasks (a learner's). */
+  onAddTask?: (columnId: string, title: string, description: string) => void
+  /** Makes a Task's title and description editable in its details; without it they are read-only. */
+  onEditTask?: (taskId: string, change: { title: string; description: string }) => void
+  /** Removal of one Task: deletion with undo when eligible, otherwise the context's archival; absent where Tasks cannot be removed. */
+  removal?: (taskId: string) => { kind: 'delete'; onDelete: () => void } | { kind: 'archive'; control: ReactNode } | { kind: 'unknown' }
   /** The last deletion, offered for undo. */
-  deletion: { title: string; onUndo: () => void } | null
+  deletion?: { title: string; onUndo: () => void } | null
   /** Context controls inside a Task's details (reward, completion). */
   taskExtra?: (taskId: string) => ReactNode
   /** Extra status beside the board's save status (e.g. Path XP). */
@@ -325,11 +327,11 @@ export function TaskBoard(props: TaskBoardProps) {
                   })}
                   {drag?.target?.columnId === column.id && drag.target.index >= column.taskIds.filter((id) => id !== drag.taskId).length && <li data-drop-indicator className="h-0.5 rounded bg-blue-400 mx-1" />}
                 </ol>
-                <div className="p-2 border-t border-slate-800/80">
+                {props.onAddTask && <div className="p-2 border-t border-slate-800/80">
                   {adding === column.id ? (
                     <NewTaskForm
                       onCancel={() => { focusNext.current = `add-card-${column.id}`; setAdding(null) }}
-                      onAdd={(title, description) => { focusNext.current = `add-card-${column.id}`; setAdding(null); props.onAddTask(column.id, title, description) }}
+                      onAdd={(title, description) => { focusNext.current = `add-card-${column.id}`; setAdding(null); props.onAddTask?.(column.id, title, description) }}
                     />
                   ) : (
                     <button id={`add-card-${column.id}`} onClick={() => setAdding(column.id)} disabled={!view.accepted}
@@ -337,7 +339,7 @@ export function TaskBoard(props: TaskBoardProps) {
                       + Add Task
                     </button>
                   )}
-                </div>
+                </div>}
               </section>
             )
           })}
@@ -347,9 +349,9 @@ export function TaskBoard(props: TaskBoardProps) {
         <CardDetails
           task={titles.get(details)!}
           columnName={columnOf(details)?.name ?? ''}
-          removal={props.removal(details)}
+          removal={props.removal?.(details) ?? null}
           extra={props.taskExtra?.(details)}
-          onSave={(change) => props.onEditTask(details, change)}
+          onSave={props.onEditTask && ((change) => props.onEditTask?.(details, change))}
           onClose={() => setDetails(null)}
         />
       )}
@@ -432,8 +434,10 @@ function BoardAlerts({ view, onRetry, onDiscard, onReapply, onReload, onRedirect
   }
   if (status.kind === 'conflict') {
     return (
-      <div id="board-conflict" role="alert" className="shrink-0 flex flex-wrap items-center gap-2 px-4 py-2 text-xs text-amber-100 bg-amber-950/40 border-b border-amber-900/60">
-        <span>This board was changed elsewhere. Your change is kept here, not saved.</span>
+      <div id="board-conflict" role="alert" data-restored={Boolean(status.restored)} className="shrink-0 flex flex-wrap items-center gap-2 px-4 py-2 text-xs text-amber-100 bg-amber-950/40 border-b border-amber-900/60">
+        <span>{status.restored
+          ? 'Your board changes were kept in this tab from before the page was reloaded, not saved, and this board has changed since (perhaps by them).'
+          : 'This board was changed elsewhere. Your change is kept here, not saved.'}</span>
         <button id="board-reapply-btn" onClick={onReapply} className={button}>Apply my change to the latest board</button>
         <button id="board-discard-btn" onClick={onDiscard} className={button}>Use the latest board</button>
       </div>
@@ -585,9 +589,10 @@ function CardMoveMenu({ taskId, columns, columnId, index, effect, onMove, onClos
 function CardDetails({ task, columnName, removal, extra, onSave, onClose }: {
   task: BoardTask
   columnName: string
-  removal: ReturnType<TaskBoardProps['removal']>
+  removal: ReturnType<NonNullable<TaskBoardProps['removal']>> | null
   extra: ReactNode
-  onSave: (change: { title: string; description: string }) => void
+  /** Absent where the Task's definition is not the board owner's to edit: it is shown read-only. */
+  onSave?: (change: { title: string; description: string }) => void
   onClose: () => void
 }) {
   const [title, setTitle] = useState(task.title)
@@ -599,14 +604,20 @@ function CardDetails({ task, columnName, removal, extra, onSave, onClose }: {
     if (title.trim() === '') return setError('A Task needs a title.')
     // Submitting unchanged values (an Enter that opened these details, say) changes nothing.
     if (title.trim() === task.title && description === task.description) return
-    onSave({ title: title.trim(), description })
+    onSave?.({ title: title.trim(), description })
     setSaved(true)
   }
   return (
     <TemporaryPanel title="Task details" closeId="btn-close-card-details" onClose={onClose} initialFocus="#card-edit-title">
       <div id="card-details" data-task-id={task.id} className="p-4 flex flex-col gap-4">
         <p className="text-xs text-slate-400">In column <span className="text-slate-200">{columnName}</span></p>
-        <form onSubmit={save} className="flex flex-col gap-2">
+        {!onSave && (
+          <div id="card-definition" className="flex flex-col gap-1">
+            <h3 id="card-definition-title" className="text-sm font-semibold text-slate-100 break-words">{task.title}</h3>
+            {task.description && <p id="card-definition-description" className="text-sm text-slate-300 whitespace-pre-wrap">{task.description}</p>}
+          </div>
+        )}
+        {onSave && <form onSubmit={save} className="flex flex-col gap-2">
           <label htmlFor="card-edit-title" className="text-xs text-slate-300">Title (required)</label>
           <input id="card-edit-title" value={title} maxLength={200} onChange={(e) => { setTitle(e.target.value); setError(null); setSaved(false) }}
             aria-invalid={error !== null} aria-describedby={error ? 'card-edit-error' : undefined}
@@ -617,9 +628,9 @@ function CardDetails({ task, columnName, removal, extra, onSave, onClose }: {
           {error && <p id="card-edit-error" role="alert" className="text-xs text-red-300">{error}</p>}
           {saved && <p id="card-edit-applied" role="status" className="text-xs text-slate-400">Changed here; the save status shows when it is saved.</p>}
           <button id="card-edit-save" type="submit" className="self-start text-xs rounded bg-blue-700 hover:bg-blue-600 px-3 py-1.5 text-white">Save changes</button>
-        </form>
+        </form>}
         {extra}
-        <div className="border-t border-slate-800 pt-3 flex flex-col gap-2">
+        {removal && <div className="border-t border-slate-800 pt-3 flex flex-col gap-2">
           {removal.kind === 'delete' && (
             <button id="card-delete-btn" onClick={() => { onClose(); removal.onDelete() }} className="self-start text-xs rounded border border-red-900 text-red-300 px-3 py-1.5 hover:bg-red-950/40">Delete Task</button>
           )}
@@ -630,7 +641,7 @@ function CardDetails({ task, columnName, removal, extra, onSave, onClose }: {
             </>
           )}
           {removal.kind === 'unknown' && <p className="text-xs text-slate-500">Checking whether this Task can be deleted…</p>}
-        </div>
+        </div>}
       </div>
     </TemporaryPanel>
   )

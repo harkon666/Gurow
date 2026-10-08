@@ -91,7 +91,7 @@ async function saved(page: Page, revision: number) {
   await page.waitForSelector(`#save-status[data-state="saved"][data-revision="${revision}"]`)
   await state(page, 'saved')
 }
-/** `board`: the context has a Task Board (personal since UX03 #49, Coach Drafts since UX04 #50); learner boards arrive with UX05. */
+/** `board`: the context has a Task Board (personal since UX03 #49, Coach Drafts since UX04 #50, learner Enrollments since UX05 #51); Coach Review never has one. */
 async function cleanChrome(page: Page, ids: string[], board = false) {
   const body = await page.evaluate(() => document.body.innerText)
   for (const id of ids) {
@@ -441,7 +441,7 @@ async function main() {
     await learner.waitForSelector(`#task-work-${c.ta}[data-status="sent"]`)
     await learner.waitForSelector(`#task-history-${c.ta}[data-revisions="1"]`)
     check(/Revision\s+1/.test(await text(learner, `#task-history-${c.ta}`)), 'Submission Revision history was hidden with technical save revisions')
-    await cleanChrome(learner, [enrollment, version.id, c.a, c.b, c.ta])
+    await cleanChrome(learner, [enrollment, version.id, c.a, c.b, c.ta], true)
     await narrow(learner, 'Vectors', c.ta)
     pass('AC1/2/3/4/6 learner without WebGPU: permitted shell, two Skills and Tasks, actual Submission, meaningful Version/Revision and narrow details')
 

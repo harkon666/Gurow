@@ -12,7 +12,7 @@ const skill = (skillId: string, over: Partial<EnrollmentSkillState> = {}): Enrol
 const records = (over: Partial<EnrollmentLearningState> = {}): EnrollmentLearningState => ({
   enrollmentId: 'e', learningPathVersionId: 'v', enrollmentStatus: 'inactive', xp: 20,
   skills: [skill('vectors', { mastery: true }), skill('matrices', { unmetPrerequisiteSkillIds: ['vectors'], xpThreshold: 40, xpShortfall: 20 })], tasks: [],
-  xpHistory: [], masteryHistory: [], taskStarts: [], awaitingReview: [], overrideHistory: [], lifecycleHistory: [], ...over,
+  xpHistory: [], masteryHistory: [], taskStarts: [], awaitingReview: [], overrideHistory: [], lifecycleHistory: [], taskReviews: [], ...over,
 })
 const record = (sequence: number, action: LifecycleRecord['action'], actorAccountId: string, reason: string | null): LifecycleRecord => ({
   id: `l${sequence}`, sequence, enrollmentId: 'e', learningPathVersionId: 'v', actorAccountId, learnerAccountId: 'lena', action, reason,

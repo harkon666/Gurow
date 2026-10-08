@@ -443,6 +443,21 @@ export interface EnrollmentLearningState {
   overrideHistory: OverrideRecord[]
   /** Every deactivation and reactivation of this Enrollment, oldest first. */
   lifecycleHistory: LifecycleRecord[]
+  /** Each sent Task's review state: its newest revision's own status, and the revisions whose Approval still counts. */
+  taskReviews: TaskReviewSummary[]
+}
+
+/**
+ * One Task's review state in an Enrollment, as two separate facts (ADR 0002, 0030): a newer
+ * pending revision neither inherits an earlier Approval nor hides it. Tasks never sent are absent.
+ */
+export interface TaskReviewSummary {
+  taskId: string
+  sentRevisions: number
+  latestRevisionNumber: number
+  latestStatus: SubmissionRevisionView['status']
+  /** Revisions whose Approval is valid (not revoked), oldest first. */
+  approvedRevisionNumbers: number[]
 }
 
 /**
@@ -493,6 +508,19 @@ export interface EnrollmentMasteryEvent { id: number; skillId: string; taskId: s
 
 /** A sent revision still waiting for the Coach's decision (ADR 0002). */
 export interface AwaitingRevision { taskId: string; revisionId: string; revisionNumber: number; sentAt: string }
+
+const enrollmentBoardRoute = (enrollmentId: string, skillId: string) => `/enrollments/${encodeURIComponent(enrollmentId)}/skills/${encodeURIComponent(skillId)}/board`
+
+/**
+ * A learner's own Task Board for one Skill of their Enrollment (ADR 0030), opened (and created
+ * once) by reading it. Its columns have no role: a save writes the arrangement and nothing else,
+ * never a Submission, Review, XP or Mastery. Only the Enrollment's learner reaches it.
+ */
+export const readEnrollmentBoard = (enrollmentId: string, skillId: string) => call<{ board: TaskBoard }>(enrollmentBoardRoute(enrollmentId, skillId))
+
+/** Saves the learner's whole board based on `expectedRevision`; stale and repeated saves answer as for the other boards. */
+export const saveEnrollmentBoard = (enrollmentId: string, skillId: string, expectedRevision: number, columns: TaskBoardColumn[]) =>
+  call<{ changed: boolean; board: TaskBoard }>(enrollmentBoardRoute(enrollmentId, skillId), { method: 'PUT', body: { expectedRevision, columns } })
 
 export const readEnrollmentLearningState = (enrollmentId: string) =>
   call<{ learningState: EnrollmentLearningState }>(`/enrollments/${encodeURIComponent(enrollmentId)}/learning-state`)

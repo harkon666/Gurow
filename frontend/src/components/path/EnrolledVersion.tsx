@@ -6,7 +6,11 @@ import { TemporaryPanel } from '../editor/TemporaryPanel'
 import { loadCameraState, saveCameraState } from '../editor/checkpoint'
 import type { CameraState } from '../editor/protocol'
 import type { GpuStatus, SelectedSkillInfo } from '../editor/types'
-import { readEnrollmentLearningState, readTaskSubmission, type AwaitingRevision, type EnrolledVersion, type EnrollmentLearningState, type EnrollmentSkillState, type PathSkill, type SubmissionRevisionView } from '../../lib/api'
+import { TaskBoard } from '../board/TaskBoard'
+import { useTaskBoards, type BoardStore } from './taskBoards'
+import { storedIntents } from '../board/boardSync'
+import { countingApprovalText, latestReviewText, taskReviewState, type TaskReviewState } from './learnerBoard'
+import { readEnrollmentBoard, readEnrollmentLearningState, readTaskSubmission, saveEnrollmentBoard, type AwaitingRevision, type EnrolledVersion, type EnrollmentLearningState, type EnrollmentSkillState, type PathSkill, type SubmissionRevisionView } from '../../lib/api'
 import { TaskWork } from './TaskWork'
 import { TaskReview } from './TaskReview'
 import { revisionNote } from './submissionWork'
@@ -34,6 +38,10 @@ import { EnrollmentParticipation } from './EnrollmentParticipation'
  * Coach grants or revokes an Access Override with a reason; both read every Override Record.
  * Below the header, the learner can stop participating and the Coach can deactivate or
  * reactivate the Enrollment (ADR 0014); everything stays readable while it is inactive.
+ * The learner organizes each Skill's Tasks on their own Task Board (ADR 0030): its columns
+ * are working organization only, so moving a card sends nothing and changes no Review,
+ * Approval, XP or Mastery; review state shows on each card apart from its column, and work
+ * is sent only from a Task's details. The Coach has no board here: Review works from Submissions.
  */
 
 /** The learning records as last confirmed by the backend; a failed read keeps them and says so. */
@@ -50,9 +58,15 @@ interface RecordsView {
 /** The camera's local storage context: one per Enrollment, so it never moves another Path's or Account's view. */
 export const enrollmentCameraContext = (enrollmentId: string) => `enrollment:${enrollmentId}`
 
+/** Where a learner's unsaved board changes for one Skill are kept across reloads: per Account, Enrollment and Skill (ADR 0030). */
+export const boardIntentsKey = (accountId: string, enrollmentId: string, skillId: string) => `gurow:board-intents:${accountId}:enrollment:${enrollmentId}:${skillId}`
+/** This tab's own storage: it survives the tab's reload, and no other tab writes or clears it. */
+const tabStorage = () => (typeof window === 'undefined' ? null : window.sessionStorage)
+
 type AccessKind = 'open' | 'locked' | 'override'
 const accessKind = (skill: EnrollmentSkillState): AccessKind => !skill.access ? 'locked' : skill.accessOverride ? 'override' : 'open'
 const ACCESS_TEXT: Record<AccessKind, string> = { open: 'Open', locked: 'Locked', override: 'Open by Coach override' }
+const noLearningEffect = () => {}
 
 export function EnrolledVersionView({ accountId, document }: { accountId: string; document: EnrolledVersion }) {
   const enrollmentId = document.enrollment.id
@@ -69,6 +83,7 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
   const [reviewOpen, setReviewOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const clearFocusTask = useCallback(() => setFocusTaskId(null), [])
+  const learner = document.viewer === 'learner'
   // Reads are numbered as issued; an answer older than the one shown is dropped.
   const reads = useRef({ issued: 0, shown: 0 })
   const latestRead = useRef<Promise<boolean>>(Promise.resolve(false))
@@ -103,6 +118,29 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
   }, [enrollmentId])
   useEffect(() => { void loadRecords() }, [loadRecords])
 
+  // The learner's Task Boards (ADR 0030), one per Skill, saved apart from every learning record. The
+  // Version's Tasks never change, so this tab's Tasks are always the ones the backend holds. A save
+  // answers no learning records: placement changes none.
+  const boardStore = useMemo<BoardStore<never>>(() => ({
+    read: (skillId) => readEnrollmentBoard(enrollmentId, skillId),
+    save: (skillId, revision, columns) => saveEnrollmentBoard(enrollmentId, skillId, revision, columns),
+  }), [enrollmentId])
+  const officialTasks = useCallback((skillId: string) => skills.find((skill) => skill.id === skillId)?.tasks.map((task) => task.id) ?? [], [skills])
+  // Changes the backend has not accepted survive a reload of this tab, for this Account only, and come back for the learner to retry or discard.
+  const keptKey = useCallback((skillId: string) => boardIntentsKey(accountId, enrollmentId, skillId), [accountId, enrollmentId])
+  const boards = useTaskBoards<never>({ scope: `${accountId}:${enrollmentId}`, store: boardStore, enabled: learner, tasksOf: officialTasks, savedTasksOf: officialTasks, learningChanged: noLearningEffect, keptKey })
+  const boardSync = boards.sync
+  // The open board is read when it opens and again with every confirmed read of the records
+  // (Refresh, returning to the page, a send), so an arrangement made in another tab shows.
+  useEffect(() => { void boardSync?.refresh() }, [boardSync, view.generation])
+  // Closing or reloading the page with board changes the backend has not accepted asks first.
+  useEffect(() => {
+    if (!boards.pending) return
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault()
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [boards.pending])
+
   // Returning to the page reads the records again: the Coach may have changed them meanwhile.
   useEffect(() => {
     const revalidate = () => { if (window.document.visibilityState === 'visible') void loadRecords() }
@@ -131,6 +169,8 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
     ? Object.fromEntries(shown.skills.map((skill) => [skill.skillId, { locked: !skill.access, mastered: skill.mastery }]))
     : undefined, [shown])
   const selected = skills.find((skill) => skill.id === selectedSkill?.id)
+  const boardSkill = skills.find((skill) => skill.id === boards.openId)
+  const boardSkillState = boardSkill ? stateOf(boardSkill.id) : undefined
   const status = shown?.enrollmentStatus ?? document.enrollment.status
   const coach = document.viewer === 'coach'
   const awaitingBySkill = useMemo(() => {
@@ -228,8 +268,23 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
           connections={connections}
           tasks={selected?.tasks}
           outcome={selected?.outcome ?? ''}
+          boardAction={learner && selected ? (
+            <>
+              <button id="open-board-btn" onClick={() => { boards.open(selected.id); void loadRecords() }}
+                className="w-full rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium py-2">
+                Open board
+              </button>
+              {boards.openId === null && storedIntents(tabStorage, keptKey(selected.id)).load() && (
+                <p id="board-kept-note" role="status" className="mt-1.5 text-[11px] text-amber-200">
+                  Board changes not saved before this page was reloaded are kept in this tab. Open the board to save or discard them.
+                </p>
+              )}
+            </>
+          ) : null}
           learning={selected && <EnrolledSkillLearning view={view} skillId={selected.id} skillTitles={skillTitles} taskTitles={taskTitles} coach={coach} enrollmentId={enrollmentId} names={overrideNames} onRecordsStale={loadRecords} />}
-          renderTaskExtra={(taskId) => (
+          // While the board is open, a Task's work and history live in its card details instead, so one
+          // private draft is never edited in two places; the summary reads it again when the board closes.
+          renderTaskExtra={(taskId) => boards.openId ? null : (
             <EnrolledTaskLearning
               key={taskId}
               accountId={accountId}
@@ -245,8 +300,85 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
             />
           )}
         />
+        {boardSkill && boards.view && (
+          <TaskBoard
+            skillTitle={boardSkill.title}
+            boardName="Your board"
+            boardNote="Your own working organization in this Enrollment. Moving a card, into Done too, sends nothing and changes no Review, Approval, XP or Mastery. Send work for Review from a Task's details; its review state shows on the card in any column."
+            view={boards.view}
+            tasks={boardSkill.tasks}
+            removalNote="Only the Tasks' column changes: nothing is sent, and no Review, Approval, XP or Mastery changes."
+            cardBadges={(taskId) => <LearnerCardBadges taskId={taskId} records={shown} />}
+            taskExtra={(taskId) => (
+              <EnrolledTaskLearning
+                key={taskId}
+                accountId={accountId}
+                viewer={document.viewer}
+                enrollmentId={enrollmentId}
+                taskId={taskId}
+                records={shown}
+                skillTitles={skillTitles}
+                generation={view.generation}
+                onRecordsStale={loadRecords}
+                focusReview={false}
+                onReviewFocused={clearFocusTask}
+              />
+            )}
+            statusExtra={<>
+              {boardSkillState && <span id="board-skill-access" data-access={accessKind(boardSkillState)} className={`text-xs px-2 py-1 rounded-lg border ${boardSkillState.access ? 'text-emerald-300 border-emerald-900/70' : 'text-red-300 border-red-900/70'}`}>{ACCESS_TEXT[accessKind(boardSkillState)]}{boardSkillState.mastery ? ' · Mastered' : ''}</span>}
+              <span id="board-enrollment-xp" data-xp={shown?.xp ?? ''} className="text-xs px-2 py-1 rounded-lg border border-sky-800/60 text-sky-200">{shown ? `${shown.xp} XP in this Enrollment` : 'XP…'}</span>
+              {view.error && <span id="board-records-error" role="alert" className="text-xs text-red-300">Review state may be out of date ({view.error})</span>}
+            </>}
+            onOp={(op) => boardSync?.perform(op)}
+            onRetry={() => boardSync?.retry()}
+            onDiscard={() => boardSync?.discard()}
+            onReapply={() => boardSync?.reapply()}
+            onRedirect={(op, columnId, columnName) => boardSync?.redirect(op, columnId, columnName)}
+            onDiscardUnapplied={() => boardSync?.discardUnapplied()}
+            onReload={() => void boardSync?.refresh()}
+            onClose={() => boards.close()}
+          />
+        )}
       </section>
     </div>
+  )
+}
+
+/**
+ * A learner's card facts (ADR 0030): Required or Enrichment and reward, the newest revision's
+ * review status and any earlier Approval that still counts, all independent of the card's column.
+ */
+function LearnerCardBadges({ taskId, records }: { taskId: string; records: EnrollmentLearningState | null }) {
+  const task = records?.tasks.find((t) => t.taskId === taskId)
+  const review = taskReviewState(records, taskId)
+  const badge = 'text-[10px] rounded border px-1'
+  return (
+    <>
+      {task && <span className={`${badge} text-slate-300 border-slate-700`}>{task.required ? 'Required' : 'Enrichment'} · {task.xpReward} XP</span>}
+      <ReviewStateBadges id={`board-card-review-${taskId}`} review={review} />
+    </>
+  )
+}
+
+const LATEST_TONE: Record<TaskReviewState['latest']['kind'], string> = {
+  'not-sent': 'text-slate-400 border-slate-700',
+  pending: 'text-sky-200 border-sky-800/70',
+  changes_requested: 'text-amber-200 border-amber-800/70',
+  approval: 'text-emerald-300 border-emerald-800/70',
+  approval_revoked: 'text-red-300 border-red-900/70',
+  superseded: 'text-slate-400 border-slate-700',
+}
+
+/** The two review facts of one Task, as separate badges; nothing until the records are read. */
+function ReviewStateBadges({ id, review }: { id: string; review: TaskReviewState | null }) {
+  if (!review) return <span id={id} data-latest="unknown" className="text-[10px] text-slate-500">Review state…</span>
+  const counting = countingApprovalText(review)
+  return (
+    <span id={id} data-latest={review.latest.kind} data-latest-revision={review.latest.kind === 'not-sent' ? '' : review.latest.revisionNumber}
+      data-counting-approvals={review.countingApprovals.join(',')} className="inline-flex flex-wrap gap-1">
+      <span className={`text-[10px] rounded border px-1 ${LATEST_TONE[review.latest.kind]}`}>{latestReviewText(review.latest)}</span>
+      {counting && <span className="review-counting text-[10px] rounded border px-1 text-emerald-300 border-emerald-800/70">{counting}</span>}
+    </span>
   )
 }
 
@@ -472,6 +604,7 @@ function EnrolledTaskLearning({ accountId, viewer, enrollmentId, taskId, records
   const revocationTask = task ? { xpReward: task.xpReward, required: task.required, skillTitle: skillTitles.get(task.skillId) ?? 'this Skill' } : null
   return (
     <div id={`task-learning-${taskId}`} data-approved={task?.approved ?? ''} data-xp-contribution={task?.xpContribution ?? ''} data-started={started} className="space-y-2 text-[11px]">
+      <ReviewStateBadges id={`task-review-state-${taskId}`} review={taskReviewState(records, taskId)} />
       {task && (
         <p className="text-slate-400">
           Reward {task.xpReward} XP · <span className={task.approved ? 'text-emerald-300' : 'text-slate-400'}>{task.approved ? `approved, contributes ${task.xpContribution} XP` : 'contributes 0 XP until approved'}</span>

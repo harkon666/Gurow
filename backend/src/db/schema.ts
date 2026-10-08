@@ -543,6 +543,60 @@ export const draftBoardCards = pgTable('draft_board_cards', {
   foreignKey({ name: 'draft_board_cards_column_fk', columns: [t.columnId, t.learningPathVersionId, t.skillId], foreignColumns: [draftBoardColumns.id, draftBoardColumns.learningPathVersionId, draftBoardColumns.skillId] }),
 ])
 
+/**
+ * A Learner's own Task Board for one Skill of their Enrollment's Version (ADR 0027, 0030):
+ * ordered columns of that Skill's Tasks expressing the learner's working organization
+ * only. It belongs to the Enrollment, so another learner, another Enrollment of the same
+ * Account and the Coach each have none of it; nothing here is evidence. `revision` is
+ * the expected revision of every board save, independent of any learning record.
+ */
+export const enrollmentTaskBoards = pgTable('enrollment_task_boards', {
+  enrollmentId: uuid('enrollment_id').notNull(),
+  learningPathVersionId: uuid('learning_path_version_id').notNull(),
+  skillId: uuid('skill_id').notNull(),
+  revision: integer('revision').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  primaryKey({ name: 'enrollment_task_boards_pk', columns: [t.enrollmentId, t.skillId] }),
+  foreignKey({ name: 'enrollment_task_boards_enrollment_fk', columns: [t.enrollmentId, t.learningPathVersionId], foreignColumns: [enrollments.id, enrollments.learningPathVersionId] }),
+  foreignKey({ name: 'enrollment_task_boards_skill_fk', columns: [t.learningPathVersionId, t.skillId], foreignColumns: [versionSkills.learningPathVersionId, versionSkills.skillId] }),
+  check('enrollment_task_boards_revision_nonnegative', sql`${t.revision} >= 0`),
+])
+
+/** A learner's column: a user-named working grouping with no learning role, Done included. */
+export const enrollmentBoardColumns = pgTable('enrollment_board_columns', {
+  id: uuid('id').primaryKey(),
+  enrollmentId: uuid('enrollment_id').notNull(),
+  skillId: uuid('skill_id').notNull(),
+  name: text('name').notNull(),
+  position: integer('position').notNull(),
+}, (t) => [
+  unique('enrollment_board_columns_id_board_key').on(t.id, t.enrollmentId, t.skillId),
+  unique('enrollment_board_columns_position_key').on(t.enrollmentId, t.skillId, t.position),
+  foreignKey({ name: 'enrollment_board_columns_board_fk', columns: [t.enrollmentId, t.skillId], foreignColumns: [enrollmentTaskBoards.enrollmentId, enrollmentTaskBoards.skillId] }),
+  check('enrollment_board_columns_name', sql`length(trim(${t.name})) > 0 AND length(${t.name}) <= 60`),
+])
+
+/**
+ * One official Task's card on a learner's board. It refers to the Task's definition in the
+ * Enrollment's own Version, so only that Version's Tasks can be organized there.
+ */
+export const enrollmentBoardCards = pgTable('enrollment_board_cards', {
+  enrollmentId: uuid('enrollment_id').notNull(),
+  learningPathVersionId: uuid('learning_path_version_id').notNull(),
+  skillId: uuid('skill_id').notNull(),
+  taskId: uuid('task_id').notNull(),
+  columnId: uuid('column_id').notNull(),
+  position: integer('position').notNull(),
+}, (t) => [
+  primaryKey({ name: 'enrollment_board_cards_pk', columns: [t.enrollmentId, t.taskId] }),
+  unique('enrollment_board_cards_position_key').on(t.columnId, t.position),
+  foreignKey({ name: 'enrollment_board_cards_enrollment_fk', columns: [t.enrollmentId, t.learningPathVersionId], foreignColumns: [enrollments.id, enrollments.learningPathVersionId] }),
+  foreignKey({ name: 'enrollment_board_cards_task_fk', columns: [t.learningPathVersionId, t.taskId], foreignColumns: [versionTasks.learningPathVersionId, versionTasks.taskId] }),
+  foreignKey({ name: 'enrollment_board_cards_task_skill_fk', columns: [t.taskId, t.skillId], foreignColumns: [tasks.id, tasks.skillId] }),
+  foreignKey({ name: 'enrollment_board_cards_column_fk', columns: [t.columnId, t.enrollmentId, t.skillId], foreignColumns: [enrollmentBoardColumns.id, enrollmentBoardColumns.enrollmentId, enrollmentBoardColumns.skillId] }),
+])
+
 /** ALL prerequisite edges within one personal Path, satisfied by declared Mastery. */
 export const personalPrerequisites = pgTable('personal_prerequisites', {
   learningPathId: uuid('learning_path_id').notNull(),

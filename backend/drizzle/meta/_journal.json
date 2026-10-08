@@ -127,6 +127,13 @@
       "when": 1791438895524,
       "tag": "0017_draft_task_boards",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1791442361583,
+      "tag": "0018_enrollment_task_boards",
+      "breakpoints": true
     }
   ]
 }

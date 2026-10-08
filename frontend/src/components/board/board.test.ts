@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { applyOp, applyOps, completionEffects, localColumns, removalChoices, type Board, type BoardColumn } from './boardModel'
-import { BoardSync, type BoardSaveAnswer, type BoardView } from './boardSync'
+import { BoardSync, RESTORED_DETAIL, storedIntents, type BoardSaveAnswer, type BoardView, type IntentStore, type KeptIntents } from './boardSync'
 
 const board = (revision = 0): Board => ({
   skillId: 's',
@@ -60,7 +60,7 @@ describe('board intents (UX03 AC2/AC4/AC5)', () => {
 })
 
 /** A BoardSync over a scripted backend: each save waits for the test to answer it. */
-function harness(initial = board(), localTaskIds = ['t1', 't2', 't3', 't4']) {
+function harness(initial = board(), localTaskIds = ['t1', 't2', 't3', 't4'], kept?: IntentStore) {
   const views: BoardView[] = []
   const saves: { expectedRevision: number; columns: BoardColumn[]; answer: (a: BoardSaveAnswer<string>) => void }[] = []
   const learning: string[] = []
@@ -75,6 +75,7 @@ function harness(initial = board(), localTaskIds = ['t1', 't2', 't3', 't4']) {
     onView: (view) => views.push(view),
     onAccepted: (l) => learning.push(l ?? ''),
     onCompletionChanged: () => completionChanged.push(views.length),
+    kept,
   })
   return { sync, views, saves, learning, completionChanged, local, setRead: (b: Board) => { readBoard = b }, last: () => views.at(-1)! }
 }
@@ -431,5 +432,117 @@ describe('Draft preparation boards (UX04 AC3/AC4)', () => {
 
   it('places a Task created here at the end of the first column until its save reaches the board', () => {
     expect(arranged(localColumns(draft(), [], ['t1', 't2', 't3', 'new'], new Set(['new'])))).toEqual(['Ideas:t1,t2,new', 'In preparation:', 'Ready:t3'])
+  })
+})
+
+/** Browser storage for one key, as a page reload would find it. */
+function memoryStorage() {
+  const items = new Map<string, string>()
+  return {
+    items,
+    storage: { getItem: (k: string) => items.get(k) ?? null, setItem: (k: string, v: string) => { items.set(k, v) }, removeItem: (k: string) => { items.delete(k) } } as unknown as Storage,
+  }
+}
+
+describe('learner board intents survive a reload (UX05 AC10)', () => {
+  const move = { kind: 'move' as const, taskId: 't1', columnId: 'done', index: 0, columnName: 'Done' }
+
+  it('keeps a failed move in storage and restores it after a reload for Retry, never sending it on its own', async () => {
+    const memory = memoryStorage()
+    const store = storedIntents(() => memory.storage, 'k')
+    const before = harness(board(), undefined, store)
+    await before.sync.refresh()
+    before.sync.perform(move)
+    // Kept while in flight, and after the failure.
+    expect(JSON.parse(memory.items.get('k')!)).toEqual({ baseRevision: 0, ops: [move] })
+    before.saves[0].answer({ kind: 'failed', detail: 'the backend could not be reached' })
+    await tick()
+    expect(JSON.parse(memory.items.get('k')!)).toEqual({ baseRevision: 0, ops: [move] })
+
+    // The page is reloaded: a new sync over the same storage.
+    const after = harness(board(), undefined, storedIntents(() => memory.storage, 'k'))
+    expect(after.last()).toBeUndefined()
+    await after.sync.refresh()
+    expect(after.last().status).toEqual({ kind: 'failed', detail: RESTORED_DETAIL })
+    expect(after.last().pending).toBe(1)
+    expect(arranged(after.last().columns)).toContain('Done*:t1,t4')
+    expect(after.saves).toHaveLength(0)
+    after.sync.retry()
+    expect(after.saves[0]).toMatchObject({ expectedRevision: 0, columns: before.saves[0].columns })
+    after.saves[0].answer({ kind: 'accepted', board: { ...board(1), columns: after.saves[0].columns } })
+    await tick()
+    expect(after.last().status.kind).toBe('saved')
+    expect(memory.items.has('k')).toBe(false)
+  })
+
+  it('restored intents meet a newer board (perhaps their own lost save) as a conflict the owner reapplies or discards', async () => {
+    const memory = memoryStorage()
+    memory.items.set('k', JSON.stringify({ baseRevision: 0, ops: [move] } satisfies KeptIntents))
+    const reapplied = harness(board(3), undefined, storedIntents(() => memory.storage, 'k'))
+    await reapplied.sync.refresh()
+    expect(reapplied.last().status).toMatchObject({ kind: 'conflict', restored: true, current: { revision: 3 } })
+    expect(reapplied.saves).toHaveLength(0)
+    reapplied.sync.reapply()
+    expect(reapplied.saves[0].expectedRevision).toBe(3)
+
+    memory.items.set('k', JSON.stringify({ baseRevision: 0, ops: [move] }))
+    const discarded = harness(board(3), undefined, storedIntents(() => memory.storage, 'k'))
+    await discarded.sync.refresh()
+    discarded.sync.discard()
+    expect(discarded.last().status.kind).toBe('saved')
+    expect(arranged(discarded.last().columns)).toEqual(arranged(board().columns))
+    expect(memory.items.has('k')).toBe(false)
+  })
+
+  it('two tabs with pending edits each keep their own: one tab\'s accepted save or discard never loses the other\'s after a reload (UX05 AC9/AC10)', async () => {
+    // Each tab has its own session storage under the same Account/Enrollment/Skill key.
+    const tabA = memoryStorage(), tabB = memoryStorage()
+    const a = harness(board(), undefined, storedIntents(() => tabA.storage, 'k'))
+    const b = harness(board(), undefined, storedIntents(() => tabB.storage, 'k'))
+    await a.sync.refresh()
+    await b.sync.refresh()
+    // A moves t1 and its answer is delayed; B moves t2 and its save fails.
+    a.sync.perform(move)
+    const moveT2 = { kind: 'move' as const, taskId: 't2', columnId: 'doing', index: 0, columnName: 'In Progress' }
+    b.sync.perform(moveT2)
+    b.saves[0].answer({ kind: 'failed', detail: 'the backend could not be reached' })
+    await tick()
+    // A's save is accepted: A forgets only its own intents.
+    a.saves[0].answer({ kind: 'accepted', board: { ...board(1), columns: a.saves[0].columns } })
+    await tick()
+    expect(tabA.items.has('k')).toBe(false)
+    expect(JSON.parse(tabB.items.get('k')!)).toEqual({ baseRevision: 0, ops: [moveT2] })
+    // A discards a later change of its own: still nothing of B's is touched.
+    a.sync.perform({ ...move, columnId: 'backlog' })
+    a.saves[1].answer({ kind: 'failed', detail: 'x' })
+    await tick()
+    a.sync.discard()
+    expect(JSON.parse(tabB.items.get('k')!)).toEqual({ baseRevision: 0, ops: [moveT2] })
+    // B reloads: its change comes back against A's newer board, for B to reapply.
+    const reloaded = harness({ ...board(1), columns: a.saves[0].columns }, undefined, storedIntents(() => tabB.storage, 'k'))
+    await reloaded.sync.refresh()
+    expect(reloaded.last().status).toMatchObject({ kind: 'conflict', restored: true })
+    reloaded.sync.reapply()
+    expect(arranged(reloaded.saves[0].columns)).toEqual(['Backlog:', 'In Progress:t2,t3', 'Done*:t1,t4'])
+  })
+
+  it('a tab that kept nothing never forgets another tab\'s kept intents; unreadable storage is dropped, not restored', async () => {
+    const memory = memoryStorage()
+    memory.items.set('k', JSON.stringify({ baseRevision: 0, ops: [move] }))
+    // Another tab opened before the intents were kept: it loaded nothing and keeps nothing.
+    const other = harness(board(), undefined, { load: () => null, save: (kept) => storedIntents(() => memory.storage, 'k').save(kept) })
+    await other.sync.refresh()
+    expect(other.last().status.kind).toBe('saved')
+    expect(memory.items.has('k')).toBe(true)
+    for (const raw of ['not json', '{"baseRevision":-1,"ops":[]}', JSON.stringify({ baseRevision: 0, ops: [{ kind: 'move', taskId: 1 }] }), JSON.stringify({ baseRevision: 0, ops: [{ kind: 'explode' }] })]) {
+      memory.items.set('bad', raw)
+      expect(storedIntents(() => memory.storage, 'bad').load()).toBeNull()
+      expect(memory.items.has('bad')).toBe(false)
+    }
+    // Unavailable storage keeps nothing and breaks nothing.
+    const none = harness(board(), undefined, storedIntents(() => null, 'k'))
+    await none.sync.refresh()
+    none.sync.perform(move)
+    expect(none.saves).toHaveLength(1)
   })
 })

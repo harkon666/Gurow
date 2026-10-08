@@ -8,7 +8,7 @@ const skill = (over: Partial<EnrollmentSkillState> = {}): EnrollmentSkillState =
 })
 const records = (over: Partial<EnrollmentLearningState> = {}): EnrollmentLearningState => ({
   enrollmentId: 'e', learningPathVersionId: 'v', enrollmentStatus: 'active', xp: 0, skills: [], tasks: [],
-  xpHistory: [], masteryHistory: [], taskStarts: [], awaitingReview: [], overrideHistory: [], lifecycleHistory: [], ...over,
+  xpHistory: [], masteryHistory: [], taskStarts: [], awaitingReview: [], overrideHistory: [], lifecycleHistory: [], taskReviews: [], ...over,
 })
 const record = (sequence: number, action: 'grant' | 'revoke', reason = 'Prior coursework', over: Partial<OverrideRecord> = {}): OverrideRecord => ({
   id: `o${sequence}`, sequence, enrollmentId: 'e', learningPathVersionId: 'v', skillId: 'matrices', coachAccountId: 'carla', learnerAccountId: 'lena',

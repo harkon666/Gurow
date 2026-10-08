@@ -6,6 +6,7 @@ import * as authoring from './authoring'
 import * as coaching from './coaching'
 import type { Database } from './db/client'
 import { readDraftBoard, saveDraftBoard, type DraftBoardRefusal } from './draftBoard'
+import { readEnrollmentBoard, saveEnrollmentBoard, type EnrollmentBoardRefusal } from './enrollmentBoard'
 import { acceptInvitation, listLearnerEnrollments, readEnrolledVersion, readEnrollment, readInvitation, type EnrollmentRefusal } from './enrollments'
 import type { IdentityResolver } from './identity'
 import * as invitations from './invitations'
@@ -62,6 +63,16 @@ const DRAFT_BOARD_REFUSAL_STATUS: Record<DraftBoardRefusal, ContentfulStatusCode
   draft_not_found: 404,
   skill_not_found: 404,
   draft_published: 409,
+  stale_revision: 409,
+  board_task_missing: 422,
+  board_task_unknown: 422,
+  column_owned_elsewhere: 422,
+}
+
+const ENROLLMENT_BOARD_REFUSAL_STATUS: Record<EnrollmentBoardRefusal, ContentfulStatusCode> = {
+  enrollment_not_found: 404,
+  skill_not_found: 404,
+  learner_only: 403,
   stale_revision: 409,
   board_task_missing: 422,
   board_task_unknown: 422,
@@ -151,6 +162,7 @@ function parseContents(body: unknown): SubmissionContents | null {
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const NIL_UUID = '00000000-0000-0000-0000-000000000000'
 
 /**
  * The backend request interface; identity comes only from the injected resolver.
@@ -318,6 +330,35 @@ export function createApp({ db, identity, auth, delivery }: { db: Database; iden
     return c.json({ review: result.value })
   })
 
+  // A learner's own Task Board for one Skill of the Enrollment (ADR 0027, 0030): saved whole against
+  // its own revision like the other boards, but its columns have no role, so a save writes nothing
+  // but the board: never a Submission, Review, XP, Mastery or Task start. Only the learner reaches it.
+  const enrollmentBoardRoute = '/enrollments/:enrollmentId/skills/:skillId/board'
+  const enrollmentBoardTarget = (enrollmentId: string, skillId: string) =>
+    UUID.test(enrollmentId) ? { enrollmentId: enrollmentId.toLowerCase(), skillId: UUID.test(skillId) ? skillId.toLowerCase() : NIL_UUID } : null
+  app.get(enrollmentBoardRoute, async (c) => {
+    const target = enrollmentBoardTarget(c.req.param('enrollmentId'), c.req.param('skillId'))
+    if (!target) return c.json({ error: 'enrollment_not_found' }, 404)
+    const result = await readEnrollmentBoard(db, target.enrollmentId, target.skillId, c.get('accountId'))
+    if (!result.ok) return c.json({ error: result.refusal, detail: result.detail }, ENROLLMENT_BOARD_REFUSAL_STATUS[result.refusal])
+    return c.json({ board: result.board })
+  })
+
+  app.put(enrollmentBoardRoute, async (c) => {
+    const target = enrollmentBoardTarget(c.req.param('enrollmentId'), c.req.param('skillId'))
+    if (!target) return c.json({ error: 'enrollment_not_found' }, 404)
+    const input = parseBoardInput(await c.req.json().catch(() => null), { completionColumn: false })
+    if (!input.ok) {
+      // An invalid board for someone else's Enrollment or Skill is still refused as such.
+      const owned = await readEnrollmentBoard(db, target.enrollmentId, target.skillId, c.get('accountId'))
+      if (!owned.ok) return c.json({ error: owned.refusal, detail: owned.detail }, ENROLLMENT_BOARD_REFUSAL_STATUS[owned.refusal])
+      return c.json({ error: 'invalid_board', detail: input.detail }, 422)
+    }
+    const result = await saveEnrollmentBoard(db, target.enrollmentId, target.skillId, c.get('accountId'), input.value)
+    if (!result.ok) return c.json({ error: result.refusal, detail: result.detail, ...(result.current ? { current: result.current } : {}) }, ENROLLMENT_BOARD_REFUSAL_STATUS[result.refusal])
+    return c.json({ changed: result.changed, board: result.board })
+  })
+
   const overrideRoute = '/enrollments/:enrollmentId/skills/:skillId/access-overrides'
   for (const action of ['grant', 'revoke'] as const) {
     app.post(action === 'grant' ? overrideRoute : `${overrideRoute}/:grantRecordId/revoke`, async (c) => {
@@ -338,7 +379,6 @@ export function createApp({ db, identity, auth, delivery }: { db: Database; iden
   // Toggles are idempotent: a repeat answers 200 with `changed: false` and records nothing.
   app.use('/personal/*', authenticate)
   const personalPath = '/personal/learning-paths/:pathId'
-  const NIL_UUID = '00000000-0000-0000-0000-000000000000'
   // A malformed Path is unknown; a malformed Task/Skill is unknown only after ownership is checked.
   const personalTarget = (pathId: string, targetId: string) => UUID.test(pathId) ? { pathId, targetId: UUID.test(targetId) ? targetId : NIL_UUID } : null
   type PersonalResult = Awaited<ReturnType<typeof personal.completeTask>>
