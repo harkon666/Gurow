@@ -4,7 +4,7 @@ import { lstatSync, readFileSync, readlinkSync } from 'node:fs'
 import { resolve, sep } from 'node:path'
 
 /** Current Git source inputs, including dirty/untracked files, not only HEAD.
- * Encoding matches scripts/harness.py source_hash: sorted raw path bytes, NUL,
+ * Encoding (shared with the former harness runner's source_hash): sorted raw path bytes, NUL,
  * decimal permission mode + NUL + contents (or link:target / deleted), NUL.
  * Ignored build outputs and .harness reports cannot change source identity.
  * Symlinks are recorded, never read through to external contents.

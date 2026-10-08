@@ -16,6 +16,6 @@ Use the canonical triage labels, including `ready-for-agent` for agreed specs. R
 
 This project uses one domain context. Before domain exploration, specification, or implementation, read [the domain documentation rules](docs/agents/domain.md), the glossary, and relevant ADRs.
 
-### Implementation and review harness
+### Tests
 
-When implementing a ticket, fixing review findings, or preparing a review handoff, follow [the harness workflow](docs/agents/harness.md). Resume `.harness/task.json` for the same ticket; pin the ticket/base once, map every acceptance criterion to observable assertions, and run current full checks before claiming readiness for independent review. During review-fix cycles run only the affected checks with `check --only`; run full checks again once after the last fix. New browser checks take `--skip-build`, declare `requires`, and run in parallel only with their own port and database.
+New behavior comes with tests at the seam that proves it: unit tests for pure domain logic, backend tests against real PostgreSQL for authorization and persistence, and a browser check for user journeys. For a bug, first make a test fail on it. Run `scripts/check.sh quick` while working and `scripts/check.sh full` before committing; report failures and skipped checks as they are. A new browser check uses its own ports and `gurow_<name>_browser_test` database, takes `--skip-build`, and is added to `BROWSER` in `scripts/check.sh` and to [the regression audit](docs/validation/regression-audit.md). The headed P1 performance capture is opt-in (`cd frontend && bun run capture:p1`) and never part of these checks.

@@ -19,22 +19,6 @@ function fixture() {
 }
 
 describe('current Git source fingerprint (real filesystem/Git)', () => {
-  it('matches the existing Python harness source_hash encoding', () => {
-    const { root, hash } = fixture()
-    unlinkSync(join(root, 'source.ts'))
-    writeFileSync(join(root, 'é\nnew.ts'), 'dirty bytes\0')
-    chmodSync(join(root, 'é\nnew.ts'), 0o751)
-    symlinkSync('missing-target', join(root, 'link'))
-    mkdirSync(join(root, '.harness'))
-    writeFileSync(join(root, '.harness', 'report'), 'ignored')
-    writeFileSync(Buffer.concat([Buffer.from(`${root}/`), Buffer.from([0xff])]), 'raw name')
-    const harness = fileURLToPath(new URL('../../../scripts/harness.py', import.meta.url))
-    const python = execFileSync('python3', ['-c',
-      'import runpy,sys; from pathlib import Path; f=runpy.run_path(sys.argv[1])["source_hash"]; f.__globals__["ROOT"]=Path(sys.argv[2]); print(f())',
-      harness, root], { encoding: 'utf8' }).trim()
-    expect(hash()).toBe(python)
-  })
-
   it('is stable, SHA256-shaped, and independent of staging', () => {
     const { root, hash, git } = fixture()
     const first = hash()

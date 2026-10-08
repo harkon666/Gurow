@@ -55,11 +55,18 @@ bun run smoke-check
 ```
 Validation artifacts and reports are saved to `docs/validation/`.
 
-### Agent implementation harness
+### All checks in one command
 
-Use [the harness guide](docs/HARNESS.md) to pin a GitHub ticket, map its acceptance
-criteria to tests, run quick/full checks, and prepare an independent review packet.
-Run `python3 scripts/harness.py --help` from the repository root.
+From the repository root (needs Docker for PostgreSQL and Chromium for the browser checks):
+
+```bash
+scripts/check.sh quick   # types, unit, Rust and backend tests
+scripts/check.sh full    # quick, then one build and every browser regression check
+scripts/check.sh ux05    # chosen checks by name or unique prefix (scripts/check.sh list)
+```
+
+Logs go to `.harness/check-logs/`. Why each browser check exists is recorded in
+[the regression audit](docs/validation/regression-audit.md).
 
 ### T01 scope and evidence
 

@@ -1,14 +1,14 @@
 # Regression check audit (#52)
 
-Audited on 2026-10-07 against `main` at `2cb404c`. Each check in `harness.json` has one decision:
+Audited on 2026-10-07 against `main` at `2cb404c` and kept up to date since. Each check has one decision:
 
-- **Keep**: it guards an invariant no newer check covers, and it is in the `regression` profile.
+- **Keep**: it guards an invariant no newer check covers, and `scripts/check.sh full` runs it.
 - **Adapt**: it is kept, and its UI-coupled assertions now read behaviour or `data-*` state instead of wording.
-- **Retire**: every assertion is covered elsewhere, named in the table. The check leaves the `regression` profile. It stays in `harness.json` for its ticket's own acceptance and history.
+- **Retire**: every assertion is covered elsewhere, named in the table, so it is no longer run separately.
 - **Support**: the build, database or type check that the other checks need. Not a behaviour check.
-- **Out of profile**: performance or historical evidence and not a functional regression. The headed P1 gate stays separate (`docs/agents/harness.md`).
+- **Out of profile**: performance or historical evidence and not a functional regression. The headed P1 gate stays separate and opt-in.
 
-`python3 scripts/harness.py check` runs the `full` profile, which is `@regression`. A ticket entry lists its own acceptance checks and references `@regression` instead of copying earlier tickets' lists. `scripts/test_harness.py` checks that this table and `harness.json` agree.
+`scripts/check.sh full` runs every Keep and Adapt browser check (its `BROWSER` list) after the suites. A new browser check gets a row here when it joins that list.
 
 ## Browser checks
 
@@ -40,7 +40,7 @@ Every browser check is in the profile. No browser check is retired: each one gua
 | `t30-archive-content` | Keep | Retention and archival: archived Tasks keep their history and XP, deletion of Tasks with history is blocked, Version evidence is kept | |
 | `t31-arrange-selection` | Keep | Box selection and multi-drag as one undo step, world limits, stale and out-of-range saves refused | |
 | `t32-delete-content` | Keep | Deletion refused when history exists, undo/redo of deletions as new saves, stale and forbidden deletions | |
-| `ux01-navigation` | Adapt | Canvas-first shell, keyboard navigation, truthful save language, no technical chrome, renderer-down learning and Review, forbidden cross-context writes | UX03 (#49): Open board is expected in the personal context. UX04 (#50): it is expected in the Coach Draft too. UX05 (#51): it is expected in the learner's enrolled view; the Coach Review view must still show no board action. |
+| `ux01-navigation` | Adapt | Canvas-first shell, keyboard navigation, truthful save language, no technical chrome, renderer-down learning and Review, forbidden cross-context writes | UX03 (#49): Open board is expected in the personal context. UX04 (#50): it is expected in the Coach Draft too. UX05 (#51): it is expected in the learner's enrolled view; the Coach Review view must still show no board action. Since the summary gained views (Edit, Manage prerequisites, History, Tasks), Tasks are reached on the board or the Tasks view, and save states are exercised through learning-outcome edits. |
 | `ux02-connections` | Keep | Dragged Prerequisite connections: validation, persistence, one-gesture undo, stale reapply, read-only learner and published views | |
 | `ux03-task-board` | Keep | Personal Task Board (#49): Completion Column membership equals completion under XP rules, failed/lost/stale/refused board writes keep local intent, column removal never loses Tasks, archived Tasks stay off the board, narrow keyboard use without WebGPU | Added by UX03; parallel on ports 3595/3596 with `gurow_ux03_browser_test`. |
 | `ux04-coach-board` | Keep | Coach Draft preparation board (#50): columns grant no Approval, XP, Mastery or publication gate, only the owning Coach reads or saves it, a published Draft's board is frozen, deletion undo and archival keep published material and history, failed/stale writes keep local intent, identity switching leaks nothing, narrow keyboard use without WebGPU | Added by UX04; parallel on ports 3597/3598 with `gurow_ux04_browser_test`. |
@@ -50,7 +50,7 @@ Every browser check is in the profile. No browser check is retired: each one gua
 
 | Check | Decision | Invariant guarded | Notes |
 | --- | --- | --- | --- |
-| `harness-tests` | Keep | Harness runner behaviour, profile resolution and agreement between this table and `harness.json` | |
+| `scripts-tests` | Keep | Graphify brain pipeline tests (`scripts/test_*.py`) | Was `harness-tests` while the harness runner existed (removed). |
 | `frontend-tests` | Keep | Every frontend unit test (`bun test` finds all `*.test.ts` under `src/` and `scripts/`) | |
 | `rust-tests` | Keep | Every engine, renderer and Wasm test in the workspace, without a name filter | |
 | `backend-tests` | Keep | Every backend integration test against migrated PostgreSQL (`bun test` finds all of `backend/test/*.test.ts`) | |
@@ -61,7 +61,7 @@ Every browser check is in the profile. No browser check is retired: each one gua
 
 ## Retired from the profile
 
-Each of these runs the same test files as a broader suite in the profile. The suite runs those files whole, with no name filter, so every assertion still runs. The checks stay in `harness.json` as their ticket's acceptance.
+Each of these ran the same test files as a broader suite. The suite runs those files whole, with no name filter, so every assertion still runs.
 
 | Check | Decision | Invariant guarded | Covered by |
 | --- | --- | --- | --- |
@@ -127,11 +127,11 @@ Kept checks still assert some user-facing text where that text is the behaviour 
 
 ## Evidence that adapted checks still fail
 
-Each break was applied to the working tree, run with `harness.py check --only` on a fresh build, then reverted:
+Each break was applied to the working tree, run alone on a fresh build (then with the former harness runner), then reverted:
 
 | Deliberate break | Adapted check | Result |
 | --- | --- | --- |
 | Engine: `CanvasDocument::can_connect` never reports `CreatesCycle` (`engine-core/src/document.rs`), so cycles are accepted | `t16-path-authoring`, `t06-functional` | Both failed: no `#cycle-rejection-alert[data-kind="cycle"]` appeared (run `20261007T111907213337Z`). |
 | Product: the editor badge reports a rejected checkpoint as `saved` (`src/routes/editor.tsx`) | `t04-browser` | Failed: `Expected the checkpoint badge in state "rejected", got "saved"` (run `20261007T111938752111Z`). |
 
-The run logs are local harness evidence in `.harness/runs/`, which is not committed.
+The run logs were local evidence in `.harness/runs/`, which is not committed.
