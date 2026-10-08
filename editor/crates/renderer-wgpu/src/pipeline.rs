@@ -1,5 +1,5 @@
 use bytemuck::{Pod, Zeroable};
-use engine_core::{connection_curve, cubic_point, cubic_tangent, EditorState, Point, CONNECTION_CURVE_SEGMENTS};
+use engine_core::{connection_route, cubic_point, cubic_tangent, EditorState, Point, CONNECTION_CURVE_SEGMENTS};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
@@ -327,8 +327,7 @@ impl WgpuRenderer {
             ) {
                 let selected = state.selected_connection.as_ref() == Some(conn);
                 generate_bezier_connection_mesh(
-                    from_card.connection_point(),
-                    to_card.incoming_point(),
+                    connection_route(&from_card.world_bounds(), &to_card.world_bounds()),
                     if selected { 5.0 } else { 2.5 },
                     if selected { selected_color } else { connection_color },
                     &mut connection_vertices,
@@ -342,7 +341,7 @@ impl WgpuRenderer {
                 Some(false) => [0.94, 0.33, 0.33, 1.0],
                 None => [0.58, 0.77, 0.99, 0.9],
             };
-            generate_bezier_connection_mesh(preview.start, preview.end, 3.0, color, &mut connection_vertices);
+            generate_bezier_connection_mesh(preview.curve, 3.0, color, &mut connection_vertices);
         }
 
         if connection_vertices.len() > self.connection_buffer_capacity {
@@ -453,13 +452,12 @@ impl WgpuRenderer {
 /// Meshes the connection curve shared with engine hit testing, so a press selects
 /// the edge that is drawn.
 fn generate_bezier_connection_mesh(
-    start: Point,
-    end: Point,
+    curve: [Point; 4],
     thickness: f32,
     color: [f32; 4],
     vertices: &mut Vec<ConnectionVertexRaw>,
 ) {
-    let curve = connection_curve(start, end);
+    let end = curve[3];
     let segments = CONNECTION_CURVE_SEGMENTS;
     let half_w = thickness * 0.5;
 

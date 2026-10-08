@@ -171,12 +171,102 @@ pub const CONNECTION_HIT_TOLERANCE_PX: f32 = 6.0;
 /// Segments used to draw and to hit-test a connection curve.
 pub const CONNECTION_CURVE_SEGMENTS: usize = 24;
 
-/// The cubic Bézier control points of a connection from `start` (the source
-/// card's connection point) to `end` (the target card's left edge). Rendering
-/// and hit testing share this curve, so a press lands on the edge that is drawn.
-pub fn connection_curve(start: Point, end: Point) -> [Point; 4] {
-    let dx = (end.x - start.x).abs().max(40.0) * 0.5;
-    [start, Point::new(start.x + dx, start.y), Point::new(end.x - dx, end.y), end]
+/// A side of a card, where a connection leaves or arrives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Side {
+    Top,
+    Right,
+    Bottom,
+    Left,
+}
+
+impl Side {
+    pub const ALL: [Side; 4] = [Side::Top, Side::Right, Side::Bottom, Side::Left];
+
+    /// The outward unit normal of the side.
+    pub fn normal(self) -> Point {
+        match self {
+            Side::Top => Point::new(0.0, -1.0),
+            Side::Right => Point::new(1.0, 0.0),
+            Side::Bottom => Point::new(0.0, 1.0),
+            Side::Left => Point::new(-1.0, 0.0),
+        }
+    }
+
+    pub fn opposite(self) -> Side {
+        match self {
+            Side::Top => Side::Bottom,
+            Side::Right => Side::Left,
+            Side::Bottom => Side::Top,
+            Side::Left => Side::Right,
+        }
+    }
+}
+
+impl Rect {
+    pub fn center(&self) -> Point {
+        Point::new(self.x + self.width * 0.5, self.y + self.height * 0.5)
+    }
+
+    /// The middle of one side of the rectangle.
+    pub fn side_midpoint(&self, side: Side) -> Point {
+        let c = self.center();
+        match side {
+            Side::Top => Point::new(c.x, self.y),
+            Side::Right => Point::new(self.x + self.width, c.y),
+            Side::Bottom => Point::new(c.x, self.y + self.height),
+            Side::Left => Point::new(self.x, c.y),
+        }
+    }
+}
+
+/// The sides a connection from `from` to `to` leaves and enters by: the facing
+/// sides across the wider gap between the two boxes, so the curve runs through
+/// the open space between them. A tie favours left-to-right.
+pub fn facing_sides(from: &Rect, to: &Rect) -> (Side, Side) {
+    let (a, b) = (from.center(), to.center());
+    let (dx, dy) = (b.x - a.x, b.y - a.y);
+    let horizontal_gap = dx.abs() - (from.width + to.width) * 0.5;
+    let vertical_gap = dy.abs() - (from.height + to.height) * 0.5;
+    let side = if horizontal_gap >= vertical_gap {
+        if dx >= 0.0 { Side::Right } else { Side::Left }
+    } else if dy >= 0.0 {
+        Side::Bottom
+    } else {
+        Side::Top
+    };
+    (side, side.opposite())
+}
+
+/// The cubic Bézier control points of a connection leaving `start` through
+/// `start_side` and arriving at `end` through `end_side`. Each end leaves along
+/// its side's normal, so the arrowhead points into the side it reaches.
+pub fn connection_curve(start: Point, start_side: Side, end: Point, end_side: Side) -> [Point; 4] {
+    let span = match start_side {
+        Side::Left | Side::Right => (end.x - start.x).abs(),
+        Side::Top | Side::Bottom => (end.y - start.y).abs(),
+    };
+    let reach = span.max(40.0) * 0.5;
+    let (n0, n1) = (start_side.normal(), end_side.normal());
+    [
+        start,
+        Point::new(start.x + n0.x * reach, start.y + n0.y * reach),
+        Point::new(end.x + n1.x * reach, end.y + n1.y * reach),
+        end,
+    ]
+}
+
+/// The curve of a connection between two cards, attached to their facing sides.
+/// Rendering and hit testing share this curve, so a press lands on the edge
+/// that is drawn.
+pub fn connection_route(from: &Rect, to: &Rect) -> [Point; 4] {
+    let (start_side, end_side) = facing_sides(from, to);
+    connection_curve(from.side_midpoint(start_side), start_side, to.side_midpoint(end_side), end_side)
+}
+
+/// The curve of a connection being dragged from a card to a free point.
+pub fn connection_route_to_point(from: &Rect, point: Point) -> [Point; 4] {
+    connection_route(from, &Rect::new(point.x, point.y, 0.0, 0.0))
 }
 
 /// The point of a cubic Bézier at `t` in [0, 1].

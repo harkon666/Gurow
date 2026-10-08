@@ -66,7 +66,10 @@ export const SelectCardCommandSchema = z.object({
   id: z.string().nullable(),
 })
 
-/** With `shift_key` on the empty canvas, the press draws a selection box instead of panning. */
+/**
+ * With `shift_key` on the empty canvas, the press draws a selection box instead of
+ * panning; on a card, it adds the card to the selection or takes it out.
+ */
 export const PointerDownCommandSchema = z.object({
   type: z.literal('PointerDown'),
   screen_x: z.number(),
@@ -97,6 +100,34 @@ export const ZoomAtCommandSchema = z.object({
   screen_x: z.number(),
   screen_y: z.number(),
   factor: z.number(),
+})
+
+export const SelectAllCommandSchema = z.object({
+  type: z.literal('SelectAll'),
+})
+
+/** Moves the selection by a world-space step; consecutive steps of the same cards are one undo step. */
+export const NudgeSelectionCommandSchema = z.object({
+  type: z.literal('NudgeSelection'),
+  delta_x: z.number(),
+  delta_y: z.number(),
+})
+
+export const ArrangementSchema = z.enum([
+  'AlignLeft',
+  'AlignCenter',
+  'AlignRight',
+  'AlignTop',
+  'AlignMiddle',
+  'AlignBottom',
+  'DistributeHorizontally',
+  'DistributeVertically',
+])
+
+/** Aligns (two or more cards) or evenly spaces (three or more) the selection, as one undo step. */
+export const ArrangeSelectionCommandSchema = z.object({
+  type: z.literal('ArrangeSelection'),
+  arrangement: ArrangementSchema,
 })
 
 export const UndoCommandSchema = z.object({
@@ -174,6 +205,9 @@ export const EditorCommandSchema = z.discriminatedUnion('type', [
   PointerUpCommandSchema,
   PanCameraCommandSchema,
   ZoomAtCommandSchema,
+  SelectAllCommandSchema,
+  NudgeSelectionCommandSchema,
+  ArrangeSelectionCommandSchema,
   UndoCommandSchema,
   RedoCommandSchema,
   ResizeViewportCommandSchema,
@@ -379,6 +413,7 @@ export type Rect = z.infer<typeof RectSchema>
 export type LabelLayout = z.infer<typeof LabelLayoutSchema>
 export type SkillCard = z.infer<typeof SkillCardSchema>
 export type PrerequisiteConnection = z.infer<typeof PrerequisiteConnectionSchema>
+export type Arrangement = z.infer<typeof ArrangementSchema>
 export type EditorCommand = z.infer<typeof EditorCommandSchema>
 export type EditorEvent = z.infer<typeof EditorEventSchema>
 export type EditorSnapshot = z.infer<typeof EditorSnapshotSchema>

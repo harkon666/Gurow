@@ -12,7 +12,8 @@ import { useWasmEditor } from './useWasmEditor'
 import { EditorToolbar } from './EditorToolbar'
 import { WebGpuEnableHint } from './WebGpuEnableHint'
 import { connectionRejectionMessage, isConnectionRejection } from './connectionRejection'
-import { SkillCardOverlay, connectionPointRadius, type ConnectionOverlay, type LabelStatus } from './SkillCardOverlay'
+import { SkillCardOverlay, connectionHandles, connectionPointRadius, type ConnectionOverlay, type LabelStatus } from './SkillCardOverlay'
+import { SelectionArrangeBar } from './SelectionArrangeBar'
 import { cssToLogicalPoint } from './coords'
 
 export interface WebGpuEditorActions {
@@ -73,6 +74,14 @@ interface WebGpuEditorProps {
   onConnectionDrop?: (fromId: string, toId: string) => string | null | void
   /** The application's own reason to refuse a connection, so its targets are not highlighted as valid. */
   connectionProblem?: (fromId: string, toId: string) => string | null
+}
+
+/** World-space direction of each arrow key's step. */
+const NUDGE_DIRECTIONS: Record<string, [number, number]> = {
+  ArrowLeft: [-1, 0],
+  ArrowRight: [1, 0],
+  ArrowUp: [0, -1],
+  ArrowDown: [0, 1],
 }
 
 export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
@@ -141,6 +150,9 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
     exportSnapshot,
     setCamera,
     selectCard,
+    selectAll,
+    nudgeSelection,
+    arrangeSelection,
     simulateDeviceLoss,
     recreateRenderer,
     handlePointerDown,
@@ -175,6 +187,23 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
   const editsConnections = !readOnly && !layoutOnly && gpuStatus === 'ready'
   const [hover, setHover] = useState<{ id: string | null; onPoint: boolean }>({ id: null, onPoint: false })
   /** Which card, and whether its connection point, lies under the pointer; mirrors the engine's hit test for display. */
+  // Keyboard arrangement on the focused canvas: Ctrl/Cmd+A selects every Skill,
+  // Escape clears the selection, and the arrow keys move it (Shift for larger steps).
+  const handleSelectionKey = (event: React.KeyboardEvent<HTMLCanvasElement>) => {
+    const modifier = event.ctrlKey || event.metaKey
+    if (modifier && !event.altKey && event.key.toLowerCase() === 'a') {
+      event.preventDefault()
+      selectAll()
+    } else if (event.key === 'Escape' && selectedIds.length > 0) {
+      event.preventDefault()
+      selectCard(null)
+    } else if (event.key in NUDGE_DIRECTIONS && !readOnly && selectedIds.length > 0 && !modifier && !event.altKey) {
+      event.preventDefault()
+      const [dx, dy] = NUDGE_DIRECTIONS[event.key]
+      const step = event.shiftKey ? 50 : 10
+      nudgeSelection(dx * step, dy * step)
+    }
+  }
   const hoverAt = (clientX: number, clientY: number) => {
     const canvas = canvasRef.current
     if (!canvas) return { id: null, onPoint: false }
@@ -184,8 +213,11 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
     // Front to back, as the engine resolves a press: a card body hides the points behind it.
     for (let i = labels.length - 1; i >= 0; i--) {
       const { x, y, width, height } = labels[i].world_rect
-      const px = (x + width) * z + offset_x, py = (y + height / 2) * z + offset_y
-      if (Math.hypot(screen.x - px, screen.y - py) <= connectionPointRadius(width, height, z)) return { id: labels[i].card_id, onPoint: true }
+      const radius = connectionPointRadius(width, height, z)
+      const onPoint = connectionHandles(labels[i].world_rect).some(
+        (p) => Math.hypot(screen.x - (p.x * z + offset_x), screen.y - (p.y * z + offset_y)) <= radius
+      )
+      if (onPoint) return { id: labels[i].card_id, onPoint: true }
       if (wx >= x && wx <= x + width && wy >= y && wy <= y + height) return { id: labels[i].card_id, onPoint: false }
     }
     return { id: null, onPoint: false }
@@ -390,7 +422,8 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
           aria-label="Learning Path canvas. Use Skill list to browse with the keyboard."
           data-hover-connection-point={hover.onPoint ? 'true' : 'false'}
           onPointerDown={(event) => {
-            gesture.current = { x: event.clientX, y: event.clientY, moved: false, open: event.button === 0 && !event.shiftKey }
+            const toggles = event.shiftKey || event.ctrlKey || event.metaKey
+            gesture.current = { x: event.clientX, y: event.clientY, moved: false, open: event.button === 0 && !toggles }
             handlePointerDown(event)
             // A press on a connection point starts a connection, never opens the Skill.
             if (connectionDragRef.current) gesture.current.open = false
@@ -406,7 +439,10 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
           }}
           onPointerLeave={() => { if (!gesture.current && hover.id) setHover({ id: null, onPoint: false }) }}
           onKeyDown={(event) => {
-            if (!selectedConnection) return
+            if (!selectedConnection) {
+              handleSelectionKey(event)
+              return
+            }
             if (event.key === 'Escape') {
               event.preventDefault()
               selectConnection(null)
@@ -432,8 +468,12 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
             data-count={selectedIds.length}
             className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none text-[11px] text-blue-100 bg-blue-950/80 border border-blue-800/70 px-2.5 py-1 rounded-lg shadow"
           >
-            {selectedIds.length} Skills selected{readOnly ? '' : ' · drag one to move them together'}
+            {selectedIds.length} Skills selected{readOnly ? '' : ' · drag one or use the arrow keys to move them together'}
           </div>
+        )}
+
+        {!readOnly && gpuStatus === 'ready' && selectedIds.length > 1 && (
+          <SelectionArrangeBar count={selectedIds.length} onArrange={arrangeSelection} />
         )}
 
         {connectionDrag && (

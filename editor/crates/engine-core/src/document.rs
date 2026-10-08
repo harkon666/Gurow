@@ -1,4 +1,4 @@
-use crate::geometry::{Point, Rect, Size};
+use crate::geometry::{Point, Rect, Side, Size};
 use serde::{Deserialize, Serialize};
 
 pub const DEFAULT_CARD_WIDTH: f32 = 180.0;
@@ -44,15 +44,10 @@ impl SkillCard {
         Rect::new(self.position.x, self.position.y, self.size.width, self.size.height)
     }
 
-    /// Where outgoing connections start and a connection drag is grabbed: the
-    /// middle of the card's right edge.
-    pub fn connection_point(&self) -> Point {
-        Point::new(self.position.x + self.size.width, self.position.y + self.size.height * 0.5)
-    }
-
-    /// Where incoming connections end: the middle of the card's left edge.
-    pub fn incoming_point(&self) -> Point {
-        Point::new(self.position.x, self.position.y + self.size.height * 0.5)
+    /// Where a connection drag can be grabbed: the middle of one side. A
+    /// connection itself attaches to whichever sides face the other card.
+    pub fn connection_handle(&self, side: Side) -> Point {
+        self.world_bounds().side_midpoint(side)
     }
 }
 

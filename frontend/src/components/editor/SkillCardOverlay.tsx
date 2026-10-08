@@ -1,5 +1,5 @@
 import React, { useLayoutEffect, useMemo } from 'react'
-import type { CameraState, LabelLayout } from './protocol'
+import type { CameraState, LabelLayout, Rect } from './protocol'
 import { cameraToCssTransform } from './coords'
 import { recordLabelCommit, traceStage, type LabelRevision } from './benchmarkHooks'
 
@@ -31,6 +31,18 @@ export const CONNECTION_POINT_RADIUS_PX = 9
 /** The screen radius of a card's connection point at a zoom, as the engine hit-tests it. */
 export function connectionPointRadius(width: number, height: number, zoom: number): number {
   return Math.max(2, Math.min(CONNECTION_POINT_RADIUS_PX, Math.min(width, height) * zoom * 0.25))
+}
+
+export type Side = 'top' | 'right' | 'bottom' | 'left'
+
+/** A card's connection points, as the engine places them: the middle of each side, in world space. */
+export function connectionHandles({ x, y, width, height }: Rect): { side: Side; x: number; y: number }[] {
+  return [
+    { side: 'top', x: x + width / 2, y },
+    { side: 'right', x: x + width, y: y + height / 2 },
+    { side: 'bottom', x: x + width / 2, y: y + height },
+    { side: 'left', x, y: y + height / 2 },
+  ]
 }
 
 type TargetState = 'source' | 'valid' | 'invalid' | undefined
@@ -141,25 +153,27 @@ export const SkillCardOverlay: React.FC<SkillCardOverlayProps> = ({
     if (!connecting) return null
     return labels
       .filter((label) => label.selected || hoveredId === label.card_id || drag?.fromId === label.card_id)
-      .map((label) => {
+      .flatMap((label) => {
         const radius = connectionPointRadius(label.world_rect.width, label.world_rect.height, zoom) / zoom
-        return (
+        return connectionHandles(label.world_rect).map(({ side, x, y }) => (
           <div
-            key={label.card_id}
-            id={`card-connection-point-${label.card_id}`}
+            key={`${label.card_id}-${side}`}
+            // The right point keeps the bare id that existing checks look for.
+            id={side === 'right' ? `card-connection-point-${label.card_id}` : `card-connection-point-${label.card_id}-${side}`}
             data-card-id={label.card_id}
+            data-side={side}
             aria-hidden="true"
             style={{
               position: 'absolute',
-              left: `${label.world_rect.x + label.world_rect.width - radius}px`,
-              top: `${label.world_rect.y + label.world_rect.height / 2 - radius}px`,
+              left: `${x - radius}px`,
+              top: `${y - radius}px`,
               width: `${radius * 2}px`,
               height: `${radius * 2}px`,
               borderWidth: `${2 / zoom}px`,
             }}
             className={`rounded-full border-white ${drag?.fromId === label.card_id ? 'bg-emerald-400' : 'bg-blue-500'}`}
           />
-        )
+        ))
       })
   }, [labels, connecting, hoveredId, drag, zoom])
 

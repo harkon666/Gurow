@@ -1221,7 +1221,8 @@ fn test_multiselect_plain_presses_keep_single_selection_and_pan() {
     assert!(pan.iter().any(|e| matches!(e, EditorEvent::CameraChanged { .. })));
     state.apply_command(EditorCommand::PointerUp { screen_x: 720.0, screen_y: 690.0 });
 
-    // Shift on a card does not draw a box: the card alone is selected and dragged.
+    // Shift on a card does not draw a box: it toggles that card, and taking the
+    // only selected card out leaves nothing to drag.
     state.camera = Camera::default();
     box_select(&mut state, Point::new(0.0, 0.0), Point::new(700.0, 200.0));
     state.apply_command(EditorCommand::SelectCard { id: Some("card-c".into()) });
@@ -1229,7 +1230,9 @@ fn test_multiselect_plain_presses_keep_single_selection_and_pan() {
     press(&mut state, Point::new(120.0, 420.0), true);
     move_to(&mut state, Point::new(140.0, 430.0));
     release(&mut state, Point::new(140.0, 430.0));
-    assert_eq!(position(&state, "card-c"), Point::new(120.0, 410.0));
+    assert!(state.selected_card_ids.is_empty());
+    assert!(state.selection_box().is_none());
+    assert_eq!(position(&state, "card-c"), Point::new(100.0, 400.0));
     assert_eq!(position(&state, "card-a"), Point::new(100.0, 100.0));
 }
 
@@ -1550,7 +1553,7 @@ fn connect_release(state: &mut EditorState, p: Point) -> Vec<EditorEvent> {
     state.apply_command(EditorCommand::PointerUp { screen_x: p.x, screen_y: p.y })
 }
 fn connection_point_on_screen(state: &EditorState, id: &str) -> Point {
-    state.camera.world_to_screen(state.document.find_card(id).unwrap().connection_point())
+    state.camera.world_to_screen(state.document.find_card(id).unwrap().connection_handle(crate::Side::Right))
 }
 fn centre_on_screen(state: &EditorState, id: &str) -> Point {
     let b = state.document.find_card(id).unwrap().world_bounds();
@@ -1584,7 +1587,8 @@ fn test_card_body_moves_while_connection_point_starts_a_connection() {
     assert!(moved.iter().any(|e| matches!(e, EditorEvent::ConnectionDragTargetChanged { target_id: Some(t) } if t == "c")));
     let preview = state.connection_preview().unwrap();
     assert_eq!(preview.target_valid, Some(true));
-    assert_eq!(preview.end, state.document.find_card("c").unwrap().incoming_point());
+    let (a, c) = (state.document.find_card("a").unwrap(), state.document.find_card("c").unwrap());
+    assert_eq!(preview.curve, crate::connection_route(&a.world_bounds(), &c.world_bounds()));
     let ended = connect_release(&mut state, target);
     assert_eq!(dropped(&ended), Some(Some("c".to_string())));
     assert_eq!(state.document.find_card("a").unwrap().position, Point::new(20.0, 20.0), "card moved");
@@ -1700,9 +1704,9 @@ fn test_pressing_a_connection_selects_it_for_deletion_and_undo() {
     state.apply_command(EditorCommand::ConnectSkills { from_id: "a".into(), to_id: "c".into() });
     state.apply_command(EditorCommand::ConnectSkills { from_id: "b".into(), to_id: "c".into() });
     state.apply_command(EditorCommand::SetCamera { offset_x: 40.0, offset_y: 30.0, zoom: 1.5 });
-    let curve = crate::connection_curve(
-        state.document.find_card("b").unwrap().connection_point(),
-        state.document.find_card("c").unwrap().incoming_point(),
+    let curve = crate::connection_route(
+        &state.document.find_card("b").unwrap().world_bounds(),
+        &state.document.find_card("c").unwrap().world_bounds(),
     );
     let on_edge = state.camera.world_to_screen(crate::cubic_point(&curve, 0.5));
     let events = connect_press(&mut state, on_edge);
@@ -1798,10 +1802,215 @@ fn test_covered_connection_point_never_takes_the_front_card_body() {
 
     // Front's own point sticks out past its edge and stays usable; so does an uncovered point.
     assert_eq!(state.hit_connection_point(Point::new(120.0 + 180.0 + 4.0, 60.0)).as_deref(), Some("front"));
-    let target = state.camera.world_to_screen(state.document.find_card("target").unwrap().connection_point());
+    let target = state.camera.world_to_screen(state.document.find_card("target").unwrap().connection_handle(crate::Side::Right));
     assert_eq!(state.hit_connection_point(target).as_deref(), Some("target"));
 
     // The inner half of a card's own point, over its own body, is still that card's point.
-    let front_point = state.document.find_card("front").unwrap().connection_point();
+    let front_point = state.document.find_card("front").unwrap().connection_handle(crate::Side::Right);
     assert_eq!(state.hit_connection_point(Point::new(front_point.x - 4.0, front_point.y)).as_deref(), Some("front"));
+}
+
+#[test]
+fn test_connections_attach_to_the_sides_facing_each_other() {
+    use crate::{facing_sides, Side};
+    let card = |x: f32, y: f32| Rect::new(x, y, 180.0, 80.0);
+    assert_eq!(facing_sides(&card(0.0, 0.0), &card(400.0, 100.0)), (Side::Right, Side::Left));
+    assert_eq!(facing_sides(&card(400.0, 100.0), &card(0.0, 0.0)), (Side::Left, Side::Right));
+    assert_eq!(facing_sides(&card(0.0, 0.0), &card(60.0, 200.0)), (Side::Bottom, Side::Top));
+    assert_eq!(facing_sides(&card(60.0, 200.0), &card(0.0, 0.0)), (Side::Top, Side::Bottom));
+    // The wider gap wins: 100 across against 40 down runs sideways.
+    assert_eq!(facing_sides(&card(0.0, 0.0), &card(280.0, 120.0)), (Side::Right, Side::Left));
+
+    // A stacked pair connects bottom to top, and a press on that curve selects it.
+    let mut state = three_cards();
+    state.apply_command(EditorCommand::ConnectSkills { from_id: "a".into(), to_id: "b".into() });
+    let (a, b) = (state.document.find_card("a").unwrap(), state.document.find_card("b").unwrap());
+    let curve = crate::connection_route(&a.world_bounds(), &b.world_bounds());
+    assert_eq!(curve[0], Point::new(90.0, 80.0));
+    assert_eq!(curve[3], Point::new(90.0, 200.0));
+    assert!(curve[1].y > curve[0].y && curve[2].y < curve[3].y, "each end leaves along its side's normal");
+    let on_edge = state.camera.world_to_screen(crate::cubic_point(&curve, 0.5));
+    assert_eq!(state.hit_connection(on_edge), Some(crate::PrerequisiteConnection::new("a", "b")));
+}
+
+#[test]
+fn test_every_side_of_a_card_starts_a_connection() {
+    for side in crate::Side::ALL {
+        let mut state = three_cards();
+        let start = state.camera.world_to_screen(state.document.find_card("c").unwrap().connection_handle(side));
+        let events = connect_press(&mut state, start);
+        assert!(
+            events.iter().any(|e| matches!(e, EditorEvent::ConnectionDragStarted { from_id, .. } if from_id == "c")),
+            "{side:?}"
+        );
+        // Dragged toward A, the preview leaves C by the side facing the pointer.
+        let target = centre_on_screen(&state, "a");
+        drag_to(&mut state, target);
+        let preview = state.connection_preview().unwrap();
+        assert_eq!(preview.curve[0], state.document.find_card("c").unwrap().connection_handle(crate::Side::Left));
+        assert_eq!(dropped(&connect_release(&mut state, target)), Some(Some("a".to_string())));
+    }
+}
+
+fn shift_press(state: &mut EditorState, p: Point) -> Vec<EditorEvent> {
+    state.apply_command(EditorCommand::PointerDown { screen_x: p.x, screen_y: p.y, shift_key: true })
+}
+
+#[test]
+fn test_shift_press_on_a_card_toggles_it_and_drags_the_selection() {
+    let mut state = three_cards();
+    connect_press(&mut state, Point::new(60.0, 40.0));
+    connect_release(&mut state, Point::new(60.0, 40.0));
+    assert_eq!(state.selected_card_ids, vec!["a"]);
+
+    // Adding C and dragging it moves A along.
+    let c = centre_on_screen(&state, "c");
+    shift_press(&mut state, c);
+    assert_eq!(state.selected_card_ids, vec!["a", "c"]);
+    drag_to(&mut state, Point::new(c.x + 10.0, c.y + 20.0));
+    connect_release(&mut state, Point::new(c.x + 10.0, c.y + 20.0));
+    assert_eq!(state.document.find_card("a").unwrap().position, Point::new(10.0, 20.0));
+    assert_eq!(state.document.find_card("c").unwrap().position, Point::new(410.0, 120.0));
+    assert_eq!(state.undo_stack.len(), 1);
+
+    // Shift on a selected card takes it out and moves nothing.
+    let a = centre_on_screen(&state, "a");
+    shift_press(&mut state, a);
+    drag_to(&mut state, Point::new(a.x + 50.0, a.y));
+    connect_release(&mut state, Point::new(a.x + 50.0, a.y));
+    assert_eq!(state.selected_card_ids, vec!["c"]);
+    assert_eq!(state.document.find_card("a").unwrap().position, Point::new(10.0, 20.0));
+
+    // A shift press never starts a connection, even on a connection point.
+    let point = connection_point_on_screen(&state, "b");
+    let events = shift_press(&mut state, point);
+    assert!(!events.iter().any(|e| matches!(e, EditorEvent::ConnectionDragStarted { .. })));
+    assert_eq!(state.selected_card_ids, vec!["b", "c"]);
+}
+
+#[test]
+fn test_select_all_selects_every_card() {
+    let mut state = three_cards();
+    state.apply_command(EditorCommand::ConnectSkills { from_id: "a".into(), to_id: "c".into() });
+    state.apply_command(EditorCommand::SelectConnection { connection: Some(crate::PrerequisiteConnection::new("a", "c")) });
+    let events = state.apply_command(EditorCommand::SelectAll);
+    assert_eq!(state.selected_card_ids, vec!["a", "b", "c"]);
+    assert_eq!(state.selected_connection, None);
+    assert!(events.iter().any(|e| matches!(e, EditorEvent::SelectionChanged { selected_id: None, selected_ids, .. } if selected_ids.len() == 3)));
+}
+
+#[test]
+fn test_consecutive_nudges_are_one_undo_step_within_world_limits() {
+    let mut state = three_cards();
+    state.apply_command(EditorCommand::SelectAll);
+    for _ in 0..3 {
+        state.apply_command(EditorCommand::NudgeSelection { delta_x: 10.0, delta_y: 0.0 });
+    }
+    state.apply_command(EditorCommand::NudgeSelection { delta_x: 0.0, delta_y: -5.0 });
+    assert_eq!(state.document.find_card("a").unwrap().position, Point::new(30.0, -5.0));
+    assert_eq!(state.document.find_card("c").unwrap().position, Point::new(430.0, 95.0));
+    assert_eq!(state.undo_stack.len(), 1);
+
+    // Commands that edit nothing (the application's saves, camera moves) keep the step open.
+    state.apply_command(EditorCommand::ExportSnapshot);
+    state.apply_command(EditorCommand::PanCamera { delta_x: 5.0, delta_y: 5.0 });
+    state.apply_command(EditorCommand::NudgeSelection { delta_x: 0.0, delta_y: 5.0 });
+    state.apply_command(EditorCommand::NudgeSelection { delta_x: 0.0, delta_y: -5.0 });
+    assert_eq!(state.undo_stack.len(), 1);
+
+    // Other cards start a new step.
+    state.apply_command(EditorCommand::SelectCard { id: Some("b".into()) });
+    state.apply_command(EditorCommand::NudgeSelection { delta_x: 0.0, delta_y: 10.0 });
+    assert_eq!(state.undo_stack.len(), 2);
+    state.apply_command(EditorCommand::Undo);
+    assert_eq!(state.document.find_card("b").unwrap().position, Point::new(30.0, 195.0));
+    state.apply_command(EditorCommand::Undo);
+    assert_eq!(state.document.find_card("a").unwrap().position, Point::new(0.0, 0.0));
+    assert_eq!(state.document.find_card("b").unwrap().position, Point::new(0.0, 200.0));
+
+    // The group stops at the world limit with its shape intact.
+    state.apply_command(EditorCommand::SelectAll);
+    state.apply_command(EditorCommand::NudgeSelection { delta_x: 2.0 * MAX_WORLD_COORD, delta_y: 0.0 });
+    assert_eq!(state.document.find_card("c").unwrap().position.x, MAX_WORLD_COORD);
+    assert_eq!(state.document.find_card("a").unwrap().position.x, MAX_WORLD_COORD - 400.0);
+}
+
+#[test]
+fn test_arranging_the_selection_is_one_undo_step() {
+    let mut state = EditorState::new();
+    for (id, x, y, w) in [("a", 0.0, 0.0, 180.0), ("b", 50.0, 300.0, 100.0), ("c", 500.0, 120.0, 180.0)] {
+        state.apply_command(EditorCommand::CreateCard {
+            id: id.into(), title: id.into(), position: Point::new(x, y), size: Some(Size::new(w, 80.0)),
+        });
+    }
+    let position = |state: &EditorState, id: &str| state.document.find_card(id).unwrap().position;
+    let arrange = |state: &mut EditorState, arrangement| {
+        state.apply_command(EditorCommand::ArrangeSelection { arrangement })
+    };
+    use crate::Arrangement::*;
+
+    // With one card selected, nothing moves.
+    state.apply_command(EditorCommand::SelectCard { id: Some("a".into()) });
+    arrange(&mut state, AlignRight);
+    assert!(state.undo_stack.is_empty());
+
+    state.apply_command(EditorCommand::SelectAll);
+    arrange(&mut state, AlignRight);
+    assert_eq!([position(&state, "a").x, position(&state, "b").x, position(&state, "c").x], [500.0, 580.0, 500.0]);
+    state.apply_command(EditorCommand::Undo);
+    arrange(&mut state, AlignCenter);
+    assert_eq!(position(&state, "b"), Point::new(290.0, 300.0));
+    state.apply_command(EditorCommand::Undo);
+    arrange(&mut state, AlignTop);
+    assert_eq!([position(&state, "a").y, position(&state, "b").y, position(&state, "c").y], [0.0, 0.0, 0.0]);
+    state.apply_command(EditorCommand::Undo);
+
+    // Vertically A (0), C (120), B (300): the outer two stay and the gaps even out.
+    let events = arrange(&mut state, DistributeVertically);
+    assert_eq!(position(&state, "a").y, 0.0);
+    assert_eq!(position(&state, "c").y, 150.0);
+    assert_eq!(position(&state, "b").y, 300.0);
+    assert_eq!(state.undo_stack.len(), 1);
+    assert!(events.iter().any(|e| matches!(e, EditorEvent::LabelsUpdated { .. })));
+    state.apply_command(EditorCommand::Undo);
+    assert_eq!(position(&state, "c"), Point::new(500.0, 120.0));
+
+    // Distribution needs three cards.
+    state.apply_command(EditorCommand::SelectCard { id: Some("a".into()) });
+    shift_press(&mut state, Point::new(550.0, 140.0));
+    connect_release(&mut state, Point::new(550.0, 140.0));
+    assert_eq!(state.selected_card_ids, vec!["a", "c"]);
+    let undo_depth = state.undo_stack.len();
+    arrange(&mut state, DistributeHorizontally);
+    assert_eq!(state.undo_stack.len(), undo_depth);
+}
+
+#[test]
+fn test_read_only_refuses_selection_moves_and_layout_only_allows_them() {
+    for layout in [false, true] {
+        let mut state = three_cards();
+        state.apply_command(EditorCommand::SelectAll);
+        state.apply_command(if layout {
+            EditorCommand::SetLayoutOnly { layout_only: true }
+        } else {
+            EditorCommand::SetReadOnly { read_only: true }
+        });
+        state.apply_command(EditorCommand::NudgeSelection { delta_x: 10.0, delta_y: 0.0 });
+        state.apply_command(EditorCommand::ArrangeSelection { arrangement: crate::Arrangement::AlignTop });
+        assert_eq!(state.document.find_card("a").unwrap().position != Point::new(0.0, 0.0), layout);
+        assert_eq!(state.undo_stack.len(), if layout { 2 } else { 0 });
+    }
+}
+
+#[test]
+fn test_selection_command_protocol_roundtrip() {
+    let json = r#"{"type":"ArrangeSelection","arrangement":"DistributeHorizontally"}"#;
+    assert_eq!(
+        serde_json::from_str::<EditorCommand>(json).unwrap(),
+        EditorCommand::ArrangeSelection { arrangement: crate::Arrangement::DistributeHorizontally }
+    );
+    for command in [EditorCommand::SelectAll, EditorCommand::NudgeSelection { delta_x: -1.0, delta_y: 2.0 }] {
+        let json = serde_json::to_string(&command).unwrap();
+        assert_eq!(serde_json::from_str::<EditorCommand>(&json).unwrap(), command);
+    }
 }

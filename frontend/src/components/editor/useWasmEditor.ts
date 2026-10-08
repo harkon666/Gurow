@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import type { WasmEditor } from '../../pkg/editor_wasm'
 import { loadWasmEditor } from './loadWasmEditor'
 import {
+  type Arrangement,
   EditorCommandSchema,
   EditorEventsSchema,
   type EditorCommand,
@@ -658,7 +659,8 @@ export function useWasmEditor({
         type: 'PointerDown',
         screen_x: logicalPt.x,
         screen_y: logicalPt.y,
-        shift_key: e.shiftKey,
+        // Ctrl/Cmd toggle a card like Shift, as in other canvas editors.
+        shift_key: e.shiftKey || e.ctrlKey || e.metaKey,
       })
     },
     [canvasRef, dispatch, flushPointerMove]
@@ -923,6 +925,16 @@ export function useWasmEditor({
     [dispatch]
   )
 
+  const selectAll = useCallback(() => dispatch({ type: 'SelectAll' }), [dispatch])
+  const nudgeSelection = useCallback(
+    (delta_x: number, delta_y: number) => dispatch({ type: 'NudgeSelection', delta_x, delta_y }),
+    [dispatch]
+  )
+  const arrangeSelection = useCallback(
+    (arrangement: Arrangement) => dispatch({ type: 'ArrangeSelection', arrangement }),
+    [dispatch]
+  )
+
   const simulateDeviceLoss = useCallback(() => {
     const device = activeDeviceRef.current || (window as any).__gurowActiveDevice
     if (device && typeof device.destroy === 'function') {
@@ -1034,6 +1046,9 @@ export function useWasmEditor({
     exportSnapshot,
     setCamera,
     selectCard,
+    selectAll,
+    nudgeSelection,
+    arrangeSelection,
     simulateDeviceLoss,
     recreateRenderer,
     handlePointerDown,

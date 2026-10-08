@@ -3,6 +3,7 @@ import {
   EditorCommandSchema,
   EditorEventSchema,
   EditorEventsSchema,
+  type EditorCommand,
 } from './protocol'
 
 
@@ -70,6 +71,17 @@ describe('Editor Protocol Schemas (Matt Pocock SDD)', () => {
         id: null,
       })
       expect(deselect).toEqual({ type: 'SelectCard', id: null })
+    })
+
+    it('validates the selection arrangement commands', () => {
+      for (const command of [
+        { type: 'SelectAll' },
+        { type: 'NudgeSelection', delta_x: -10, delta_y: 50 },
+        { type: 'ArrangeSelection', arrangement: 'DistributeVertically' },
+      ] satisfies EditorCommand[]) {
+        expect(EditorCommandSchema.parse(command)).toEqual(command)
+      }
+      expect(() => EditorCommandSchema.parse({ type: 'ArrangeSelection', arrangement: 'Shuffle' })).toThrow()
     })
 
     it('validates PointerDown command', () => {

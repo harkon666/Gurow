@@ -1,10 +1,10 @@
 use crate::document::{CanvasDocument, ConnectionError, PrerequisiteConnection, SkillCard};
 use crate::geometry::{
-    connection_curve, cubic_point, distance_to_segment, Camera, Point, Rect, Size,
+    connection_route, connection_route_to_point, cubic_point, distance_to_segment, Camera, Point, Rect, Side, Size,
     CONNECTION_CURVE_SEGMENTS, CONNECTION_HANDLE_RADIUS_PX, CONNECTION_HIT_TOLERANCE_PX,
     MAX_WORLD_COORD, MIN_WORLD_COORD,
 };
-use crate::protocol::{EditorCommand, EditorEvent, LabelLayout, SelectionChange};
+use crate::protocol::{Arrangement, EditorCommand, EditorEvent, LabelLayout, SelectionChange};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -46,8 +46,8 @@ pub enum InteractionState {
 /// How the renderer draws the connection being dragged.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ConnectionPreview {
-    pub start: Point,
-    pub end: Point,
+    /// The Bézier curve from the source card to the pointer, or to a valid target.
+    pub curve: [Point; 4],
     /// Whether the card under the pointer is a valid target; `None` over the empty canvas.
     pub target_valid: Option<bool>,
 }
@@ -97,6 +97,9 @@ pub struct EditorState {
     pub layout_only: bool,
     /// The selected connection, offered for deletion; session-only, never saved.
     pub selected_connection: Option<PrerequisiteConnection>,
+    /// The undo depth right after a `NudgeSelection` was recorded: a further step
+    /// of the same cards joins it while no other edit, undo or redo has happened.
+    pub nudge_depth: Option<usize>,
 }
 
 impl Default for EditorState {
@@ -112,6 +115,7 @@ impl Default for EditorState {
             read_only: false,
             layout_only: false,
             selected_connection: None,
+            nudge_depth: None,
         }
     }
 }
@@ -144,20 +148,23 @@ impl EditorState {
     }
 
     /// Returns the card whose visible connection point lies under a screen-space
-    /// point. Cards are tried front to back, and a card body under the point hides
-    /// every connection point behind it, so a covered point never takes a press on
-    /// the card in front. The point keeps its screen size at every zoom, but never
-    /// covers more than a quarter of a small card, so the card body stays draggable.
+    /// point. Each card has one in the middle of every side. Cards are tried front
+    /// to back, and a card body under the point hides every connection point behind
+    /// it, so a covered point never takes a press on the card in front. The points
+    /// keep their screen size at every zoom, but never cover more than a quarter of
+    /// a small card, so the card body stays draggable.
     pub fn hit_connection_point(&self, screen_pos: Point) -> Option<String> {
         let zoom = self.camera.zoom;
         let world_pos = self.camera.screen_to_world(screen_pos);
         for card in self.document.cards.iter().rev() {
-            let center = self.camera.world_to_screen(card.connection_point());
             let radius = CONNECTION_HANDLE_RADIUS_PX
                 .min(card.size.width.min(card.size.height) * zoom * 0.25)
                 .max(2.0);
-            let distance = ((screen_pos.x - center.x).powi(2) + (screen_pos.y - center.y).powi(2)).sqrt();
-            if distance <= radius {
+            let on_point = Side::ALL.iter().any(|&side| {
+                let center = self.camera.world_to_screen(card.connection_handle(side));
+                ((screen_pos.x - center.x).powi(2) + (screen_pos.y - center.y).powi(2)).sqrt() <= radius
+            });
+            if on_point {
                 return Some(card.id.clone());
             }
             if card.world_bounds().contains(world_pos) {
@@ -178,7 +185,7 @@ impl EditorState {
             ) else {
                 continue;
             };
-            let curve = connection_curve(from.connection_point(), to.incoming_point());
+            let curve = connection_route(&from.world_bounds(), &to.world_bounds());
             let mut previous = self.camera.world_to_screen(curve[0]);
             for i in 1..=CONNECTION_CURVE_SEGMENTS {
                 let point = self
@@ -205,8 +212,9 @@ impl EditorState {
             .collect()
     }
 
-    /// The connection being dragged, in world space, for the renderer. Over a
-    /// valid target it snaps to that card's incoming point.
+    /// The connection being dragged, in world space, for the renderer. It leaves
+    /// the source by the side facing the pointer; over a valid target it snaps to
+    /// the connection it would make.
     pub fn connection_preview(&self) -> Option<ConnectionPreview> {
         let InteractionState::Connecting {
             from_id,
@@ -218,17 +226,19 @@ impl EditorState {
         else {
             return None;
         };
-        let start = self.document.find_card(from_id)?.connection_point();
+        let source = self.document.find_card(from_id)?.world_bounds();
         let target = target_id
             .as_ref()
             .filter(|id| *left_source || *id != from_id)
             .and_then(|id| self.document.find_card(id));
-        let (end, target_valid) = match target {
-            Some(card) if valid_target_ids.contains(&card.id) => (card.incoming_point(), Some(true)),
-            Some(_) => (*pointer_world, Some(false)),
-            None => (*pointer_world, None),
+        let (curve, target_valid) = match target {
+            Some(card) if valid_target_ids.contains(&card.id) => {
+                (connection_route(&source, &card.world_bounds()), Some(true))
+            }
+            Some(_) => (connection_route_to_point(&source, *pointer_world), Some(false)),
+            None => (connection_route_to_point(&source, *pointer_world), None),
         };
-        Some(ConnectionPreview { start, end, target_valid })
+        Some(ConnectionPreview { curve, target_valid })
     }
 
     /// Selects one connection (or none) and emits the change.
@@ -424,8 +434,153 @@ impl EditorState {
         )
     }
 
+    /// Moves cards to new positions and returns the moves that changed a position.
+    fn move_cards(&mut self, targets: Vec<(String, Point)>, events: &mut Vec<EditorEvent>) -> Vec<CardMove> {
+        let moves: Vec<CardMove> = targets
+            .into_iter()
+            .filter_map(|(card_id, to)| {
+                let from = self.document.find_card(&card_id)?.position;
+                let moved = (to.x - from.x).abs() > 1e-4 || (to.y - from.y).abs() > 1e-4;
+                moved.then_some(CardMove { card_id, from, to })
+            })
+            .collect();
+        self.place_cards(moves.iter().map(|m| (m.card_id.as_str(), m.to)), events);
+        moves
+    }
+
+    /// The selected cards' world bounds, in document order.
+    fn selected_bounds(&self) -> Vec<(String, Rect)> {
+        self.cards_with_selection()
+            .filter(|(_, selected)| *selected)
+            .map(|(card, _)| (card.id.clone(), card.world_bounds()))
+            .collect()
+    }
+
+    /// Moves the selection by one step, limited so every card stays within the
+    /// world bounds. A step of the same cards right after another joins its undo
+    /// step, however many other commands (saves, camera moves) came between.
+    fn nudge_selection(&mut self, delta: Point, events: &mut Vec<EditorEvent>) -> bool {
+        let selected = self.selected_bounds();
+        let Some((_, first)) = selected.first() else {
+            return false;
+        };
+        let (mut min, mut max) = (Point::new(first.x, first.y), Point::new(first.x, first.y));
+        for (_, rect) in &selected {
+            min = Point::new(min.x.min(rect.x), min.y.min(rect.y));
+            max = Point::new(max.x.max(rect.x), max.y.max(rect.y));
+        }
+        let dx = delta.x.min(MAX_WORLD_COORD - max.x).max(MIN_WORLD_COORD - min.x);
+        let dy = delta.y.min(MAX_WORLD_COORD - max.y).max(MIN_WORLD_COORD - min.y);
+        let targets = selected
+            .into_iter()
+            .map(|(id, rect)| (id, Point::new(rect.x + dx, rect.y + dy)))
+            .collect();
+        let moves = self.move_cards(targets, events);
+        if moves.is_empty() {
+            return false;
+        }
+        if self.nudge_depth == Some(self.undo_stack.len()) {
+            if let Some(HistoryAction::MoveCards { moves: previous }) = self.undo_stack.last_mut() {
+                let same_cards = previous.len() == moves.len()
+                    && previous.iter().zip(&moves).all(|(p, m)| p.card_id == m.card_id);
+                if same_cards {
+                    for (p, m) in previous.iter_mut().zip(moves) {
+                        p.to = m.to;
+                    }
+                    events.push(EditorEvent::HistoryChanged { can_undo: true, can_redo: false });
+                    return true;
+                }
+            }
+        }
+        self.record(HistoryAction::MoveCards { moves }, events);
+        self.nudge_depth = Some(self.undo_stack.len());
+        true
+    }
+
+    /// Aligns or distributes the selected cards as one undo step. Alignment needs
+    /// two cards, distribution three; fewer leave everything in place.
+    fn arrange_selection(&mut self, arrangement: Arrangement, events: &mut Vec<EditorEvent>) -> bool {
+        let mut selected = self.selected_bounds();
+        let distributes = matches!(
+            arrangement,
+            Arrangement::DistributeHorizontally | Arrangement::DistributeVertically
+        );
+        if selected.len() < if distributes { 3 } else { 2 } {
+            return false;
+        }
+        let left = selected.iter().map(|(_, r)| r.x).fold(f32::INFINITY, f32::min);
+        let top = selected.iter().map(|(_, r)| r.y).fold(f32::INFINITY, f32::min);
+        let right = selected.iter().map(|(_, r)| r.x + r.width).fold(f32::NEG_INFINITY, f32::max);
+        let bottom = selected.iter().map(|(_, r)| r.y + r.height).fold(f32::NEG_INFINITY, f32::max);
+        let targets: Vec<(String, Point)> = match arrangement {
+            Arrangement::DistributeHorizontally | Arrangement::DistributeVertically => {
+                let horizontal = arrangement == Arrangement::DistributeHorizontally;
+                // Ordered by leading edge; a stable sort keeps document order for ties.
+                let lead = |r: &Rect| if horizontal { r.x } else { r.y };
+                let length = |r: &Rect| if horizontal { r.width } else { r.height };
+                selected.sort_by(|(_, a), (_, b)| lead(a).total_cmp(&lead(b)));
+                let start = lead(&selected[0].1);
+                let last = &selected[selected.len() - 1].1;
+                let occupied: f32 = selected.iter().map(|(_, r)| length(r)).sum();
+                let gap = (lead(last) + length(last) - start - occupied) / (selected.len() - 1) as f32;
+                let mut cursor = start;
+                selected
+                    .into_iter()
+                    .map(|(id, r)| {
+                        let at = cursor;
+                        cursor += length(&r) + gap;
+                        (id, if horizontal { Point::new(at, r.y) } else { Point::new(r.x, at) })
+                    })
+                    .collect()
+            }
+            _ => selected
+                .into_iter()
+                .map(|(id, r)| {
+                    let p = match arrangement {
+                        Arrangement::AlignLeft => Point::new(left, r.y),
+                        Arrangement::AlignCenter => Point::new((left + right - r.width) * 0.5, r.y),
+                        Arrangement::AlignRight => Point::new(right - r.width, r.y),
+                        Arrangement::AlignTop => Point::new(r.x, top),
+                        Arrangement::AlignMiddle => Point::new(r.x, (top + bottom - r.height) * 0.5),
+                        Arrangement::AlignBottom => Point::new(r.x, bottom - r.height),
+                        Arrangement::DistributeHorizontally | Arrangement::DistributeVertically => unreachable!(),
+                    };
+                    (id, p)
+                })
+                .collect(),
+        };
+        let moves = self.move_cards(targets, events);
+        if moves.is_empty() {
+            return false;
+        }
+        self.record(HistoryAction::MoveCards { moves }, events);
+        true
+    }
+
+    /// A drag of the whole selection, grabbed at `screen_pt` on `anchor_id`.
+    fn drag_selection_from(&self, anchor_id: &str, screen_pt: Point) -> InteractionState {
+        let Some(card) = self.document.find_card(anchor_id) else {
+            return InteractionState::Idle;
+        };
+        let world_pointer = self.camera.screen_to_world(screen_pt);
+        let grab_offset_world = Point::new(world_pointer.x - card.position.x, world_pointer.y - card.position.y);
+        let start_positions = self
+            .document
+            .cards
+            .iter()
+            .filter(|c| self.selected_card_ids.contains(&c.id))
+            .map(|c| (c.id.clone(), c.position))
+            .collect();
+        InteractionState::DraggingCards {
+            anchor_id: anchor_id.to_string(),
+            grab_offset_world,
+            start_positions,
+        }
+    }
+
     /// Records a completed edit as one undo step; a new edit ends the redo history.
     fn record(&mut self, action: HistoryAction, events: &mut Vec<EditorEvent>) {
+        self.nudge_depth = None;
         self.undo_stack.push(action);
         self.redo_stack.clear();
         events.push(EditorEvent::HistoryChanged {
@@ -544,6 +699,7 @@ impl EditorState {
         match cmd {
             EditorCommand::LoadDocument { document } => {
                 self.document = document;
+                self.nudge_depth = None;
                 self.undo_stack.clear();
                 self.redo_stack.clear();
                 if let InteractionState::Connecting { from_id, .. } = &self.interaction {
@@ -637,6 +793,24 @@ impl EditorState {
                         valid_target_ids,
                         left_source: false,
                     };
+                } else if let Some(card_id) = hit.clone().filter(|_| shift_key && !self.read_only) {
+                    // Shift on a card adds it to the selection or takes it out; a card
+                    // it adds drags the selection along, as an ordinary press would.
+                    self.set_connection_selection(None, &mut events);
+                    let mut ids = self.selected_card_ids.clone();
+                    let added = !ids.contains(&card_id);
+                    if added {
+                        ids.push(card_id.clone());
+                    } else {
+                        ids.retain(|id| *id != card_id);
+                    }
+                    let change = self.set_selection(ids);
+                    if Self::push_selection_change(change, &mut events) {
+                        labels_changed = true;
+                    }
+                    if added {
+                        self.interaction = self.drag_selection_from(&card_id, screen_pt);
+                    }
                 } else if let Some(card_id) = hit {
                     self.set_connection_selection(None, &mut events);
                     // Pressing a card of the selection keeps it, so the whole selection drags.
@@ -651,24 +825,8 @@ impl EditorState {
                         self.interaction = InteractionState::Panning {
                             last_screen_pos: screen_pt,
                         };
-                    } else if let Some(card) = self.document.find_card(&card_id) {
-                        let world_pointer = self.camera.screen_to_world(screen_pt);
-                        let grab_offset_world = Point::new(
-                            world_pointer.x - card.position.x,
-                            world_pointer.y - card.position.y,
-                        );
-                        let start_positions = self
-                            .document
-                            .cards
-                            .iter()
-                            .filter(|c| self.selected_card_ids.contains(&c.id))
-                            .map(|c| (c.id.clone(), c.position))
-                            .collect();
-                        self.interaction = InteractionState::DraggingCards {
-                            anchor_id: card_id,
-                            grab_offset_world,
-                            start_positions,
-                        };
+                    } else {
+                        self.interaction = self.drag_selection_from(&card_id, screen_pt);
                     }
                 } else if shift_key && !self.read_only {
                     // Shift on the empty canvas draws a selection box instead of panning.
@@ -838,10 +996,38 @@ impl EditorState {
                     zoom: self.camera.zoom,
                 });
             }
+            EditorCommand::SelectAll => {
+                if self.cancel_active_interaction(&mut events) {
+                    labels_changed = true;
+                }
+                self.set_connection_selection(None, &mut events);
+                let all = self.document.cards.iter().map(|card| card.id.clone()).collect();
+                let change = self.set_selection(all);
+                if Self::push_selection_change(change, &mut events) {
+                    labels_changed = true;
+                }
+            }
+            EditorCommand::NudgeSelection { delta_x, delta_y } => {
+                // A step during a gesture would fight the pointer for the cards.
+                if self.interaction == InteractionState::Idle {
+                    if self.nudge_selection(Point::new(delta_x, delta_y), &mut events) {
+                        labels_changed = true;
+                    }
+                }
+            }
+            EditorCommand::ArrangeSelection { arrangement } => {
+                if self.cancel_active_interaction(&mut events) {
+                    labels_changed = true;
+                }
+                if self.arrange_selection(arrangement, &mut events) {
+                    labels_changed = true;
+                }
+            }
             EditorCommand::Undo => {
                 if self.cancel_active_interaction(&mut events) {
                     labels_changed = true;
                 }
+                self.nudge_depth = None;
                 if let Some(action) = self.undo_stack.pop() {
                     if self.apply_history(&action, false, &mut events) {
                         labels_changed = true;
@@ -857,6 +1043,7 @@ impl EditorState {
                 if self.cancel_active_interaction(&mut events) {
                     labels_changed = true;
                 }
+                self.nudge_depth = None;
                 if let Some(action) = self.redo_stack.pop() {
                     if self.apply_history(&action, true, &mut events) {
                         labels_changed = true;

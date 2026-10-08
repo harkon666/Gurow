@@ -47,6 +47,7 @@ function check(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
 }
 const near = (a: number, b: number, tolerance = 1.5) => Math.abs(a - b) <= tolerance
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 async function api(page: Page, apiPath: string, method = 'GET', body?: unknown): Promise<{ status: number; body: any }> {
   return page.evaluate(async (p: string, m: string, b: string | null) => {
@@ -194,7 +195,8 @@ async function canvasPixels(page: Page, area: Rect, kind: 'connection' | 'box'):
 }
 /** A small canvas-relative square around the on-screen midpoint of a connection's curve. */
 async function connectionMidpoint(page: Page, from: Point, to: Point): Promise<Rect> {
-  // The curve from the source's right middle to the target's left middle is symmetric: t = 0.5 is the midpoint of its ends.
+  // The curve between the facing sides' middles is symmetric: t = 0.5 is the midpoint of its ends,
+  // which is also the midpoint of the two card centres, whichever sides face each other.
   const cam = await camera(page)
   const x = ((from.x + 180 + to.x) / 2) * cam.zoom + cam.x, y = ((from.y + 40 + to.y + 40) / 2) * cam.zoom + cam.y
   return { x: Math.round(x - 6), y: Math.round(y - 6), width: 12, height: 12 }
@@ -420,6 +422,101 @@ async function main() {
     await waitForSaved(page, farRevision + 2)
     check(samePositions(await stored(page, far), edgeStart), `undo at the limit stored ${JSON.stringify(await stored(page, far))}`)
     pass('world limits', `dragging Embedded+Firmware 500 px right at 100% stops when Firmware reaches x = 1,000,000: saved Embedded (${limited[edge.e].x}, ${limited[edge.e].y.toFixed(1)}), Firmware (${limited[edge.f].x}, ${limited[edge.f].y.toFixed(1)}), same 200×150 offset; one Undo stores both starting positions`)
+
+    // 6. Connections leave by the sides facing each other, and any side's point starts one.
+    const tools = await createPath(page, 'Layout Tools', 'Arrange with the keyboard and the arrange bar')
+    const k = { p: crypto.randomUUID(), q: crypto.randomUUID(), r: crypto.randomUUID() }
+    const toolsStart = { [k.p]: { x: 100, y: 100 }, [k.q]: { x: 500, y: 140 }, [k.r]: { x: 260, y: 400 } }
+    await seed(page, tools, [
+      { id: k.p, title: 'Parsing', position: toolsStart[k.p] },
+      { id: k.q, title: 'Queries', position: toolsStart[k.q] },
+      { id: k.r, title: 'Rendering', position: toolsStart[k.r] },
+    ], [{ from_id: k.p, to_id: k.r }])
+    await page.evaluate((key: string) => localStorage.setItem(key, JSON.stringify({ offset_x: 0, offset_y: 0, zoom: 1 })), `gurow:camera:${adaId}:${tools}`)
+    await openEditor(page, tools, 3)
+    await labelsMatch(page, toolsStart)
+    // Rendering lies below Parsing: the curve leaves Parsing's bottom and enters Rendering's top, not its right and left.
+    const bottomExit = await canvasPixels(page, { x: 184, y: 183, width: 12, height: 10 }, 'connection')
+    const topEntry = await canvasPixels(page, { x: 344, y: 386, width: 12, height: 10 }, 'connection')
+    const rightExit = await canvasPixels(page, { x: 284, y: 134, width: 12, height: 12 }, 'connection')
+    check(bottomExit >= 8 && topEntry >= 8 && rightExit === 0, `Parsing → Rendering pixels: bottom exit ${bottomExit}, top entry ${topEntry}, right exit ${rightExit}`)
+    // A drag from Queries' bottom point onto Rendering proposes Queries → Rendering, which is saved.
+    await closeEditorPanels(page)
+    const queries = await toPage(page, { x: 590, y: 180 })
+    await page.mouse.move(queries.x, queries.y)
+    await page.waitForSelector(`#card-connection-point-${k.q}-bottom`, { visible: true })
+    check((await page.$$(`[data-card-id="${k.q}"][data-side]`)).length === 4, 'the hovered card does not show a connection point on every side')
+    const bottomPoint = (await (await page.$(`#card-connection-point-${k.q}-bottom`))!.boundingBox())!
+    const rendering = await toPage(page, { x: 350, y: 440 })
+    await page.mouse.move(bottomPoint.x + bottomPoint.width / 2, bottomPoint.y + bottomPoint.height / 2)
+    await page.mouse.down()
+    await page.mouse.move(rendering.x, rendering.y, { steps: 10 })
+    await page.mouse.up()
+    for (let deadline = Date.now() + 10000; ; await pause(200)) {
+      if ((await readDoc(page, tools)).editor.connections.some((c) => c.from_id === k.q && c.to_id === k.r)) break
+      check(Date.now() < deadline, `Queries → Rendering was not saved: ${JSON.stringify((await readDoc(page, tools)).editor.connections)}`)
+    }
+    check(samePositions(await stored(page, tools), toolsStart), 'the connection drag moved a card')
+    pass('connections from any side', `Parsing → Rendering (stacked) is drawn from Parsing's bottom (${bottomExit} px) into Rendering's top (${topEntry} px), none at Parsing's right (${rightExit} px); a hovered card shows four connection points, and a drag from Queries' bottom point onto Rendering saved Queries → Rendering without moving a card`)
+
+    // 7. Shift/Ctrl+click toggles cards, Escape clears, Ctrl+A selects all.
+    // A plain click opens the Skill summary over the canvas; a multiselection starts with a modified click.
+    const points = { [k.p]: await cardPoint(page, k.p), [k.q]: await cardPoint(page, k.q), [k.r]: await cardPoint(page, k.r) }
+    const clickWith = async (id: string, key?: 'Shift' | 'Control') => {
+      const at = points[id]
+      if (key) await page.keyboard.down(key)
+      await page.mouse.click(at.x, at.y)
+      if (key) await page.keyboard.up(key)
+      await settle(page)
+    }
+    await clickWith(k.p, 'Shift')
+    await clickWith(k.q, 'Shift')
+    await clickWith(k.r, 'Control')
+    check(JSON.stringify(await selectedLabels(page)) === JSON.stringify(Object.values(k).sort()), `Shift and Ctrl clicks selected ${await selectedLabels(page)}`)
+    await clickWith(k.r, 'Control')
+    check(JSON.stringify(await selectedLabels(page)) === JSON.stringify([k.p, k.q].sort()), `a second Ctrl click left ${await selectedLabels(page)}`)
+    check(await page.$eval('[data-arrangement="DistributeHorizontally"]', (el) => (el as HTMLButtonElement).disabled), 'distribution offered for two Skills')
+    check(samePositions(await stored(page, tools), toolsStart), 'toggling a card moved it')
+    check(await page.$('#btn-close-skill-details') === null, 'a modified click opened a Skill')
+    await page.focus('#editor-canvas')
+    await page.keyboard.press('Escape')
+    await settle(page)
+    check((await selectedLabels(page)).length === 0, `Escape left ${await selectedLabels(page)} selected`)
+    await page.keyboard.down('Control')
+    await page.keyboard.press('a')
+    await page.keyboard.up('Control')
+    await settle(page)
+    check(JSON.stringify(await selectedLabels(page)) === JSON.stringify(Object.values(k).sort()), `Ctrl+A selected ${await selectedLabels(page)}`)
+    pass('toggle and select all', 'Shift+click and Ctrl+click add Skills to the selection without opening one, Ctrl+click again takes one out, Escape clears it and Ctrl+A selects all three; nothing moved')
+
+    // 8. Arrow keys nudge the selection as one undo step; the arrange bar aligns and spaces it out.
+    const waitStored = async (want: Record<string, Point>, what: string) => {
+      const deadline = Date.now() + 10000
+      while (!samePositions(await stored(page, tools), want)) {
+        if (Date.now() > deadline) throw new Error(`${what}: stored ${JSON.stringify(await stored(page, tools))}, expected ${JSON.stringify(want)}`)
+        await pause(200)
+      }
+      await page.waitForSelector('#save-status[data-state="saved"]')
+    }
+    const shift = (dx: number, dy: number) => Object.fromEntries(Object.entries(toolsStart).map(([id, p]) => [id, { x: p.x + dx, y: p.y + dy }]))
+    for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight')
+    await page.keyboard.down('Shift')
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.up('Shift')
+    await waitStored(shift(30, 50), 'after three ArrowRight and one Shift+ArrowDown')
+    await labelsMatch(page, shift(30, 50))
+    await page.click('#editor-undo-btn')
+    await waitStored(toolsStart, 'after one Undo of the nudges')
+    await page.click('[data-arrangement="AlignTop"]')
+    const top = { [k.p]: { x: 100, y: 100 }, [k.q]: { x: 500, y: 100 }, [k.r]: { x: 260, y: 100 } }
+    await waitStored(top, 'after Align top')
+    await page.click('[data-arrangement="DistributeHorizontally"]')
+    const spaced = { ...top, [k.r]: { x: 300, y: 100 } }
+    await waitStored(spaced, 'after Space evenly horizontally')
+    await labelsMatch(page, spaced)
+    await page.click('#editor-undo-btn')
+    await waitStored(top, 'after undoing the distribution')
+    pass('nudge and arrange', 'three ArrowRight and one Shift+ArrowDown saved every Skill at +(30, 50) and one Undo put all back; Align top saved y = 100 for all three, Space evenly horizontally put Rendering at x = 300 between Parsing and Queries, and one Undo restored the aligned positions')
 
     check(errors.length === 0, `page errors: ${errors.join('; ')}`)
     console.log(`\nT31 arrange-selection check passed (${steps.length} steps).`)

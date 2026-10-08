@@ -24,6 +24,21 @@ pub struct LabelLayout {
     pub selected: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+/// How `ArrangeSelection` lines up the selected cards. Alignments line one edge
+/// or centre up with the selection's bounds; distributions leave equal gaps
+/// between neighbours, keeping the outermost cards where they are.
+pub enum Arrangement {
+    AlignLeft,
+    AlignCenter,
+    AlignRight,
+    AlignTop,
+    AlignMiddle,
+    AlignBottom,
+    DistributeHorizontally,
+    DistributeVertically,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type")]
 /// Commands accepted by the Wasm editor boundary.
@@ -44,7 +59,8 @@ pub enum EditorCommand {
         id: Option<String>,
     },
     /// With `shift_key` on the empty canvas, the press starts a selection box
-    /// instead of panning. On an editable canvas, a press on a card's connection
+    /// instead of panning; on a card, it adds the card to the selection or takes
+    /// it out. On an editable canvas, a press on a card's connection
     /// point starts a connection drag instead of moving the card; a press near a
     /// connection on the empty canvas selects that connection.
     PointerDown {
@@ -77,6 +93,18 @@ pub enum EditorCommand {
     /// card selection.
     SelectConnection {
         connection: Option<PrerequisiteConnection>,
+    },
+    /// Selects every card.
+    SelectAll,
+    /// Moves the selected cards by a world-space step. Consecutive steps of the
+    /// same cards, with no other edit, undo or redo between, are one undo step.
+    NudgeSelection {
+        delta_x: f32,
+        delta_y: f32,
+    },
+    /// Aligns or spaces out the selected cards, as one undo step.
+    ArrangeSelection {
+        arrangement: Arrangement,
     },
     Undo,
     Redo,
@@ -120,7 +148,14 @@ impl EditorCommand {
     /// Whether the command changes the document or its edit history, which a
     /// read-only canvas refuses. Loading a document replaces it rather than editing it.
     pub fn edits_document(&self) -> bool {
-        self.edits_content() || matches!(self, EditorCommand::Undo | EditorCommand::Redo)
+        self.edits_content()
+            || matches!(
+                self,
+                EditorCommand::Undo
+                    | EditorCommand::Redo
+                    | EditorCommand::NudgeSelection { .. }
+                    | EditorCommand::ArrangeSelection { .. }
+            )
     }
 
     /// Whether the command changes which cards or connections the document has,
