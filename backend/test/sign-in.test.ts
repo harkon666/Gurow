@@ -226,7 +226,7 @@ describe('AC5: the active context is personal, with no permanent Coach/Learner A
   it('describes the Account by identity and verification state only', async () => {
     const browser = await signedUp('ada@gurow.test')
     const { body } = await browser.account()
-    expect(Object.keys(body.account).sort()).toEqual(['email', 'emailVerified', 'id', 'name'])
+    expect(Object.keys(body.account).sort()).toEqual(['email', 'emailVerificationRequired', 'emailVerified', 'id', 'name'])
     const columns = await db.execute<{ column_name: string }>(sql`select column_name from information_schema.columns where table_name = 'accounts' order by column_name`)
     expect([...columns].map((c) => c.column_name)).toEqual(['created_at', 'email', 'email_verified', 'id', 'image', 'name', 'updated_at'])
   })

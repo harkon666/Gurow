@@ -253,7 +253,7 @@ async function main() {
   const apiServer = spawn('bun', ['run', 'src/index.ts'], {
     cwd: BACKEND,
     env: {
-      ...process.env, DATABASE_URL, PORT: String(API_PORT), BETTER_AUTH_URL: ORIGIN, BETTER_AUTH_SECRET: SECRET, NODE_ENV: 'test',
+      ...process.env, DATABASE_URL, PORT: String(API_PORT), BETTER_AUTH_URL: ORIGIN, BETTER_AUTH_SECRET: SECRET, NODE_ENV: 'test', EMAIL_VERIFICATION: 'required',
       RESEND_API_KEY: resend.apiKey, RESEND_API_URL: resend.url, MAIL_FROM: 'Gurow <invitations@gurow.test>',
     },
     stdio: ['ignore', 'ignore', 'inherit'],

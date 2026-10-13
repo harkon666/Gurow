@@ -104,7 +104,7 @@ async function main() {
   // A developer's backend/.env may hold a real Resend key; this check reads the logged mail instead.
   const api = spawn('bun', ['run', 'src/index.ts'], {
     cwd: BACKEND,
-    env: { ...process.env, DATABASE_URL, PORT: String(API_PORT), BETTER_AUTH_URL: ORIGIN, BETTER_AUTH_SECRET: 't15-browser-check-secret-not-for-production', NODE_ENV: 'test', RESEND_API_KEY: '' },
+    env: { ...process.env, DATABASE_URL, PORT: String(API_PORT), BETTER_AUTH_URL: ORIGIN, BETTER_AUTH_SECRET: 't15-browser-check-secret-not-for-production', NODE_ENV: 'test', EMAIL_VERIFICATION: 'required', RESEND_API_KEY: '' },
     stdio: ['ignore', 'pipe', 'inherit'],
   })
   captureMail(api)

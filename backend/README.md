@@ -31,11 +31,11 @@ Integration tests of P2 rules use `createApp` with `fixtureIdentity`, which maps
 
 | Route | Effect |
 | --- | --- |
-| `POST /api/auth/sign-up/email` `{ email, password, name, callbackURL? }` | Creates an Account (password at least 8 characters), signs it in and sends a verification link |
+| `POST /api/auth/sign-up/email` `{ email, password, name, callbackURL? }` | Creates an Account (password at least 8 characters), signs it in and sends a verification link (none with `EMAIL_VERIFICATION=off`) |
 | `POST /api/auth/sign-in/email` `{ email, password }` | Sets the session cookie; wrong credentials answer 401 |
 | `POST /api/auth/sign-out` | Ends the session server-side |
 | `GET /api/auth/verify-email?token=…` | Redeems the emailed link; the only way `emailVerified` becomes true |
-| `GET /api/account` | `{ account: { id, email, name, emailVerified } }`; no Coach/Learner type exists |
+| `GET /api/account` | `{ account: { id, email, name, emailVerified, emailVerificationRequired } }`; no Coach/Learner type exists |
 | `PUT /api/personal/workspace` | Enters the Account's one Personal Workspace: 201 on creation, 200 afterwards, `{ workspace, learningPaths }` |
 | `GET /api/personal/workspaces/:workspaceId` | The same body for its owner; 404 `workspace_not_found` for every other Account |
 

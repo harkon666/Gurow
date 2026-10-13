@@ -17,12 +17,19 @@ if (resendKey && !mailFrom) throw new Error('MAIL_FROM must name a sender on a R
 const mailer = resendKey ? resendMailer({ apiKey: resendKey, from: mailFrom!, apiUrl: process.env.RESEND_API_URL }) : loggingMailer
 if (!resendKey) console.warn('[gurow] RESEND_API_KEY is not set: emails are logged, not delivered')
 
+// EMAIL_VERIFICATION=off is temporary, for trials without a sending domain: sign-up sends
+// no verification link and an Invitation needs only the matching address, not a verified one.
+const emailVerification = process.env.EMAIL_VERIFICATION || 'required'
+if (emailVerification !== 'required' && emailVerification !== 'off') throw new Error('EMAIL_VERIFICATION must be "required" or "off"')
+const requireVerifiedEmail = emailVerification === 'required'
+if (!requireVerifiedEmail) console.warn('[gurow] EMAIL_VERIFICATION is off: Invitations are accepted without a verified email')
+
 const { db } = createDatabase(url)
-const auth = createAuth({ db, baseURL, secret, sendVerificationEmail: async ({ to, url: link }) => { await mailer(verificationEmail(to, link)) } })
+const auth = createAuth({ db, baseURL, secret, verifyOnSignUp: requireVerifiedEmail, sendVerificationEmail: async ({ to, url: link }) => { await mailer(verificationEmail(to, link)) } })
 const delivery = {
   send: async (message: Parameters<typeof invitationEmail>[0]) => mailer(invitationEmail(message)),
   link: (invitationId: string) => new URL(`/invitations/${invitationId}`, baseURL).toString(),
 }
 
 // Identity comes only from Better Auth sessions; the P2 fixture header is never trusted.
-export default { port: Number(process.env.PORT ?? 3001), fetch: createServer({ db, auth, delivery }).fetch }
+export default { port: Number(process.env.PORT ?? 3001), fetch: createServer({ db, auth, delivery, requireVerifiedEmail }).fetch }

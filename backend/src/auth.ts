@@ -17,6 +17,8 @@ export interface AuthConfig {
   /** Signs session cookies; at least 32 random characters in production. */
   secret: string
   sendVerificationEmail: VerificationMailer
+  /** Whether a new Account is emailed a verification link on sign-up; off while verification is not required. */
+  verifyOnSignUp?: boolean
 }
 
 /**
@@ -24,7 +26,7 @@ export interface AuthConfig {
  * Account, so a session identifies an Account directly, and `emailVerified` is
  * set only by redeeming a verification link sent to that address.
  */
-export function createAuth({ db, baseURL, secret, sendVerificationEmail }: AuthConfig) {
+export function createAuth({ db, baseURL, secret, sendVerificationEmail, verifyOnSignUp = true }: AuthConfig) {
   return betterAuth({
     appName: 'Gurow',
     baseURL,
@@ -37,9 +39,9 @@ export function createAuth({ db, baseURL, secret, sendVerificationEmail }: AuthC
     account: { modelName: 'authCredentials' },
     verification: { modelName: 'authVerifications' },
     advanced: { database: { generateId: 'uuid' } },
-    emailAndPassword: { enabled: true },
+    emailAndPassword: { enabled: true, minPasswordLength: 8 },
     emailVerification: {
-      sendOnSignUp: true,
+      sendOnSignUp: verifyOnSignUp,
       sendVerificationEmail: ({ user, url }) => sendVerificationEmail({ to: user.email, url }),
     },
   })

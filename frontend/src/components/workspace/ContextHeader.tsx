@@ -41,15 +41,18 @@ export function ContextHeader({ account, onSignOut, context = { kind: 'personal'
       {account && (
         <div className="flex items-center gap-2.5 text-xs">
           <span id="account-email" className="text-slate-300">{account.email}</span>
-          <span
-            id="email-verification-status"
-            data-verified={account.emailVerified}
-            className={`px-2 py-0.5 rounded-md border ${account.emailVerified
-              ? 'text-emerald-300 border-emerald-700/60 bg-emerald-950/40'
-              : 'text-amber-300 border-amber-700/60 bg-amber-950/40'}`}
-          >
-            {account.emailVerified ? 'Email verified' : 'Email not verified'}
-          </span>
+          {/* Hidden while the backend does not require verification (EMAIL_VERIFICATION=off). */}
+          {(account.emailVerified || account.emailVerificationRequired) && (
+            <span
+              id="email-verification-status"
+              data-verified={account.emailVerified}
+              className={`px-2 py-0.5 rounded-md border ${account.emailVerified
+                ? 'text-emerald-300 border-emerald-700/60 bg-emerald-950/40'
+                : 'text-amber-300 border-amber-700/60 bg-amber-950/40'}`}
+            >
+              {account.emailVerified ? 'Email verified' : 'Email not verified'}
+            </span>
+          )}
           {onSignOut && (
             <button
               id="sign-out-btn"

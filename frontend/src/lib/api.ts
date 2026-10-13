@@ -10,6 +10,8 @@ export interface Account {
   email: string
   name: string
   emailVerified: boolean
+  /** False while the backend runs with EMAIL_VERIFICATION=off; the unverified notice is then hidden. */
+  emailVerificationRequired: boolean
 }
 
 export interface PersonalWorkspace {

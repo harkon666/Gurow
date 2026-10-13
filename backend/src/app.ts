@@ -170,9 +170,10 @@ const NIL_UUID = '00000000-0000-0000-0000-000000000000'
 /**
  * The backend request interface; identity comes only from the injected resolver.
  * With `auth`, it also serves Better Auth's sign-in endpoints under `/auth`; with
- * `delivery`, Coaches can send Enrollment Invitations.
+ * `delivery`, Coaches can send Enrollment Invitations. `requireVerifiedEmail` is off
+ * only while email verification is switched off (EMAIL_VERIFICATION=off).
  */
-export function createApp({ db, identity, auth, delivery }: { db: Database; identity: IdentityResolver; auth?: Auth; delivery?: InvitationDelivery }) {
+export function createApp({ db, identity, auth, delivery, requireVerifiedEmail = true }: { db: Database; identity: IdentityResolver; auth?: Auth; delivery?: InvitationDelivery; requireVerifiedEmail?: boolean }) {
   type Env = { Variables: { accountId: string } }
   const app = new Hono<Env>()
 
@@ -191,7 +192,7 @@ export function createApp({ db, identity, auth, delivery }: { db: Database; iden
   app.get('/account', async (c) => {
     const account = await readAccount(db, c.get('accountId'))
     if (!account) return c.json({ error: 'unauthenticated' }, 401)
-    return c.json({ account })
+    return c.json({ account: { ...account, emailVerificationRequired: requireVerifiedEmail } })
   })
 
   app.use('/invitations/*', authenticate)
@@ -202,7 +203,7 @@ export function createApp({ db, identity, auth, delivery }: { db: Database; iden
   app.get('/invitations/:invitationId', async (c) => {
     const invitationId = c.req.param('invitationId')
     if (!UUID.test(invitationId)) return c.json({ error: 'invitation_not_found' }, 404)
-    const result = await readInvitation(db, invitationId, c.get('accountId'))
+    const result = await readInvitation(db, invitationId, c.get('accountId'), requireVerifiedEmail)
     if (!result.ok) return c.json({ error: result.refusal }, REFUSAL_STATUS[result.refusal])
     return c.json({ offer: result.offer, enrollment: result.enrollment })
   })
@@ -210,7 +211,7 @@ export function createApp({ db, identity, auth, delivery }: { db: Database; iden
   app.post('/invitations/:invitationId/accept', async (c) => {
     const invitationId = c.req.param('invitationId')
     if (!UUID.test(invitationId)) return c.json({ error: 'invitation_not_found' }, 404)
-    const result = await acceptInvitation(db, invitationId, c.get('accountId'))
+    const result = await acceptInvitation(db, invitationId, c.get('accountId'), requireVerifiedEmail)
     if (!result.ok) return c.json({ error: result.refusal }, REFUSAL_STATUS[result.refusal])
     return c.json({ enrollment: result.enrollment, created: result.created, offer: result.offer }, result.created ? 201 : 200)
   })
@@ -773,6 +774,6 @@ export function createApp({ db, identity, auth, delivery }: { db: Database; iden
  * application, with identity taken only from Better Auth sessions (ADR 0022).
  * The P2 fixture identity is never accepted here.
  */
-export function createServer({ db, auth, delivery }: { db: Database; auth: Auth; delivery: InvitationDelivery }) {
-  return new Hono().route('/api', createApp({ db, identity: sessionIdentity(auth), auth, delivery }))
+export function createServer({ db, auth, delivery, requireVerifiedEmail }: { db: Database; auth: Auth; delivery: InvitationDelivery; requireVerifiedEmail?: boolean }) {
+  return new Hono().route('/api', createApp({ db, identity: sessionIdentity(auth), auth, delivery, requireVerifiedEmail }))
 }

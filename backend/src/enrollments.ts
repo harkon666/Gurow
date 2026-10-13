@@ -37,8 +37,9 @@ const sameEmail = (a: string, b: string) => a.trim().toLowerCase() === b.trim().
  * Account and another address are refused in that order, before anything about the
  * offer is disclosed. `lock` reads the Version FOR SHARE, so an Enrollment Closure
  * either commits before this acceptance reads it or waits until the acceptance ends.
+ * Without `requireVerifiedEmail` (EMAIL_VERIFICATION=off) the matching address is enough.
  */
-async function addressedInvitation(tx: Tx, invitationId: string, accountId: string, lock: boolean) {
+async function addressedInvitation(tx: Tx, invitationId: string, accountId: string, lock: boolean, requireVerifiedEmail: boolean) {
   const query = tx
     .select({
       id: enrollmentInvitations.id,
@@ -60,7 +61,7 @@ async function addressedInvitation(tx: Tx, invitationId: string, accountId: stri
   if (!invitation) return { ok: false, refusal: 'invitation_not_found' } as const
 
   const [account] = await tx.select().from(accounts).where(eq(accounts.id, accountId))
-  if (!account?.emailVerified) return { ok: false, refusal: 'email_not_verified' } as const
+  if (!account || (requireVerifiedEmail && !account.emailVerified)) return { ok: false, refusal: 'email_not_verified' } as const
   if (!sameEmail(account.email, invitation.email)) return { ok: false, refusal: 'email_mismatch' } as const
   const offer: InvitationOffer = {
     invitationId: invitation.id, learningPathVersionId: invitation.versionId, learningPathTitle: invitation.title,
@@ -82,9 +83,9 @@ const existingEnrollment = async (tx: Pick<Database, 'select'>, accountId: strin
  * acceptances converge on the unique (Account, Version) constraint, and a
  * refusal leaves no Enrollment and no recorded acceptance.
  */
-export async function acceptInvitation(db: Database, invitationId: string, accountId: string): Promise<AcceptResult> {
+export async function acceptInvitation(db: Database, invitationId: string, accountId: string, requireVerifiedEmail = true): Promise<AcceptResult> {
   return db.transaction(async (tx) => {
-    const addressed = await addressedInvitation(tx, invitationId, accountId, true)
+    const addressed = await addressedInvitation(tx, invitationId, accountId, true, requireVerifiedEmail)
     if (!addressed.ok) return addressed
     const { invitation, offer } = addressed
     if (invitation.workspaceOwnerId === accountId) return { ok: false, refusal: 'owner_cannot_enroll' }
@@ -118,9 +119,9 @@ export async function acceptInvitation(db: Database, invitationId: string, accou
  * what it offers, and the Account's existing Enrollment in that Version, if any.
  * Whether a new Enrollment would be admitted is decided only by accepting.
  */
-export async function readInvitation(db: Database, invitationId: string, accountId: string) {
+export async function readInvitation(db: Database, invitationId: string, accountId: string, requireVerifiedEmail = true) {
   return db.transaction(async (tx) => {
-    const addressed = await addressedInvitation(tx, invitationId, accountId, false)
+    const addressed = await addressedInvitation(tx, invitationId, accountId, false, requireVerifiedEmail)
     if (!addressed.ok) return addressed
     const enrollment = await existingEnrollment(tx, accountId, addressed.invitation.versionId)
     return { ok: true, offer: addressed.offer, enrollment: enrollment && { id: enrollment.id, status: enrollment.status } } as const

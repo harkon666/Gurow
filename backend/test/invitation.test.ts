@@ -26,9 +26,9 @@ let resend: ReturnType<typeof startResendStandIn>
 beforeAll(async () => { ({ db, close } = await prepareTestDatabase()) })
 afterAll(async () => { await close() })
 /** The served backend as `src/index.ts` builds it, sending all email through `mailer`. */
-function serve(mailer: Mailer) {
-  const auth = createAuth({ db, baseURL: ORIGIN, secret: 'test-secret-with-at-least-32-characters!', sendVerificationEmail: async ({ to, url }) => { await mailer(verificationEmail(to, url)) } })
-  return createServer({ db, auth, delivery: { send: (message) => mailer(invitationEmail(message)), link: (id) => `${ORIGIN}/invitations/${id}` } })
+function serve(mailer: Mailer, requireVerifiedEmail = true) {
+  const auth = createAuth({ db, baseURL: ORIGIN, secret: 'test-secret-with-at-least-32-characters!', verifyOnSignUp: requireVerifiedEmail, sendVerificationEmail: async ({ to, url }) => { await mailer(verificationEmail(to, url)) } })
+  return createServer({ db, auth, requireVerifiedEmail, delivery: { send: (message) => mailer(invitationEmail(message)), link: (id) => `${ORIGIN}/invitations/${id}` } })
 }
 beforeEach(async () => {
   await resetTestDatabase(db)
@@ -125,6 +125,29 @@ describe('AC1: a Coach invites one email to one published Version, delivered thr
     expect((await new Browser('anonymous').json(`/coach/learning-path-versions/${algebra.versionId}/invitations`, 'POST', { email: 'lena@gurow.test' })).status).toBe(401)
     expect(await db.select().from(enrollmentInvitations)).toEqual([])
     expect(resend.sent.length).toBe(sentBefore)
+  })
+})
+
+describe('email verification switched off (EMAIL_VERIFICATION=off)', () => {
+  it('signs up with an 8-character password and no verification email, and accepts by matching address alone', async () => {
+    const { coach, algebra } = await coachWithPaths()
+    await invite(coach, algebra.versionId, 'lena@gurow.test')
+    await invite(coach, algebra.versionId, 'otto@gurow.test')
+    const invitationId = invitationIdFromEmail('lena@gurow.test')
+    server = serve(resendMailer({ apiKey: resend.apiKey, from: 'Gurow <invitations@gurow.test>', apiUrl: resend.url }), false)
+
+    const lena = new Browser('lena@gurow.test')
+    const signUpWith = (password: string) => lena.request('/api/auth/sign-up/email', { method: 'POST', body: { email: lena.email, password, name: 'lena' } })
+    expect((await signUpWith('1234567')).status).toBe(400)
+    expect((await signUpWith('12345678')).status).toBe(200)
+    expect(resend.linkTo('lena@gurow.test', 'Verify')).toBeNull()
+    expect((await lena.json('/account')).body.account).toMatchObject({ email: 'lena@gurow.test', emailVerified: false, emailVerificationRequired: false })
+
+    expect((await lena.json(`/invitations/${invitationId}`)).status).toBe(200)
+    expect(await lena.accept(invitationId)).toMatchObject({ status: 201, body: { created: true, enrollment: { learningPathVersionId: algebra.versionId, status: 'active' } } })
+    // Another address is still refused, and the Account stays unverified.
+    expect(await lena.accept(invitationIdFromEmail('otto@gurow.test'))).toEqual({ status: 403, body: { error: 'email_mismatch' } })
+    expect((await db.select().from(accounts).where(eq(accounts.email, 'lena@gurow.test')))[0].emailVerified).toBe(false)
   })
 })
 
