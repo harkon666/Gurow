@@ -24,29 +24,34 @@ function EnrollmentPage() {
   const document = view.state === 'ready' ? view.value : null
   return (
     <main className="w-full h-full flex flex-col bg-slate-950" data-account-id={account?.id ?? ''}>
-      <ContextHeader account={account} onSignOut={handleSignOut} context={document?.viewer === 'coach' ? { kind: 'coach', workspaceName: document.coachWorkspace.name } : { kind: 'learner' }} />
+      {!document && <ContextHeader account={account} onSignOut={handleSignOut} context={{ kind: 'learner' }} />}
       {document && view.state === 'ready' && (
-        <>
-          <nav className="shrink-0 px-4 py-1.5 text-xs border-b border-slate-800/80 bg-slate-950">
-            {document.viewer === 'learner'
+        <EnrolledVersionView
+          key={`${view.account.id}:${enrollmentId}`}
+          accountId={view.account.id}
+          document={document}
+          chrome={{
+            account: view.account,
+            onSignOut: handleSignOut,
+            context: document.viewer === 'coach' ? { kind: 'coach', workspaceName: document.coachWorkspace.name } : { kind: 'learner' },
+            back: document.viewer === 'learner'
               ? (
-                <Link id="back-to-learning" to="/learning" className="text-violet-300 hover:text-violet-200 inline-flex items-center gap-1.5">
+                <Link id="back-to-learning" to="/learning" className="text-violet-300 hover:text-violet-200 inline-flex items-center gap-1.5 whitespace-nowrap">
                   <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                   </svg>
                   <span>Your Enrollments</span>
                 </Link>
               ) : (
-                <Link id="back-to-coach-workspace" to="/coach/workspaces/$workspaceId" params={{ workspaceId: document.coachWorkspace.id }} className="text-sky-300 hover:text-sky-200 inline-flex items-center gap-1.5">
+                <Link id="back-to-coach-workspace" to="/coach/workspaces/$workspaceId" params={{ workspaceId: document.coachWorkspace.id }} className="text-sky-300 hover:text-sky-200 inline-flex items-center gap-1.5 whitespace-nowrap">
                   <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                   </svg>
                   <span>Coach Workspace</span>
                 </Link>
-              )}
-          </nav>
-          <EnrolledVersionView key={`${view.account.id}:${enrollmentId}`} accountId={view.account.id} document={document} />
-        </>
+              ),
+          }}
+        />
       )}
       {view.state === 'loading' && <p className="p-6 text-sm text-slate-500">Loading your Enrollment…</p>}
       {view.state === 'unavailable' && (

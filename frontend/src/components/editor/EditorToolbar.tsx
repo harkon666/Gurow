@@ -37,13 +37,10 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
   layoutOnly = false,
 }) => {
   return (
-    <div className="@container min-h-12 shrink-0 border-b border-slate-800/80 bg-slate-900/60 px-3 py-2 flex items-center justify-between gap-3 backdrop-blur-sm z-20">
-      {/*
-        Controls keep their intrinsic width (shrink-0 + whitespace-nowrap) so a
-        narrow editor column scrolls the group instead of squeezing every label
-        into a one-character-per-line sliver.
-      */}
-      <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
+    // Floats over the canvas, which keeps the whole area; above the canvas notices, so the Skill list stays reachable.
+    <div id="editor-toolbar" className="absolute bottom-3 left-1/2 -translate-x-1/2 z-40 w-max max-w-[calc(100%-1.5rem)] rounded-xl border border-slate-700/70 bg-slate-900/90 backdrop-blur shadow-lg px-2 py-1.5">
+      {/* Controls keep their intrinsic width (shrink-0 + whitespace-nowrap); a narrow canvas wraps the group. */}
+      <div className="flex flex-wrap items-center justify-center gap-2 min-w-0">
         {navigation}
         <span
           id="gpu-status-badge"

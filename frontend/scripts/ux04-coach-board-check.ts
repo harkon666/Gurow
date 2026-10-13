@@ -495,6 +495,7 @@ export async function main() {
     current = reviewPage
     await reviewPage.goto(`${ORIGIN}/coach/versions/${v1.id}`, { waitUntil: 'networkidle0' })
     check(!await reviewPage.$('#open-board-btn'), 'a published Version offers a preparation board')
+    await activate(reviewPage, '#open-learners-btn')
     await activate(reviewPage, `#open-enrollment-${enrollment}`)
     await reviewPage.waitForSelector('#enrolled-version[data-gpu-status="unsupported"]')
     check(!await reviewPage.$('#open-board-btn'), 'the review context offers a board')
@@ -554,6 +555,8 @@ export async function main() {
     // ---- AC9: identity switching in the same browser shows none of the Coach's Draft or board.
     await activate(narrow, '#btn-close-skill-details')
     await narrow.waitForSelector('#skill-detail-panel', { hidden: true })
+    // On a narrow screen the menu holding the Account starts closed.
+    await activate(narrow, '#toggle-sidebar-btn')
     await activate(narrow, '#sign-out-btn')
     await narrow.waitForSelector('#sign-in-form')
     await setValue(narrow, '#email-input', 'learner@ux04.test')

@@ -19,6 +19,9 @@ import { ReusePanel } from './ReusePanel'
 import { ArchivedSkills, ArchiveSkillControl, ArchiveTaskControl, RetainedTasks, type RetainedTask } from './Archival'
 import { DeleteSkillControl } from './Deletion'
 import { TaskBoard } from '../board/TaskBoard'
+import { CanvasSidebar, FLOAT_ROW, FLOAT_STACK, SidebarToggle, useCanvasSidebar } from '../workspace/CanvasChrome'
+import { FLOATING, type LearningContext } from '../workspace/ContextHeader'
+import type { Account } from '../../lib/api'
 import type { BoardColumn } from '../board/boardModel'
 import { useTaskBoards, type BoardStore } from './taskBoards'
 
@@ -113,8 +116,10 @@ const workOf = (document: EditablePathDocument): PathWork => ({
  * (completion, rewards, Mastery, thresholds, overrides) are separate backend actions
  * that never touch the document or its revision; a Draft has none.
  */
-export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId = null, publishedVersionIds = [], draftControls }: {
+export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId = null, publishedVersionIds = [], draftControls, chrome }: {
   accountId: string
+  /** What floats over the canvas with the editor's own controls: the way back, and the Account and context in the menu. */
+  chrome: { account: Account; onSignOut: () => void; context: LearningContext; back: ReactNode; extra?: ReactNode }
   initial: EditablePathDocument
   mode?: PathMode
   /** The Draft's Learning Path Version id (coach mode): unsaved work is kept per Draft, not per Path. */
@@ -164,6 +169,7 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
   // Read by the autosave when it builds a save, so they follow every edit at once.
   const local = useRef({ skills, title, goal })
   const actionsRef = useRef<WebGpuEditorActions | null>(null)
+  const [sidebar, toggleSidebar] = useCanvasSidebar()
   const autosaveRef = useRef<Autosave<LocalDocument> | null>(null)
   /** Each Skill's Task IDs in the document the backend last accepted from this tab. */
   const savedTasks = useRef(new Map(initial.application.skills.map((skill) => [skill.id, skill.tasks.map((task) => task.id)])))
@@ -688,41 +694,41 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
   }
 
   return (
-    <div id="path-editor" data-path-id={pathId} data-gpu-status={gpuStatus} data-reapplying={reapplying} className="flex-1 min-h-0 flex flex-col">
-      <div inert={reapplying} className="shrink-0 border-b border-slate-800/80 bg-slate-900/60 px-4 py-2 flex flex-wrap items-center gap-3">
-        <input
-          id="path-title-input"
-          aria-label="Learning Path title"
-          value={title}
-          onChange={(e) => changeHeader('title', e.target.value)}
-          className="text-sm font-semibold text-slate-100 bg-transparent border border-transparent hover:border-slate-700 focus:border-blue-500 rounded px-2 py-1 min-w-[12rem]"
-        />
-        <label className="flex-1 min-w-[16rem] flex items-center gap-2 text-xs text-slate-400">
-          Goal
+    <div id="path-editor" data-path-id={pathId} data-gpu-status={gpuStatus} data-reapplying={reapplying} className="relative flex-1 min-h-0">
+      <div inert={reapplying} className={FLOAT_ROW}>
+        <div className={`${FLOATING} min-h-9 px-3 py-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs min-w-0`}>
+          {chrome.back}
+          <span className="h-4 w-px bg-slate-700" aria-hidden="true" />
           <input
-            id="path-goal-input"
-            value={goal}
-            onChange={(e) => changeHeader('goal', e.target.value)}
-            placeholder="What this Path works toward"
-            className="flex-1 text-xs text-slate-200 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded px-2 py-1"
+            id="path-title-input"
+            aria-label="Learning Path title"
+            value={title}
+            onChange={(e) => changeHeader('title', e.target.value)}
+            className="text-sm font-semibold text-slate-100 bg-transparent border border-transparent hover:border-slate-700 focus:border-blue-500 rounded px-2 py-0.5 w-[14rem] max-w-full"
           />
-        </label>
-        {personal ? (
-          <LearningStatus
-            view={learning}
-            describe={(action) => describeAction(action, taskTitles, skillTitles)}
-            onRetry={() => void learningRef.current?.retry()}
-            onDismiss={() => learningRef.current?.dismiss()}
-            onReload={() => void learningRef.current?.refresh()}
-          />
-        ) : (
-          <span id="draft-badge" title="Learners cannot enroll in a Draft, so nothing in it awards XP or Mastery yet" className="text-xs px-2 py-1 rounded-lg border border-amber-800/60 text-amber-200 bg-slate-950/80">
-            Draft · not published
-          </span>
-        )}
-        {!personal && draftControls?.({ saved: saveState.kind === 'saved', revision: saveState.revision })}
-        <SaveStatus state={saveState} onRetry={() => autosaveRef.current?.retry()} />
+          {!personal && (
+            <span id="draft-badge" title="Learners cannot enroll in a Draft, so nothing in it awards XP or Mastery yet" className="px-1.5 py-0.5 rounded-md border border-amber-800/60 text-amber-200 whitespace-nowrap">
+              Draft · not published
+            </span>
+          )}
+          {chrome.extra}
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2 min-w-0">
+          {personal && (
+            <LearningStatus
+              view={learning}
+              describe={(action) => describeAction(action, taskTitles, skillTitles)}
+              onRetry={() => void learningRef.current?.retry()}
+              onDismiss={() => learningRef.current?.dismiss()}
+              onReload={() => void learningRef.current?.refresh()}
+            />
+          )}
+          <SaveStatus state={saveState} onRetry={() => autosaveRef.current?.retry()} />
+          {!personal && draftControls?.({ saved: saveState.kind === 'saved', revision: saveState.revision })}
+          <SidebarToggle open={sidebar} onToggle={toggleSidebar} />
+        </div>
       </div>
+      <div className={FLOAT_STACK}>
       {saveState.kind === 'conflict' && (
         <SaveConflict
           prefix=""
@@ -766,7 +772,8 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
           {ruleProblem} This Draft cannot be saved until it is fixed.
         </p>
       )}
-      <section inert={reapplying} aria-busy={reapplying} className={`w-full flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden relative ${reapplying ? 'pointer-events-none opacity-60' : ''}`}>
+      </div>
+      <section inert={reapplying} aria-busy={reapplying} className={`absolute inset-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden ${reapplying ? 'pointer-events-none opacity-60' : ''}`}>
         {addOpen && <TemporaryPanel title="Add Skill" closeId="btn-close-add-skill" onClose={() => setAddOpen(false)} initialFocus="#new-skill-title">
           <form id="new-skill-form" onSubmit={addSkill} className="shrink-0 p-3 border-b border-slate-800/80 flex flex-col gap-2">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400">New Skill</h2>
@@ -945,6 +952,19 @@ export function PathEditor({ accountId, initial, mode = PERSONAL_MODE, draftId =
           />
         )}
       </section>
+      <CanvasSidebar open={sidebar} onClose={() => toggleSidebar(false)} heading={personal ? 'This Path' : 'This Draft'} account={chrome.account} onSignOut={chrome.onSignOut} context={chrome.context}>
+        <label inert={reapplying} className="flex flex-col gap-1 text-slate-400">
+          Goal
+          <input
+            id="path-goal-input"
+            value={goal}
+            onChange={(e) => changeHeader('goal', e.target.value)}
+            placeholder="What this Path works toward"
+            className="text-xs text-slate-200 bg-slate-950 border border-slate-800 focus:border-blue-500 rounded px-2 py-1.5"
+          />
+        </label>
+        <p className="text-slate-500">{personal ? 'Select a Skill on the canvas to work on its Tasks. Add Skills from the toolbar below.' : 'Learners cannot enroll in a Draft. Add Skills from the toolbar below, then publish it as a Version.'}</p>
+      </CanvasSidebar>
     </div>
   )
 }
@@ -983,7 +1003,7 @@ function SaveStatus({ state, onRetry, prefix = '' }: { state: SaveState; onRetry
   const tone = state.kind === 'saved' ? 'text-emerald-300 border-emerald-800/60' : state.kind === 'dirty' || state.kind === 'saving' ? 'text-slate-300 border-slate-700' : 'text-red-300 border-red-800/70'
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs">
-      <span id={`${prefix}save-status`} role="status" data-state={state.kind} data-revision={state.revision} className={`px-2 py-1 rounded-lg border bg-slate-950/80 ${tone}`}>
+      <span id={`${prefix}save-status`} role="status" data-state={state.kind} data-revision={state.revision} className={`px-2.5 py-2 rounded-xl border bg-slate-900/90 backdrop-blur shadow-lg ${tone}`}>
         {text}
       </span>
       {(state.kind === 'rejected' || state.kind === 'failed') && (

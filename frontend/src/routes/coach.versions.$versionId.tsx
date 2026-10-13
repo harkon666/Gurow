@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useCallback } from 'react'
-import { PublishedVersionView, VersionHistory } from '../components/path/Publication'
+import { PublishedVersionView } from '../components/path/Publication'
 import { ContextHeader } from '../components/workspace/ContextHeader'
 import { readCoachVersion, signOut } from '../lib/api'
 import { useOwnedView } from '../lib/useOwnedView'
@@ -24,21 +24,8 @@ function CoachVersionPage() {
   const document = view.state === 'ready' ? view.value : null
   return (
     <main className="w-full h-full flex flex-col bg-slate-950" data-account-id={account?.id ?? ''}>
-      <ContextHeader account={account} onSignOut={handleSignOut} context={{ kind: 'coach' }} />
-      {document && view.state === 'ready' && (
-        <>
-          <nav className="shrink-0 px-4 py-1.5 text-xs border-b border-slate-800/80 bg-slate-950 flex items-center gap-4">
-            <Link id="back-to-path" to="/coach/paths/$pathId" params={{ pathId: document.learningPath.id }} className="text-sky-300 hover:text-sky-200 inline-flex items-center gap-1.5">
-              <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-              </svg>
-              <span>Learning Path</span>
-            </Link>
-            <VersionHistory versions={document.versions} currentVersionId={document.version?.id} />
-          </nav>
-          <PublishedVersionView accountId={view.account.id} document={document} />
-        </>
-      )}
+      {!document && <ContextHeader account={account} onSignOut={handleSignOut} context={{ kind: 'coach' }} />}
+      {document && view.state === 'ready' && <PublishedVersionView account={view.account} onSignOut={handleSignOut} document={document} currentVersionId={document.version?.id} />}
       {view.state === 'loading' && <p className="p-6 text-sm text-slate-500">Loading Learning Path Version…</p>}
       {view.state === 'unavailable' && (
         <div id="version-unavailable" role="alert" className="m-6 max-w-md bg-slate-900/70 border border-slate-800 rounded-xl p-4 flex flex-col gap-2">

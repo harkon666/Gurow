@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { WebGpuEditor, type WebGpuEditorActions } from '../editor/WebGpuEditor'
 import { SkillPrerequisiteList } from '../editor/SkillPrerequisiteList'
 import { SkillDetailPanel } from '../editor/SkillDetailPanel'
@@ -10,6 +10,7 @@ import { Autosave, type SaveState } from './autosave'
 import { layoutChanges, layoutWorkProblem, reapplyLayout, sameLayoutWork, type LayoutWork, type WorkContext } from './keptWork'
 import { KeptWorkList, SaveConflict } from './KeptWorkPanel'
 import { useKeptWork, type SaveAnswer } from './useKeptWork'
+import { FLOAT_ROW, FLOAT_STACK } from '../workspace/CanvasChrome'
 
 /**
  * A published Version's shared Canvas Layout, arranged by its owning Coach (ADR 0005,
@@ -20,7 +21,8 @@ import { useKeptWork, type SaveAnswer } from './useKeptWork'
  * canvas, unsaved, and in this browser until the Coach reapplies the moves onto the
  * accepted layout as a new save or discards them; moves never accepted are offered
  * again on reopening. Undoing a saved move is sent as a new save. Camera state is
- * stored only locally, per Account and Version.
+ * stored only locally, per Account and Version. The canvas fills the whole page;
+ * `lead` (naming the Version) and `actions` float over its top corners.
  */
 
 const AUTOSAVE_DELAY_MS = 500
@@ -33,7 +35,7 @@ export const versionCameraContext = (versionId: string) => `version:${versionId}
 const cardsOf = (document: CoachPathDocument) => document.editor.cards.map((card) => ({ id: card.id, title: card.title, position: card.position }))
 const layoutOf = (document: CoachPathDocument): LayoutWork => document.editor.cards.map((card) => ({ id: card.id, position: card.position }))
 
-export function VersionLayoutEditor({ accountId, document }: { accountId: string; document: CoachPathDocument }) {
+export function VersionLayoutEditor({ accountId, document, lead, actions }: { accountId: string; document: CoachPathDocument; lead?: ReactNode; actions?: ReactNode }) {
   const version = document.version!
   const [loaded, setLoaded] = useState(() => cardsOf(document))
   const [connections] = useState(() => document.editor.connections)
@@ -149,15 +151,15 @@ export function VersionLayoutEditor({ accountId, document }: { accountId: string
   const reapplying = keptView.busy
 
   return (
-    <section id="version-layout" data-version-id={version.id} data-gpu-status={gpuStatus} aria-labelledby="version-layout-heading" className="flex flex-col border border-slate-800 rounded-xl overflow-hidden">
-      <div className="shrink-0 px-3 py-2 bg-slate-900/60 border-b border-slate-800/80 flex flex-wrap items-center gap-3">
-        <h2 id="version-layout-heading" className="text-sm font-semibold text-slate-100">Shared Canvas Layout</h2>
-        <LayoutSaveStatus state={saveState} onRetry={() => autosaveRef.current?.retry()} />
-        {selected && <span id="version-layout-selected" className="text-xs text-slate-400">Selected: {selected.title}</span>}
+    <section id="version-layout" data-version-id={version.id} data-gpu-status={gpuStatus} aria-label="Shared Canvas Layout" className="relative flex-1 min-h-0">
+      <div className={FLOAT_ROW}>
+        <div className="flex flex-wrap items-center gap-2 min-w-0">{lead}</div>
+        <div className="flex flex-wrap items-center justify-end gap-2 min-w-0">
+          <LayoutSaveStatus state={saveState} onRetry={() => autosaveRef.current?.retry()} />
+          {actions}
+        </div>
       </div>
-      <p id="version-layout-note" className="shrink-0 px-3 py-1.5 text-[11px] text-slate-400 border-b border-slate-800/80">
-        Drag cards to make this Version easier to read. Its learners see the new arrangement when they next open it, each with their own view. Only positions change: Skills, Tasks, Prerequisites and learning records stay as they are, and no new Version is published.
-      </p>
+      <div className={FLOAT_STACK}>
       {saveState.kind === 'conflict' && (
         <SaveConflict
           prefix="layout-"
@@ -185,7 +187,8 @@ export function VersionLayoutEditor({ accountId, document }: { accountId: string
         onDiscard={(id) => kept.discard(id)}
         onDismissRefused={() => kept.dismissRefused()}
       />
-      <div inert={reapplying} aria-busy={reapplying} className={`h-[28rem] flex ${reapplying ? 'pointer-events-none opacity-60' : ''}`}>
+      </div>
+      <div inert={reapplying} aria-busy={reapplying} className={`absolute inset-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden ${reapplying ? 'pointer-events-none opacity-60' : ''}`}>
         <WebGpuEditor
           navigation={<SkillPrerequisiteList skills={document.application.skills} connections={connections} selectedSkillId={selected?.id ?? null} onSelectSkill={(skill) => { setSelected(skill); actionsRef.current?.selectCard(skill?.id ?? null) }} />}
           layoutOnly
@@ -207,8 +210,8 @@ export function VersionLayoutEditor({ accountId, document }: { accountId: string
 /** Tells the Coach whether the arrangement on the canvas is saved; only a backend acceptance says so. */
 function LayoutSaveStatus({ state, onRetry }: { state: SaveState; onRetry: () => void }) {
   const text = {
-    saved: 'Saved',
-    dirty: 'Unsaved changes',
+    saved: 'Layout saved',
+    dirty: 'Unsaved layout changes',
     saving: 'Saving…',
     conflict: 'Not saved: this layout was changed elsewhere',
     rejected: 'Not saved: the change was refused',
@@ -217,7 +220,7 @@ function LayoutSaveStatus({ state, onRetry }: { state: SaveState; onRetry: () =>
   const tone = state.kind === 'saved' ? 'text-emerald-300 border-emerald-800/60' : state.kind === 'dirty' || state.kind === 'saving' ? 'text-slate-300 border-slate-700' : 'text-red-300 border-red-800/70'
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs">
-      <span id="layout-save-status" role="status" data-state={state.kind} data-revision={state.revision} className={`px-2 py-1 rounded-lg border bg-slate-950/80 ${tone}`}>
+      <span id="layout-save-status" role="status" data-state={state.kind} data-revision={state.revision} title="Shared Canvas Layout: card positions only" className={`px-2.5 py-2 rounded-xl border bg-slate-900/90 backdrop-blur shadow-lg ${tone}`}>
         {text}
       </span>
       {(state.kind === 'rejected' || state.kind === 'failed') && (

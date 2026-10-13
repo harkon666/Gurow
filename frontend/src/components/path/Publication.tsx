@@ -3,7 +3,10 @@ import { useState, type ReactNode } from 'react'
 import { EnrollmentAdmission } from './Admission'
 import { VersionEnrollments } from './VersionEnrollments'
 import { VersionLayoutEditor } from './VersionLayout'
-import { prepareCoachDraft, publishCoachDraft, type BlockedSkill, type CoachPathDocument } from '../../lib/api'
+import { KeptPanel } from '../editor/TemporaryPanel'
+import { CanvasSidebar, SidebarToggle, useCanvasSidebar } from '../workspace/CanvasChrome'
+import { FLOATING } from '../workspace/ContextHeader'
+import { prepareCoachDraft, publishCoachDraft, type Account, type BlockedSkill, type CoachPathDocument } from '../../lib/api'
 
 /**
  * Publishing a Coach's Draft (ADR 0005, 0008). Publication freezes the Draft as a
@@ -96,12 +99,12 @@ export function PrepareDraftControl({ pathId, revision, nextVersion, onPrepared 
     setError(result?.error === 'stale_revision' || result?.error === 'draft_already_open' ? 'This Path was changed elsewhere; reload it.' : result?.error ?? 'the backend could not be reached')
   }
   return (
-    <div className="flex items-center gap-2 text-xs">
+    <div className="flex flex-wrap items-center gap-2 text-xs">
       <button
         id="prepare-draft-btn"
         onClick={() => void prepare()}
         disabled={pending}
-        className="font-medium bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white rounded-lg px-2.5 py-1 cursor-pointer"
+        className="font-medium bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white rounded-lg px-2.5 py-2 cursor-pointer"
       >
         {pending ? 'Preparing…' : `Prepare Version ${nextVersion} as a Draft`}
       </button>
@@ -114,7 +117,7 @@ export function PrepareDraftControl({ pathId, revision, nextVersion, onPrepared 
 export function VersionHistory({ versions, currentVersionId }: { versions: CoachPathDocument['versions']; currentVersionId?: string }) {
   if (versions.length === 0) return <span id="version-history" className="text-slate-500">Not published yet</span>
   return (
-    <span id="version-history" className="flex items-center gap-1.5 text-slate-400">
+    <span id="version-history" className="flex items-center gap-1.5 text-slate-400 whitespace-nowrap">
       Published:
       {versions.map((version) => (
         <Link
@@ -133,58 +136,121 @@ export function VersionHistory({ versions, currentVersionId }: { versions: Coach
 }
 
 /**
- * A published Version's learning content and rules, read-only: its own title and goal, Skills with outcomes,
- * Required or Optional designation, XP Thresholds and Prerequisites, and their Tasks
- * with Required or Enrichment designation and rewards. Above it, the Coach arranges the
- * Version's shared Canvas Layout, positions only; below it, outside the read-only
- * content, the Coach invites learners and controls admission.
+ * A published Version for its Coach: the Version's shared Canvas Layout fills the whole
+ * page, where the Coach arranges cards, positions only, and everything else floats over
+ * it. The way back to the Coach Workspace, the Version and the context switch stay in
+ * view; a menu sidebar on the right opens and closes over the canvas, holding the Version's
+ * panels, the context switch and the Account. The Version's learning content and
+ * rules are read-only (own title and goal, Skills with outcomes, Required or Optional
+ * designation, XP Thresholds and Prerequisites, and their Tasks with Required or
+ * Enrichment designation and rewards) and open as a panel; inviting learners, admission
+ * and the enrolled learners open as another, outside the read-only content.
  */
-export function PublishedVersionView({ accountId, document, actions }: { accountId: string; document: CoachPathDocument; actions?: ReactNode }) {
+export function PublishedVersionView({ account, onSignOut, document, actions, currentVersionId }: {
+  account: Account
+  onSignOut: () => void
+  document: CoachPathDocument
+  actions?: ReactNode
+  /** Set on a Version's own page: its link is marked current and the title leads back to the Path. */
+  currentVersionId?: string
+}) {
+  const accountId = account.id
   const version = document.version!
+  const [panel, setPanel] = useState<'content' | 'learners' | null>(null)
+  const [learners, setLearners] = useState<{ count: number; awaiting: number } | null>(null)
+  const [sidebar, toggleSidebar] = useCanvasSidebar()
   const titles = new Map(document.application.skills.map((skill) => [skill.id, skill.title]))
   const prerequisites = (id: string) => document.editor.connections.filter((edge) => edge.to_id === id).map((edge) => titles.get(edge.from_id) ?? edge.from_id)
+  const panelButton = 'w-full text-xs text-slate-200 bg-slate-800/70 hover:bg-slate-700 border border-slate-700 rounded-lg px-2.5 py-2 cursor-pointer flex items-center justify-between gap-2'
+  const title = <h1 id="published-path-title" className="text-sm font-semibold text-slate-100 truncate max-w-[16rem]">{document.learningPath.title}</h1>
   return (
-    <div className="flex-1 min-h-0 overflow-y-auto p-6 flex flex-col gap-4 max-w-4xl">
-      <section id="published-version" data-version-id={version.id} data-version-number={version.versionNumber} className="flex flex-col gap-4">
-        <header className="flex flex-wrap items-center gap-3">
-          <h1 id="published-path-title" className="text-base font-semibold text-slate-100">{document.learningPath.title}</h1>
-          <span id="published-version-badge" className="text-xs px-2 py-1 rounded-lg border border-sky-800/60 text-sky-200 bg-slate-950/80">
-            Version {version.versionNumber} · published {version.publishedAt ? new Date(version.publishedAt).toLocaleString() : ''}
-          </span>
-          {actions}
-        </header>
-        {document.learningPath.goal && <p id="published-path-goal" className="text-xs text-slate-400">Goal: {document.learningPath.goal}</p>}
-        <p id="published-version-immutable" className="text-xs text-slate-400">
-          A published Version's learning content and rules cannot be edited, not even to correct a typo. Learners enrolled in it keep it as published; changes are prepared in a new Draft and published as a new Version.
-        </p>
-        <VersionLayoutEditor key={`${accountId}:${version.id}`} accountId={accountId} document={document} />
-        <ol id="published-skills" className="flex flex-col gap-3">
-          {document.application.skills.map((skill) => (
-            <li key={skill.id} id={`published-skill-${skill.id}`} data-optional={skill.optional === true} className="border border-slate-800 rounded-xl p-3 bg-slate-900/50 flex flex-col gap-1.5">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 data-field="title" className="text-sm font-semibold text-slate-100">{skill.title}</h2>
-                <span className={`text-[10px] px-1.5 rounded border ${skill.optional ? 'text-sky-300 border-sky-900/70' : 'text-slate-300 border-slate-700'}`}>{skill.optional ? 'Optional' : 'Required'}</span>
-                {(skill.xpThreshold ?? 0) > 0 && <span data-field="threshold" className="text-[10px] px-1.5 rounded border text-amber-300 border-amber-900/70">needs {skill.xpThreshold} XP</span>}
-              </div>
-              <p data-field="outcome" className="text-xs text-slate-300">{skill.outcome}</p>
-              {prerequisites(skill.id).length > 0 && <p data-field="prerequisites" className="text-xs text-slate-400">Requires Mastery of: {prerequisites(skill.id).join(', ')}</p>}
-              {skill.tasks.length === 0 ? <p className="text-xs text-slate-500">No Tasks</p> : (
-                <ul className="flex flex-col gap-1">
-                  {skill.tasks.map((task) => (
-                    <li key={task.id} id={`published-task-${task.id}`} data-required={task.required === true} className="text-xs text-slate-300 border-l-2 border-slate-700 pl-2">
-                      <span data-field="title" className="text-slate-100">{task.title}</span>
-                      <span className="text-slate-500"> · {task.required ? 'Required' : 'Enrichment'} · {task.xpReward ?? 0} XP</span>
-                      {task.description && <p className="text-slate-400">{task.description}</p>}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </li>
-          ))}
-        </ol>
+    <div className="relative w-full flex-1 min-h-0 flex flex-col">
+      <section id="published-version" data-version-id={version.id} data-version-number={version.versionNumber} className="flex-1 min-h-0 flex flex-col">
+        <VersionLayoutEditor
+          key={`${accountId}:${version.id}`}
+          accountId={accountId}
+          document={document}
+          lead={<>
+            <div className={`${FLOATING} min-h-9 px-3 py-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs`}>
+              <Link id="back-to-coach-workspace" to="/coach/workspaces/$workspaceId" params={{ workspaceId: document.learningPath.coachWorkspaceId }} className="text-sky-300 hover:text-sky-200 inline-flex items-center gap-1.5 whitespace-nowrap">
+                <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                </svg>
+                <span>Coach Workspace</span>
+              </Link>
+              <span className="h-4 w-px bg-slate-700" aria-hidden="true" />
+              {currentVersionId
+                ? <Link id="back-to-path" to="/coach/paths/$pathId" params={{ pathId: document.learningPath.id }} title="Open this Learning Path" className="hover:underline decoration-slate-500">{title}</Link>
+                : title}
+              <span id="published-version-badge" title={`Published ${version.publishedAt ? new Date(version.publishedAt).toLocaleString() : ''}. Published content and rules cannot be edited; changes are prepared in a new Draft.`} className="px-1.5 py-0.5 rounded-md border border-sky-800/60 text-sky-200 whitespace-nowrap">
+                Version {version.versionNumber} · published
+              </span>
+              <VersionHistory versions={document.versions} currentVersionId={currentVersionId} />
+            </div>
+          </>}
+          actions={
+            <SidebarToggle open={sidebar} onToggle={toggleSidebar} badge={learners && learners.awaiting > 0 && <span className="px-1.5 rounded-md bg-sky-700 text-white">{learners.awaiting} to review</span>} />
+          }
+        />
+        <KeptPanel id="version-content-panel" title={`Version ${version.versionNumber} · Skills & Tasks`} closeId="close-version-content-btn" open={panel === 'content'} onClose={() => setPanel(null)}>
+          <div className="p-4 flex flex-col gap-3">
+            {document.learningPath.goal && <p id="published-path-goal" className="text-xs text-slate-400">Goal: {document.learningPath.goal}</p>}
+            <p id="published-version-immutable" className="text-xs text-slate-400">
+              A published Version's learning content and rules cannot be edited, not even to correct a typo. Learners enrolled in it keep it as published; changes are prepared in a new Draft and published as a new Version.
+            </p>
+            <p id="version-layout-note" className="text-xs text-slate-400">
+              On the canvas, drag cards to make this Version easier to read. Its learners see the new arrangement when they next open it, each with their own view. Only positions change: Skills, Tasks, Prerequisites and learning records stay as they are, and no new Version is published.
+            </p>
+            <ol id="published-skills" className="flex flex-col gap-3">
+              {document.application.skills.map((skill) => (
+                <li key={skill.id} id={`published-skill-${skill.id}`} data-optional={skill.optional === true} className="border border-slate-800 rounded-xl p-3 bg-slate-900/50 flex flex-col gap-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 data-field="title" className="text-sm font-semibold text-slate-100">{skill.title}</h2>
+                    <span className={`text-[10px] px-1.5 rounded border ${skill.optional ? 'text-sky-300 border-sky-900/70' : 'text-slate-300 border-slate-700'}`}>{skill.optional ? 'Optional' : 'Required'}</span>
+                    {(skill.xpThreshold ?? 0) > 0 && <span data-field="threshold" className="text-[10px] px-1.5 rounded border text-amber-300 border-amber-900/70">needs {skill.xpThreshold} XP</span>}
+                  </div>
+                  <p data-field="outcome" className="text-xs text-slate-300">{skill.outcome}</p>
+                  {prerequisites(skill.id).length > 0 && <p data-field="prerequisites" className="text-xs text-slate-400">Requires Mastery of: {prerequisites(skill.id).join(', ')}</p>}
+                  {skill.tasks.length === 0 ? <p className="text-xs text-slate-500">No Tasks</p> : (
+                    <ul className="flex flex-col gap-1">
+                      {skill.tasks.map((task) => (
+                        <li key={task.id} id={`published-task-${task.id}`} data-required={task.required === true} className="text-xs text-slate-300 border-l-2 border-slate-700 pl-2">
+                          <span data-field="title" className="text-slate-100">{task.title}</span>
+                          <span className="text-slate-500"> · {task.required ? 'Required' : 'Enrichment'} · {task.xpReward ?? 0} XP</span>
+                          {task.description && <p className="text-slate-400">{task.description}</p>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </li>
+              ))}
+            </ol>
+          </div>
+        </KeptPanel>
       </section>
-      <EnrollmentAdmission key={version.id} versionId={version.id} versionNumber={version.versionNumber} />
-      <VersionEnrollments key={`enrollments:${version.id}`} versionId={version.id} />
+      <KeptPanel id="learners-panel" title={`Version ${version.versionNumber} · Learners`} closeId="close-learners-btn" open={panel === 'learners'} onClose={() => setPanel(null)}>
+        <div className="p-4 flex flex-col gap-4">
+          <EnrollmentAdmission key={version.id} versionId={version.id} versionNumber={version.versionNumber} />
+          <VersionEnrollments key={`enrollments:${version.id}`} versionId={version.id} onSummary={setLearners} />
+        </div>
+      </KeptPanel>
+      <CanvasSidebar open={sidebar} onClose={() => toggleSidebar(false)} heading="This Version" account={account} onSignOut={onSignOut} context={{ kind: 'coach' }}>
+          <p className="text-slate-100">{document.learningPath.title} · Version {version.versionNumber}</p>
+          {document.learningPath.goal && <p className="text-slate-400">Goal: {document.learningPath.goal}</p>}
+          <button id="open-version-content-btn" aria-haspopup="dialog" aria-expanded={panel === 'content'} onClick={() => setPanel('content')} className={panelButton}>
+            <span>Skills & Tasks</span>
+            <span className="text-slate-400">{document.application.skills.length}</span>
+          </button>
+          <button id="open-learners-btn" aria-haspopup="dialog" aria-expanded={panel === 'learners'} onClick={() => setPanel('learners')} className={panelButton}>
+            <span>Learners</span>
+            <span className="flex items-center gap-1.5">
+              {learners && learners.awaiting > 0 && <span id="learners-awaiting-badge" className="px-1.5 rounded-md bg-sky-700 text-white">{learners.awaiting} to review</span>}
+              {learners && <span className="text-slate-400">{learners.count}</span>}
+            </span>
+          </button>
+          <p className="text-slate-500">Published content and rules cannot be edited. Dragging cards on the canvas only rearranges them for everyone enrolled.</p>
+        {actions}
+      </CanvasSidebar>
     </div>
   )
 }

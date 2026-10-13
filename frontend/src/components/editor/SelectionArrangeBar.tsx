@@ -25,7 +25,7 @@ export const SelectionArrangeBar: React.FC<SelectionArrangeBarProps> = ({ count,
     id="canvas-arrange-bar"
     role="toolbar"
     aria-label="Arrange selected Skills"
-    className="absolute bottom-11 left-1/2 -translate-x-1/2 z-20 flex items-center gap-0.5 bg-gray-900/90 border border-gray-700 rounded-lg p-1 shadow-lg"
+    className="absolute bottom-24 left-1/2 -translate-x-1/2 z-20 flex items-center gap-0.5 bg-gray-900/90 border border-gray-700 rounded-lg p-1 shadow-lg"
   >
     {ACTIONS.map(({ arrangement, label, icon, minimum }, i) => (
       <React.Fragment key={arrangement}>

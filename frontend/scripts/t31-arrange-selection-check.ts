@@ -406,7 +406,8 @@ async function main() {
     await openEditor(page, far, 2)
     await waitForSaved(page, farRevision)
     await labelsMatch(page, edgeStart)
-    await boxSelect(page, { x: MAX_WORLD - 600, y: -60 }, { x: MAX_WORLD - 50, y: 260 })
+    // Starts below the controls floating over the canvas's top edge.
+    await boxSelect(page, { x: MAX_WORLD - 600, y: -20 }, { x: MAX_WORLD - 50, y: 260 })
     check(JSON.stringify(await selectedLabels(page)) === JSON.stringify([edge.e, edge.f].sort()), `the edge box selected ${await selectedLabels(page)}`)
     const edgeGrab = await cardPoint(page, edge.e)
     await page.mouse.move(edgeGrab.x, edgeGrab.y)

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { WebGpuEditor, type WebGpuEditorActions } from '../editor/WebGpuEditor'
 import { SkillDetailPanel } from '../editor/SkillDetailPanel'
 import { SkillPrerequisiteList } from '../editor/SkillPrerequisiteList'
@@ -20,6 +20,9 @@ import { masteryEventText, revocationEffect, xpEventText } from './revocationWor
 import { AccessOverrideControl } from './AccessOverrideControl'
 import { enrollmentLockReasons, ordinaryRequirements, overrideRecordText, type OverrideNames } from './overrideWork'
 import { EnrollmentParticipation } from './EnrollmentParticipation'
+import { CanvasSidebar, FLOAT_ROW, SidebarToggle, useCanvasSidebar } from '../workspace/CanvasChrome'
+import { FLOATING, type LearningContext } from '../workspace/ContextHeader'
+import type { Account } from '../../lib/api'
 
 /**
  * The Version an Enrollment joined, as its learner navigates it (ADR 0005, 0017): the
@@ -68,7 +71,13 @@ const accessKind = (skill: EnrollmentSkillState): AccessKind => !skill.access ? 
 const ACCESS_TEXT: Record<AccessKind, string> = { open: 'Open', locked: 'Locked', override: 'Open by Coach override' }
 const noLearningEffect = () => {}
 
-export function EnrolledVersionView({ accountId, document }: { accountId: string; document: EnrolledVersion }) {
+export function EnrolledVersionView({ accountId, document, chrome }: {
+  accountId: string
+  document: EnrolledVersion
+  /** What floats over the canvas with the Enrollment's own state: the way back, and the Account and context in the menu. */
+  chrome: { account: Account; onSignOut: () => void; context: LearningContext; back: ReactNode }
+}) {
+  const [sidebar, toggleSidebar] = useCanvasSidebar()
   const enrollmentId = document.enrollment.id
   const skills = document.application.skills
   const connections = document.editor.connections
@@ -189,46 +198,55 @@ export function EnrolledVersionView({ accountId, document }: { accountId: string
   }, [handleSelectListSkill])
 
   return (
-    <div id="enrolled-version" data-enrollment-id={enrollmentId} data-version-id={document.version.id} data-gpu-status={gpuStatus} className="flex-1 min-h-0 flex flex-col">
-      <div className="shrink-0 border-b border-slate-800/80 bg-slate-900/60 px-4 py-2 flex flex-wrap items-center gap-3">
-        <h1 id="enrolled-path-title" className="text-sm font-semibold text-slate-100">{document.learningPath.title}</h1>
-        <span id="enrolled-version-badge" data-version-number={document.version.versionNumber} className="text-xs px-2 py-1 rounded-lg border border-violet-800/60 text-violet-200 bg-slate-950/80">
-          Version {document.version.versionNumber}
-        </span>
-        <span id="enrolled-workspace" className="text-xs text-slate-400">with {document.coachWorkspace.name}</span>
-        {coach && <span id="enrolled-learner" className="text-xs text-slate-300">Learner: {document.learner.name || document.learner.email} ({document.learner.email})</span>}
-        <span id="enrollment-status" data-status={status} className={`text-xs px-2 py-1 rounded-lg border ${status === 'active' ? 'text-emerald-300 border-emerald-800/60' : 'text-amber-200 border-amber-800/60'}`}>
-          Enrollment {status}
-        </span>
-        <span id="enrollment-xp" data-xp={shown?.xp ?? ''} title="XP from approved Tasks in this Enrollment only" className="text-xs px-2 py-1 rounded-lg border border-slate-700 text-slate-200">
-          {shown ? `${shown.xp} XP in this Enrollment` : 'XP…'}
-        </span>
-        <span id="enrollment-records" data-generation={view.generation} data-reading={view.reading} className="flex items-center gap-2 text-xs">
+    <div id="enrolled-version" data-enrollment-id={enrollmentId} data-version-id={document.version.id} data-gpu-status={gpuStatus} className="relative flex-1 min-h-0">
+      <div className={FLOAT_ROW}>
+        <div className={`${FLOATING} min-h-9 px-3 py-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs min-w-0`}>
+          {chrome.back}
+          <span className="h-4 w-px bg-slate-700" aria-hidden="true" />
+          <h1 id="enrolled-path-title" className="text-sm font-semibold text-slate-100 truncate max-w-[16rem]">{document.learningPath.title}</h1>
+          <span id="enrolled-version-badge" data-version-number={document.version.versionNumber} className="px-1.5 py-0.5 rounded-md border border-violet-800/60 text-violet-200 whitespace-nowrap">
+            Version {document.version.versionNumber}
+          </span>
+          <span id="enrolled-workspace" className="text-slate-400 whitespace-nowrap">with {document.coachWorkspace.name}</span>
+          {coach && <span id="enrolled-learner" className="text-slate-300">Learner: {document.learner.name || document.learner.email} ({document.learner.email})</span>}
+        </div>
+        <div className="flex flex-wrap items-center justify-end gap-2 min-w-0 text-xs">
+          <span id="enrollment-status" data-status={status} className={`px-2.5 py-2 rounded-xl border bg-slate-900/90 backdrop-blur shadow-lg ${status === 'active' ? 'text-emerald-300 border-emerald-800/60' : 'text-amber-200 border-amber-800/60'}`}>
+            Enrollment {status}
+          </span>
+          <span id="enrollment-xp" data-xp={shown?.xp ?? ''} title="XP from approved Tasks in this Enrollment only" className="px-2.5 py-2 rounded-xl border border-slate-700 bg-slate-900/90 backdrop-blur shadow-lg text-slate-200">
+            {shown ? `${shown.xp} XP in this Enrollment` : 'XP…'}
+          </span>
+          <SidebarToggle open={sidebar} onToggle={toggleSidebar} />
+        </div>
+      </div>
+      <CanvasSidebar open={sidebar} onClose={() => toggleSidebar(false)} heading="This Enrollment" account={chrome.account} onSignOut={chrome.onSignOut} context={chrome.context}>
+        <p id="version-pinned-note" className="text-slate-400">
+          {document.learningPath.goal && <>Goal: {document.learningPath.goal} · </>}
+          Your Enrollment stays on Version {document.version.versionNumber} exactly as it was published; later Versions do not change its Skills, Tasks or rules.
+          {status === 'inactive' && <span id="enrollment-inactive-note" className="text-amber-200"> This Enrollment is inactive: you can still read everything here, but only {coach ? 'you' : 'the Coach'} can reactivate it.</span>}
+        </p>
+        <span id="enrollment-records" data-generation={view.generation} data-reading={view.reading} className="flex flex-wrap items-center gap-2">
+          <button id="enrollment-records-refresh" onClick={() => void loadRecords()} disabled={view.reading} className="text-slate-200 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 border border-slate-700 px-2 py-1 rounded-lg cursor-pointer">
+            {view.reading ? 'Reading…' : view.error ? 'Try again' : 'Refresh records'}
+          </button>
           {view.readAt && <span id="enrollment-records-read-at" className="text-slate-500">as of {view.readAt.toLocaleTimeString()}</span>}
           {view.error && (
             <span id="enrollment-records-error" role="alert" className="text-red-300">
               Could not {view.records ? 'refresh' : 'read'} your learning records ({view.error}){view.records ? '; the state shown may be out of date' : ''}.
             </span>
           )}
-          <button id="enrollment-records-refresh" onClick={() => void loadRecords()} disabled={view.reading} className="text-slate-200 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 border border-slate-700 px-2 py-1 rounded-lg cursor-pointer">
-            {view.reading ? 'Reading…' : view.error ? 'Try again' : 'Refresh'}
-          </button>
         </span>
-      </div>
-      <p id="version-pinned-note" className="shrink-0 px-4 py-1.5 text-[11px] text-slate-400 border-b border-slate-800/80 bg-slate-950">
-        {document.learningPath.goal && <>Goal: {document.learningPath.goal} · </>}
-        Your Enrollment stays on Version {document.version.versionNumber} exactly as it was published; later Versions do not change its Skills, Tasks or rules.
-        {status === 'inactive' && <span id="enrollment-inactive-note" className="text-amber-200"> This Enrollment is inactive: you can still read everything here, but only {coach ? 'you' : 'the Coach'} can reactivate it.</span>}
-      </p>
-      <EnrollmentParticipation
-        enrollmentId={enrollmentId}
-        actor={coach ? 'coach' : 'learner'}
-        records={shown}
-        versionNumber={document.version.versionNumber}
-        names={overrideNames}
-        onChanged={loadRecords}
-      />
-      <section className="w-full flex-1 min-h-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden relative">
+        <EnrollmentParticipation
+          enrollmentId={enrollmentId}
+          actor={coach ? 'coach' : 'learner'}
+          records={shown}
+          versionNumber={document.version.versionNumber}
+          names={overrideNames}
+          onChanged={loadRecords}
+        />
+      </CanvasSidebar>
+      <section className="absolute inset-0 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden">
         {moreOpen && <TemporaryPanel title="More actions" closeId="btn-close-more-actions" onClose={() => setMoreOpen(false)}>
           <button id="more-enrollment-records-refresh" disabled={view.reading} onClick={() => { void loadRecords(); setMoreOpen(false) }} className="rounded-lg border border-slate-700 bg-slate-800 px-3 py-2 text-sm disabled:opacity-50">
             Refresh learning records

@@ -67,3 +67,46 @@ export function ContextHeader({ account, onSignOut, context = { kind: 'personal'
     </header>
   )
 }
+
+/** The surface of a control floating over a full-page canvas. */
+export const FLOATING = 'rounded-xl border border-slate-700/70 bg-slate-900/90 backdrop-blur shadow-lg'
+
+/**
+ * The header's context switch and Account for a sidebar beside a full-page canvas:
+ * the Account's email and verification state, the contexts, and Sign out.
+ */
+export function SidebarAccount({ account, onSignOut, context }: { account: Account; onSignOut?: () => void; context: LearningContext }) {
+  const contextName = context.kind === 'personal' ? 'Personal Workspace'
+    : context.kind === 'learner' ? 'Learning with a Coach'
+    : `Coaching${context.workspaceName ? ` · ${context.workspaceName}` : ''}`
+  const switchClass = (active: boolean) => `flex-1 text-center px-2 py-1 rounded-md border ${active ? 'text-slate-100 border-slate-600 bg-slate-800' : 'text-slate-400 border-transparent hover:text-slate-200'}`
+  return (
+    <div className="flex flex-col gap-2 text-xs">
+      <div className="flex flex-wrap items-center gap-2">
+        <span id="account-email" className="text-slate-200 truncate">{account.email}</span>
+        {(account.emailVerified || account.emailVerificationRequired) && (
+          <span
+            id="email-verification-status"
+            data-verified={account.emailVerified}
+            className={`px-2 py-0.5 rounded-md border ${account.emailVerified
+              ? 'text-emerald-300 border-emerald-700/60 bg-emerald-950/40'
+              : 'text-amber-300 border-amber-700/60 bg-amber-950/40'}`}
+          >
+            {account.emailVerified ? 'Email verified' : 'Email not verified'}
+          </span>
+        )}
+      </div>
+      <nav id="context-switch" aria-label="Learning context" className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-950/60 p-1 text-[11px]">
+        <span id="active-context" data-context={context.kind} className="sr-only">{contextName}</span>
+        <Link id="switch-to-personal" to="/" aria-current={context.kind === 'personal' ? 'page' : undefined} className={switchClass(context.kind === 'personal')}>Personal</Link>
+        <Link id="switch-to-learning" to="/learning" aria-current={context.kind === 'learner' ? 'page' : undefined} className={switchClass(context.kind === 'learner')}>Learning</Link>
+        <Link id="switch-to-coach" to="/coach" aria-current={context.kind === 'coach' ? 'page' : undefined} className={switchClass(context.kind === 'coach')}>Coaching</Link>
+      </nav>
+      {onSignOut && (
+        <button id="sign-out-btn" onClick={onSignOut} className="self-start text-slate-300 hover:text-slate-100 bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700/60 px-2.5 py-1 rounded-lg cursor-pointer">
+          Sign out
+        </button>
+      )}
+    </div>
+  )
+}

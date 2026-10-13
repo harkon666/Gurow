@@ -11,7 +11,8 @@ import { useOwnedView } from '../lib/useOwnedView'
  * the editor, published from there, or else its latest published Version read-only,
  * from which the next Draft is prepared (ADR 0005). The document is read once per
  * Account and Path, and again only after a publication or a new Draft, so unsaved
- * local edits are never replaced by a reload of the page's own data.
+ * local edits are never replaced by a reload of the page's own data. Either takes the
+ * whole page as a canvas, with its controls floating over it.
  */
 export const Route = createFileRoute('/coach/paths/$pathId')({ component: CoachPathPage })
 
@@ -28,39 +29,44 @@ function CoachPathPage() {
   const document = view.state === 'ready' ? view.value : null
   return (
     <main className="w-full h-full flex flex-col bg-slate-950" data-account-id={account?.id ?? ''}>
-      <ContextHeader account={account} onSignOut={handleSignOut} context={{ kind: 'coach' }} />
-      {document && view.state === 'ready' && (
+      {!document && <ContextHeader account={account} onSignOut={handleSignOut} context={{ kind: 'coach' }} />}
+      {document && view.state === 'ready' && (document.draft ? (
+        <PathEditor
+          key={`${view.account.id}:${pathId}:${document.draft.id}`}
+          accountId={view.account.id}
+          initial={document}
+          mode={COACH_MODE}
+          draftId={document.draft.id}
+          publishedVersionIds={document.versions.map((version) => version.id)}
+          draftControls={(save) => <PublishControl pathId={pathId} versionNumber={document.draft!.versionNumber} save={save} onPublished={reload} />}
+          chrome={{
+            account: view.account,
+            onSignOut: handleSignOut,
+            context: { kind: 'coach' },
+            back: (
+              <Link id="back-to-coach-workspace" to="/coach/workspaces/$workspaceId" params={{ workspaceId: document.learningPath.coachWorkspaceId }} className="text-sky-300 hover:text-sky-200 inline-flex items-center gap-1.5 whitespace-nowrap">
+                <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                </svg>
+                <span>Coach Workspace</span>
+              </Link>
+            ),
+            extra: <VersionHistory versions={document.versions} />,
+          }}
+        />
+      ) : document.version ? (
+        <PublishedVersionView
+          account={view.account}
+          onSignOut={handleSignOut}
+          document={document}
+          actions={<PrepareDraftControl pathId={pathId} revision={document.learningPath.revision} nextVersion={document.version.versionNumber + 1} onPrepared={reload} />}
+        />
+      ) : (
         <>
-          <nav className="shrink-0 px-4 py-1.5 text-xs border-b border-slate-800/80 bg-slate-950 flex items-center gap-4">
-            <Link id="back-to-coach-workspace" to="/coach/workspaces/$workspaceId" params={{ workspaceId: document.learningPath.coachWorkspaceId }} className="text-sky-300 hover:text-sky-200 inline-flex items-center gap-1.5">
-              <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-              </svg>
-              <span>Coach Workspace</span>
-            </Link>
-            <VersionHistory versions={document.versions} />
-          </nav>
-          {document.draft ? (
-            <PathEditor
-              key={`${view.account.id}:${pathId}:${document.draft.id}`}
-              accountId={view.account.id}
-              initial={document}
-              mode={COACH_MODE}
-              draftId={document.draft.id}
-              publishedVersionIds={document.versions.map((version) => version.id)}
-              draftControls={(save) => <PublishControl pathId={pathId} versionNumber={document.draft!.versionNumber} save={save} onPublished={reload} />}
-            />
-          ) : document.version ? (
-            <PublishedVersionView
-              accountId={view.account.id}
-              document={document}
-              actions={<PrepareDraftControl pathId={pathId} revision={document.learningPath.revision} nextVersion={document.version.versionNumber + 1} onPrepared={reload} />}
-            />
-          ) : (
-            <p id="no-open-draft" className="p-6 text-sm text-slate-400">This Learning Path has no open Draft.</p>
-          )}
+          <ContextHeader account={account} onSignOut={handleSignOut} context={{ kind: 'coach' }} />
+          <p id="no-open-draft" className="p-6 text-sm text-slate-400">This Learning Path has no open Draft.</p>
         </>
-      )}
+      ))}
       {view.state === 'loading' && <p className="p-6 text-sm text-slate-500">Loading Learning Path Draft…</p>}
       {view.state === 'unavailable' && (
         <div id="path-unavailable" role="alert" className="m-6 max-w-md bg-slate-900/70 border border-slate-800 rounded-xl p-4 flex flex-col gap-2">

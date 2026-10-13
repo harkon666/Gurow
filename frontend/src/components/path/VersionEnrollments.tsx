@@ -8,7 +8,7 @@ import { listVersionEnrollments, type CoachEnrollment } from '../../lib/api'
  * Each opens the Enrollment, where the Coach reads the work and decides. Learners
  * keep sending meanwhile, so the list is read again whenever the page becomes visible.
  */
-export function VersionEnrollments({ versionId }: { versionId: string }) {
+export function VersionEnrollments({ versionId, onSummary }: { versionId: string; onSummary?: (summary: { count: number; awaiting: number }) => void }) {
   const [enrollments, setEnrollments] = useState<CoachEnrollment[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [reading, setReading] = useState(true)
@@ -40,6 +40,8 @@ export function VersionEnrollments({ versionId }: { versionId: string }) {
   }, [load])
 
   const awaiting = enrollments?.reduce((total, enrollment) => total + enrollment.awaitingReview.length, 0) ?? 0
+  const count = enrollments?.length
+  useEffect(() => { if (count !== undefined) onSummary?.({ count, awaiting }) }, [count, awaiting, onSummary])
   return (
     <section id="version-enrollments" data-count={enrollments?.length ?? ''} data-awaiting-review={enrollments ? awaiting : ''} aria-labelledby="version-enrollments-heading" className="border border-slate-800 rounded-xl p-3 bg-slate-900/50 flex flex-col gap-2.5">
       <div className="flex flex-wrap items-center gap-3">

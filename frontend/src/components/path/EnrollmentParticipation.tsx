@@ -117,8 +117,8 @@ export function EnrollmentParticipation({ enrollmentId, actor, records, versionN
       data-checked={status.kind === 'unconfirmed' ? String(status.checkedAt !== null) : ''}
       data-refresh={status.kind === 'recorded' || status.kind === 'refused' ? status.refresh : ''}
       data-records={history.length}
-      // The page does not scroll: a long history or an open form scrolls here, leaving the learning panes their room.
-      className="shrink-0 max-h-[35vh] overflow-y-auto px-4 py-1.5 text-[11px] border-b border-slate-800/80 bg-slate-950 space-y-1.5"
+      // Shown in the menu sidebar: a long history or an open form scrolls here.
+      className="max-h-[35vh] overflow-y-auto text-[11px] space-y-1.5"
     >
       <div className="flex flex-wrap items-center gap-2">
         {records?.enrollmentStatus === 'inactive' && (

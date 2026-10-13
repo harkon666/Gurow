@@ -476,6 +476,7 @@ async function main() {
     current = review
     await review.goto(`${ORIGIN}/coach/versions/${version.id}`, { waitUntil: 'networkidle0' })
     await review.waitForSelector(`#open-enrollment-${enrollment}`)
+    await activate(review, '#open-learners-btn')
     await activate(review, `#open-enrollment-${enrollment}`)
     await review.waitForSelector('#enrolled-version[data-gpu-status="unsupported"]')
     check(/coach review/i.test(await text(review, '#btn-coach-review')), 'separate Coach Review entry point lacks a text label')

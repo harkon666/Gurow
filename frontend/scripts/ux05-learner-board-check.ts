@@ -422,6 +422,7 @@ export async function main() {
     const reviewPage = await newPage(browser, errors, { context: coachContext, noGpu: true })
     current = reviewPage
     await reviewPage.goto(`${ORIGIN}/coach/versions/${v1.id}`, { waitUntil: 'networkidle0' })
+    await activate(reviewPage, '#open-learners-btn')
     await activate(reviewPage, `#open-enrollment-${enrollment}`)
     await reviewPage.waitForSelector('#enrolled-version[data-gpu-status="unsupported"]')
     await selectSkillFromList(reviewPage, V)
@@ -619,6 +620,8 @@ export async function main() {
     await closeBoard(narrow)
     await activate(narrow, '#btn-close-skill-details')
     await narrow.waitForSelector('#skill-detail-panel', { hidden: true })
+    // On a narrow screen the menu holding the Account starts closed.
+    await activate(narrow, '#toggle-sidebar-btn')
     await activate(narrow, '#sign-out-btn')
     await narrow.waitForSelector('#sign-in-form')
     await setValue(narrow, '#email-input', 'peer@ux05.test')

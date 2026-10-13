@@ -108,8 +108,15 @@ async function invitationRow(page: Page, email: string): Promise<Record<string, 
   await page.waitForFunction((e: string) => document.querySelector(`#invitation-list [data-email="${e}"]`), {}, email)
   return page.$eval(`#invitation-list [data-email="${email}"]`, (el) => ({ ...(el as HTMLElement).dataset, id: el.id.replace('invitation-', '') }))
 }
+/** Opens the Version's Learners panel, where the Coach invites and admits. */
+async function openLearners(page: Page) {
+  await page.waitForSelector('#open-learners-btn')
+  if (!await page.$eval('#learners-panel', (el) => (el as HTMLDialogElement).open)) await page.click('#open-learners-btn')
+  await page.waitForSelector('#invite-email-input', { visible: true })
+}
 /** Sends an Invitation from the Coach's admission panel and waits for the backend's answer. */
 async function inviteFromUi(page: Page, email: string) {
+  await openLearners(page)
   const answer = await nextNotice(page, async () => {
     await setValue(page, '#invite-email-input', email)
     await page.click('#send-invitation-btn')
@@ -317,6 +324,7 @@ async function main() {
 
     // 8. Closure: Pia's pending Invitation cannot enroll her; Lena continues; reopening admits Pia.
     await carla.goto(`${ORIGIN}/coach/versions/${algebra}`, { waitUntil: 'networkidle0' })
+    await openLearners(carla)
     await carla.waitForSelector('#enrollment-closure-btn')
     check(await text(carla, '#enrollment-closure-btn') === 'Close Version 1 to new Enrollments', 'closure button')
     await carla.click('#enrollment-closure-btn')
@@ -348,7 +356,7 @@ async function main() {
     const deactivated = await api(lena, `/enrollments/${enrolled.enrollmentId}/deactivate`, 'POST', {})
     check(deactivated.status === 200 && deactivated.body.enrollment.status === 'inactive', `deactivation: ${JSON.stringify(deactivated)}`)
     await carla.reload({ waitUntil: 'networkidle0' })
-    await carla.waitForSelector('#invite-email-input')
+    await openLearners(carla)
     const sentBeforeSecond = resend.sent.length
     await setValue(carla, '#invite-email-input', 'lena@gurow.test')
     await carla.click('#send-invitation-btn')

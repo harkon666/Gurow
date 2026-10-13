@@ -294,6 +294,10 @@ async function main() {
     await page.mouse.down()
     await page.mouse.move(start.x + 70, start.y + 30, { steps: 6 })
     await page.mouse.up()
+    // Zoom over the canvas itself, not over a control floating on it.
+    const zoomAt = await emptyPoint(page)
+    check(zoomAt, 'no empty canvas point for zooming')
+    await page.mouse.move(zoomAt.x, zoomAt.y)
     await page.keyboard.down('Control')
     await page.mouse.wheel({ deltaY: -60 })
     await page.keyboard.up('Control')

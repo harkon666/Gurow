@@ -310,7 +310,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
 
       {/* Engine Error Toast Banner */}
       {engineError && (
-        <div id="editor-error-toast" role="alert" className="absolute top-14 left-4 right-4 z-40 bg-red-950/90 border border-red-800/80 text-red-200 px-4 py-2 rounded-xl text-xs flex items-center justify-between shadow-lg">
+        <div id="editor-error-toast" role="alert" className="absolute top-16 left-1/2 -translate-x-1/2 w-[min(48rem,calc(100%-1.5rem))] z-40 bg-red-950/90 border border-red-800/80 text-red-200 px-4 py-2 rounded-xl text-xs flex items-center justify-between shadow-lg">
           <span>{engineError === connectionRejection || isConnectionRejection(engineError)
             ? connectionRejectionMessage(engineError, labels.map((label) => ({ id: label.card_id, title: label.title })))
             : engineError}</span>
@@ -335,7 +335,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
         {gpuStatus === 'unsupported' && (
           <div
             id="editor-gpu-notice"
-            className="absolute inset-0 z-30 flex flex-col items-center overflow-y-auto p-4 md:p-8 text-center bg-slate-950/95"
+            className="absolute inset-0 z-30 flex flex-col items-center overflow-y-auto px-4 pt-20 pb-24 md:px-8 text-center bg-slate-950/95"
           >
             <div className="max-w-md bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl">
               <div className="w-12 h-12 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20 flex items-center justify-center mx-auto mb-4">
@@ -366,7 +366,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
         {gpuStatus === 'error' && (
           <div
             id="editor-gpu-error-notice"
-            className="absolute inset-0 z-30 flex flex-col items-center overflow-y-auto p-4 md:p-8 text-center bg-slate-950/95 backdrop-blur-sm"
+            className="absolute inset-0 z-30 flex flex-col items-center overflow-y-auto px-4 pt-20 pb-24 md:px-8 text-center bg-slate-950/95 backdrop-blur-sm"
           >
             <div className="max-w-md bg-slate-900 border border-red-800/80 rounded-2xl p-6 shadow-2xl">
               <div className="w-12 h-12 rounded-xl bg-red-500/10 text-red-400 border border-red-500/20 flex items-center justify-center mx-auto mb-4">
@@ -469,7 +469,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
           <div
             id="canvas-selection-count"
             data-count={selectedIds.length}
-            className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none text-[11px] text-blue-100 bg-blue-950/80 border border-blue-800/70 px-2.5 py-1 rounded-lg shadow"
+            className="absolute bottom-16 left-1/2 -translate-x-1/2 z-20 pointer-events-none text-[11px] text-blue-100 bg-blue-950/80 border border-blue-800/70 px-2.5 py-1 rounded-lg shadow"
           >
             {selectedIds.length} Skills selected{readOnly ? '' : ' · drag one or use the arrow keys to move them together'}
           </div>
@@ -495,7 +495,7 @@ export const WebGpuEditor: React.FC<WebGpuEditorProps> = ({
             id="selected-connection-bar"
             data-from-id={selectedConnection.from_id}
             data-to-id={selectedConnection.to_id}
-            className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 text-[11px] text-amber-100 bg-slate-900/95 border border-amber-700/70 px-3 py-1.5 rounded-lg shadow"
+            className="absolute bottom-16 left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 text-[11px] text-amber-100 bg-slate-900/95 border border-amber-700/70 px-3 py-1.5 rounded-lg shadow"
           >
             <span id="selected-connection-label">
               Prerequisite: “{titleOf(selectedConnection.from_id)}” → “{titleOf(selectedConnection.to_id)}”

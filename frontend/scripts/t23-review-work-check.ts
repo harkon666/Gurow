@@ -349,6 +349,7 @@ async function main() {
     const piaEntry = await data(carla, `#version-enrollment-${piaEnrollment}`)
     check(lenaEntry.email === 'lena@gurow.test' && lenaEntry.awaitingReview === '1' && piaEntry.awaitingReview === '0' && (await data(carla, '#version-enrollments')).awaitingReview === '1', `Version learners: ${JSON.stringify([lenaEntry, piaEntry])}`)
     check((await text(carla, `#version-enrollment-${enrollment}`)).includes('1 awaiting Review'), 'Lena\'s entry does not say her work awaits Review')
+    await carla.click('#open-learners-btn')
     await carla.click(`#open-enrollment-${enrollment}`)
     await carla.waitForSelector('#enrolled-version[data-gpu-status="ready"]', { timeout: 20000 })
     await waitAwaitingReview(carla, 1)

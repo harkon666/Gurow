@@ -60,18 +60,27 @@ function PathPage() {
   const account = view.state === 'loading' ? null : view.account
   return (
     <main className="w-full h-full flex flex-col bg-slate-950" data-account-id={account?.id ?? ''}>
-      <ContextHeader account={account} onSignOut={handleSignOut} />
+      {view.state !== 'ready' && <ContextHeader account={account} onSignOut={handleSignOut} />}
       {view.state === 'ready' && (
-        <nav className="shrink-0 px-4 py-1.5 text-xs border-b border-slate-800/80 bg-slate-950">
-          <Link id="back-to-workspace" to="/workspaces/$workspaceId" params={{ workspaceId: view.document.learningPath.personalWorkspaceId }} className="text-emerald-300 hover:text-emerald-200 inline-flex items-center gap-1.5">
-            <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
-            </svg>
-            <span>Personal Workspace</span>
-          </Link>
-        </nav>
+        <PathEditor
+          key={`${view.account.id}:${pathId}`}
+          accountId={view.account.id}
+          initial={view.document}
+          chrome={{
+            account: view.account,
+            onSignOut: handleSignOut,
+            context: { kind: 'personal' },
+            back: (
+              <Link id="back-to-workspace" to="/workspaces/$workspaceId" params={{ workspaceId: view.document.learningPath.personalWorkspaceId }} className="text-emerald-300 hover:text-emerald-200 inline-flex items-center gap-1.5 whitespace-nowrap">
+                <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                </svg>
+                <span>Personal Workspace</span>
+              </Link>
+            ),
+          }}
+        />
       )}
-      {view.state === 'ready' && <PathEditor key={`${view.account.id}:${pathId}`} accountId={view.account.id} initial={view.document} />}
       {view.state === 'loading' && <p className="p-6 text-sm text-slate-500">Loading Learning Path…</p>}
       {view.state === 'unavailable' && (
         <div id="path-unavailable" role="alert" className="m-6 max-w-md bg-slate-900/70 border border-slate-800 rounded-xl p-4 flex flex-col gap-2">
