@@ -529,9 +529,12 @@ const enrollmentBoardRoute = (enrollmentId: string, skillId: string) => `/enroll
 /**
  * A learner's own Task Board for one Skill of their Enrollment (ADR 0030), opened (and created
  * once) by reading it. Its columns have no role: a save writes the arrangement and nothing else,
- * never a Submission, Review, XP or Mastery. Only the Enrollment's learner reaches it.
+ * never a Submission, Review, XP or Mastery. Only the Enrollment's learner arranges it.
  */
 export const readEnrollmentBoard = (enrollmentId: string, skillId: string) => call<{ board: TaskBoard }>(enrollmentBoardRoute(enrollmentId, skillId))
+
+/** The same board as its owning Coach reads it (ADR 0031): as the learner left it, never created or changed; `null` until the learner opens it. */
+export const readLearnerBoard = (enrollmentId: string, skillId: string) => call<{ board: TaskBoard | null; readOnly: boolean }>(enrollmentBoardRoute(enrollmentId, skillId))
 
 /** Saves the learner's whole board based on `expectedRevision`; stale and repeated saves answer as for the other boards. */
 export const saveEnrollmentBoard = (enrollmentId: string, skillId: string, expectedRevision: number, columns: TaskBoardColumn[]) =>

@@ -271,7 +271,7 @@ it('AC3/AC9: placement does not confer Access or bypass an inactive Enrollment, 
   expect((await json(request(`${taskPath(reading)}/start`, 'learner', 'POST'), 403)).error).toBe('enrollment_inactive')
 })
 
-it('AC4/AC7: only the learner reaches the board; it never carries Task definitions or private Submission Draft contents', async () => {
+it('AC4/AC7: only the learner arranges the board, its Coach reads it; it never carries Task definitions or private Submission Draft contents', async () => {
   await json(request(`${taskPath(exercises)}/draft`, 'learner', 'PUT', { text: 'PRIVATE draft words', urls: ['https://example.com/private'] }), 200)
   const board = await boardOf(vectors)
   const before = await storedLearning()
@@ -279,11 +279,18 @@ it('AC4/AC7: only the learner reaches the board; it never carries Task definitio
   const answer = JSON.stringify(await json(request(boardRoute(vectors)), 200))
   expect(answer).not.toContain('PRIVATE')
   expect(answer).not.toContain('example.com')
-  // The Coach is told the board is the learner's; everyone else that the Enrollment does not exist.
+  // The owning Coach reads the board as the learner left it (ADR 0031), with no Draft or evidence in it, and creates nothing.
+  const coachRead = await json(request(boardRoute(vectors), 'coach'), 200)
+  expect(coachRead).toEqual({ board, readOnly: true })
+  expect(JSON.stringify(coachRead)).not.toContain('PRIVATE')
+  expect(await json(request(boardRoute(matrices), 'coach'), 200)).toEqual({ board: null, readOnly: true })
+  expect(await storedBoardRows()).toEqual(rowsBefore)
+  expect((await json(request(`/enrollments/${enrollmentId}/skills/${crypto.randomUUID()}/board`, 'coach'), 404)).error).toBe('skill_not_found')
+  // No one but the learner saves it: the Coach is told the board is the learner's; everyone else that the Enrollment does not exist.
   const cases: [Actor, number, string | null][] = [['coach', 403, 'learner_only'], ['peer', 404, 'enrollment_not_found'], ['unrelated', 404, 'enrollment_not_found'],
     ['otherCoach', 404, 'enrollment_not_found'], ['unverified', 404, 'enrollment_not_found'], [null, 401, 'unauthenticated']]
   for (const [actor, status, error] of cases) {
-    for (const response of [request(boardRoute(vectors), actor), saveBoard(vectors, board.revision, board.columns, actor), request(boardRoute(vectors), actor, 'PUT', { nonsense: true })]) {
+    for (const response of [...(actor === 'coach' ? [] : [request(boardRoute(vectors), actor)]), saveBoard(vectors, board.revision, board.columns, actor), request(boardRoute(vectors), actor, 'PUT', { nonsense: true })]) {
       const r = await response
       expect({ actor, status: r.status, error: (await r.json()).error }).toEqual({ actor, status, error })
     }

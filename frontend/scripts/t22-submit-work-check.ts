@@ -343,7 +343,7 @@ async function main() {
     await lena.click(`#task-work-send-${la.drills}`)
     await waitStatus(lena, la.drills, 'sent')
     await at(lena, la.drills)
-    check((await data(lena, work(la.drills))).sentRevision === '1' && (await text(lena, `#task-work-status-${la.drills}`)).startsWith('Sent as Revision 1'), 'the confirmation does not name Revision 1')
+    check((await data(lena, work(la.drills))).sentRevision === '1' && (await text(lena, `#task-work-status-${la.drills}`)).startsWith('Submission sent · Revision 1'), 'the confirmation does not name Revision 1')
     let revisions = await history(lena, la.drills, 1)
     check(revisions[0].status === 'pending' && revisions[0].text.includes('Exercise 2: 2u = (4, 2)') && revisions[0].text.includes('https://notes.example/vectors-v1') && revisions[0].note === 'Waiting for your Coach\'s Review.', `history after sending: ${JSON.stringify(revisions)}`)
     check(JSON.stringify((await storedRevisions(la.drills)).map((r) => r.text)) === JSON.stringify(['Exercise 1: u + v = (3, 1)\nExercise 2: 2u = (4, 2)']) && await stored(lena, recoveryKey(la.drills)) === null, 'the sent revision is not stored exactly, or its local copy remains')
@@ -356,7 +356,7 @@ async function main() {
     await lena.click(`#task-work-save-${la.drills}`)
     await waitStatus(lena, la.drills, 'saved')
     check(!(await storedRevisions(la.drills))[0].text.includes('Exercise 3') && !JSON.stringify(await ok(carla, `${taskRoute(la.drills)}/submission`)).includes('Exercise 3'), 'editing the draft changed the sent revision or reached the Coach')
-    pass('send confirmed', 'Send → "Sent as Revision 1 … confirmed" and Revision 1 Awaiting Review in the history with its text and link, stored exactly; the Coach reads it; a later saved draft edit leaves Revision 1 unchanged and private')
+    pass('send confirmed', 'Send → "Submission sent · Revision 1 … confirmed" and Revision 1 Awaiting Review in the history with its text and link, stored exactly; the Coach reads it; a later saved draft edit leaves Revision 1 unchanged and private')
 
     // 5. Corrections: a new revision supersedes a pending one; an Approval stays with its revision; reload keeps the history.
     await at(lena, la.drills)
@@ -669,7 +669,7 @@ async function main() {
     check(JSON.stringify((await storedRevisions(la.reading)).map((r) => r.superseded)) === JSON.stringify([true, true, false]) && revisions[2].text.includes('Page 13 too'), `the revisions after the lost answers are not the expected three: ${JSON.stringify(await storedRevisions(la.reading))} / ${JSON.stringify(revisions)}`)
     lena.removeAllListeners('request')
     await lena.setRequestInterception(false)
-    pass('lost answers', 'POST committed but its answer dropped → "Sent as Revision 2 … the answer was lost, but your submitted work shows it", one stored revision; POST and the history read dropped → "Not confirmed … may or may not have arrived", Send paused, work kept, no "Nothing was submitted"; Check again → "not in your submitted work", Send enabled → Revision 3; three revisions stored, no duplicate')
+    pass('lost answers', 'POST committed but its answer dropped → "Submission sent · Revision 2 … the answer was lost, but your submitted work shows it", one stored revision; POST and the history read dropped → "Not confirmed … may or may not have arrived", Send paused, work kept, no "Nothing was submitted"; Check again → "not in your submitted work", Send enabled → Revision 3; three revisions stored, no duplicate')
 
     check(errors.length === 0, `page errors: ${errors.join('; ')}`)
     console.log(`\nT22 learner work check passed (${steps.length} steps).`)

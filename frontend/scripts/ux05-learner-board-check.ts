@@ -319,7 +319,8 @@ export async function main() {
     await activate(learner, '#btn-close-card-details')
     check((await api(learner, boardRoute(V), 'PUT', { expectedRevision: 0, columns: [...(await storedBoard(V)).map((c, i) => (i === 0 ? { ...c, taskIds: [...c.taskIds, uuid()] } : c))] })).body?.error === 'board_task_unknown', 'a private Task was accepted on the board')
     check((await api(learner, `${coachRoute}/draft`, 'PUT', { expectedRevision: 0, title: 'x', goal: '', editor: seeded.editor, application: seeded.application })).status === 404, 'a learner edited the Path\'s Draft')
-    check((await api(coach, boardRoute(V))).status === 403 && (await api(coach, boardRoute(V), 'PUT', { expectedRevision: 0, columns: [] })).status === 403, 'the Coach reached the learner\'s board')
+    const coachBoard = await api(coach, boardRoute(V))
+    check(coachBoard.status === 200 && coachBoard.body?.readOnly === true && (await api(coach, boardRoute(V), 'PUT', { expectedRevision: 0, columns: [] })).status === 403, 'the Coach did not read the learner\'s board read-only, or saved it')
     check((await api(peer, boardRoute(V))).status === 404, 'a peer reached the learner\'s board')
     await closeBoard(learner)
     pass('AC7 no Add Task, edit, delete or archival on the learner board; the official definition is read-only beside the explicit send; private Tasks and Draft edits are refused; the Coach gets 403 and a peer 404 for the board')
@@ -427,6 +428,17 @@ export async function main() {
     await reviewPage.waitForSelector('#enrolled-version[data-gpu-status="unsupported"]')
     await selectSkillFromList(reviewPage, V)
     check(!await reviewPage.$('#open-board-btn'), 'the Coach\'s Review context offers a board')
+    // The Coach reads the learner's arrangement as it is, with no way to change it (ADR 0031).
+    await activate(reviewPage, '#view-learner-board-btn')
+    await reviewPage.waitForSelector('#learner-board-columns')
+    const coachSees = await reviewPage.$$eval('#learner-board-columns > section', (columns) => columns.map((column) => ({
+      name: (column as HTMLElement).dataset.name, taskIds: [...column.querySelectorAll<HTMLElement>('[data-task-id]')].map((card) => card.dataset.taskId),
+    })))
+    check(same(coachSees, settled.map((column) => ({ name: column.name, taskIds: column.taskIds }))), `the Coach sees another arrangement: ${JSON.stringify(coachSees)}`)
+    check(await reviewPage.$eval('#learner-board-view', (el) => el.querySelectorAll('input, select, textarea, [draggable="true"]').length) === 0, 'the Coach\'s view of the board offers an edit')
+    check(same(await storedBoard(V), settled), 'the Coach reading the board changed it')
+    await activate(reviewPage, '#btn-close-learner-board')
+    await reviewPage.waitForSelector('#learner-board-view', { hidden: true })
     await openCoachReview(reviewPage)
     await reviewPage.waitForSelector(`#awaiting-review-${reading}[data-revision-number="1"]`)
     await activate(reviewPage, `#awaiting-review-${reading}`)

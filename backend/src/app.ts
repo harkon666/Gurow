@@ -336,16 +336,17 @@ export function createApp({ db, identity, auth, delivery, requireVerifiedEmail =
 
   // A learner's own Task Board for one Skill of the Enrollment (ADR 0027, 0030): saved whole against
   // its own revision like the other boards, but its columns have no role, so a save writes nothing
-  // but the board: never a Submission, Review, XP, Mastery or Task start. Only the learner reaches it.
+  // but the board: never a Submission, Review, XP, Mastery or Task start. Only the learner saves it;
+  // the owning Coach reads it as the learner left it (ADR 0031).
   const enrollmentBoardRoute = '/enrollments/:enrollmentId/skills/:skillId/board'
   const enrollmentBoardTarget = (enrollmentId: string, skillId: string) =>
     UUID.test(enrollmentId) ? { enrollmentId: enrollmentId.toLowerCase(), skillId: UUID.test(skillId) ? skillId.toLowerCase() : NIL_UUID } : null
   app.get(enrollmentBoardRoute, async (c) => {
     const target = enrollmentBoardTarget(c.req.param('enrollmentId'), c.req.param('skillId'))
     if (!target) return c.json({ error: 'enrollment_not_found' }, 404)
-    const result = await readEnrollmentBoard(db, target.enrollmentId, target.skillId, c.get('accountId'))
+    const result = await readEnrollmentBoard(db, target.enrollmentId, target.skillId, c.get('accountId'), true)
     if (!result.ok) return c.json({ error: result.refusal, detail: result.detail }, ENROLLMENT_BOARD_REFUSAL_STATUS[result.refusal])
-    return c.json({ board: result.board })
+    return c.json({ board: result.board, readOnly: result.readOnly })
   })
 
   app.put(enrollmentBoardRoute, async (c) => {

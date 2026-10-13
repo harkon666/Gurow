@@ -10,7 +10,7 @@ import { TaskBoard } from '../board/TaskBoard'
 import { useTaskBoards, type BoardStore } from './taskBoards'
 import { storedIntents } from '../board/boardSync'
 import { countingApprovalText, latestReviewText, taskReviewState, type TaskReviewState } from './learnerBoard'
-import { readEnrollmentBoard, readEnrollmentLearningState, readTaskSubmission, saveEnrollmentBoard, type AwaitingRevision, type EnrolledVersion, type EnrollmentLearningState, type EnrollmentSkillState, type PathSkill, type SubmissionRevisionView } from '../../lib/api'
+import { readEnrollmentBoard, readEnrollmentLearningState, readLearnerBoard, type TaskBoard as LearnerBoard, readTaskSubmission, saveEnrollmentBoard, type AwaitingRevision, type EnrolledVersion, type EnrollmentLearningState, type EnrollmentSkillState, type PathSkill, type SubmissionRevisionView } from '../../lib/api'
 import { TaskWork } from './TaskWork'
 import { TaskReview } from './TaskReview'
 import { revisionNote } from './submissionWork'
@@ -174,13 +174,6 @@ export function EnrolledVersionView({ accountId, document, chrome }: {
   const skillTitles = useMemo(() => new Map(skills.map((skill) => [skill.id, skill.title])), [skills])
   const taskTitles = useMemo(() => new Map(skills.flatMap((skill) => skill.tasks.map((task) => [task.id, task.title] as const))), [skills])
   const stateOf = (id: string) => shown?.skills.find((skill) => skill.skillId === id)
-  const labelStatus = useMemo(() => shown
-    ? Object.fromEntries(shown.skills.map((skill) => [skill.skillId, { locked: !skill.access, mastered: skill.mastery }]))
-    : undefined, [shown])
-  const selected = skills.find((skill) => skill.id === selectedSkill?.id)
-  const boardSkill = skills.find((skill) => skill.id === boards.openId)
-  const boardSkillState = boardSkill ? stateOf(boardSkill.id) : undefined
-  const status = shown?.enrollmentStatus ?? document.enrollment.status
   const coach = document.viewer === 'coach'
   const awaitingBySkill = useMemo(() => {
     const counts = new Map<string, number>()
@@ -190,6 +183,16 @@ export function EnrolledVersionView({ accountId, document, chrome }: {
     }
     return counts
   }, [shown, skills])
+  const labelStatus = useMemo(() => shown
+    ? Object.fromEntries(shown.skills.map((skill) => [skill.skillId, { locked: !skill.access, mastered: skill.mastery, awaiting: coach ? awaitingBySkill.get(skill.skillId) ?? 0 : 0 }]))
+    : undefined, [shown, coach, awaitingBySkill])
+  const selected = skills.find((skill) => skill.id === selectedSkill?.id)
+  const boardSkill = skills.find((skill) => skill.id === boards.openId)
+  /** The Skill whose board the Coach is reading (ADR 0031). */
+  const [viewedBoard, setViewedBoard] = useState<string | null>(null)
+  const viewedSkill = skills.find((skill) => skill.id === viewedBoard)
+  const boardSkillState = boardSkill ? stateOf(boardSkill.id) : undefined
+  const status = shown?.enrollmentStatus ?? document.enrollment.status
   const overrideNames = useMemo<OverrideNames>(() => ({ viewerAccountId: accountId, coach: document.coach, learner: document.learner, skillTitles }), [accountId, document.coach, document.learner, skillTitles])
   const openReview = useCallback((skill: PathSkill, taskId: string) => {
     setReviewOpen(false)
@@ -302,7 +305,12 @@ export function EnrolledVersionView({ accountId, document, chrome }: {
           tasksLabel="Tasks / Review"
           tasksRequest={coach ? focusTaskId : null}
           editLabel="Manage Access"
-          learning={selected && <><EnrolledSkillLearning view={view} skillId={selected.id} skillTitles={skillTitles} taskTitles={taskTitles} coach={coach} enrollmentId={enrollmentId} names={overrideNames} onRecordsStale={loadRecords} />{learner && <SummaryTaskReviews tasks={selected.tasks} records={shown} />}</>}
+          learning={selected && <><EnrolledSkillLearning view={view} skillId={selected.id} skillTitles={skillTitles} taskTitles={taskTitles} coach={coach} enrollmentId={enrollmentId} names={overrideNames} onRecordsStale={loadRecords} />{coach && <SummaryAwaitingReview tasks={selected.tasks} awaiting={shown?.awaitingReview ?? []} inactive={status === 'inactive'} onOpen={setFocusTaskId} />}{coach && (
+            <button id="view-learner-board-btn" aria-haspopup="dialog" onClick={() => setViewedBoard(selected.id)}
+              className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-medium py-1.5 cursor-pointer">
+              View learner's board
+            </button>
+          )}{learner && <SummaryTaskReviews tasks={selected.tasks} records={shown} />}</>}
           settings={coach && selected && <EnrolledSkillLearning section="settings" view={view} skillId={selected.id} skillTitles={skillTitles} taskTitles={taskTitles} coach={coach} enrollmentId={enrollmentId} names={overrideNames} onRecordsStale={loadRecords} />}
           history={selected && <EnrolledSkillLearning section="history" view={view} skillId={selected.id} skillTitles={skillTitles} taskTitles={taskTitles} coach={coach} enrollmentId={enrollmentId} names={overrideNames} onRecordsStale={loadRecords} />}
           // The summary's Tasks view exists only where there is no board (the Coach's Review): a learner
@@ -323,6 +331,16 @@ export function EnrolledVersionView({ accountId, document, chrome }: {
             />
           )}
         />
+        {coach && viewedSkill && (
+          <LearnerBoardView
+            key={viewedSkill.id}
+            enrollmentId={enrollmentId}
+            skill={viewedSkill}
+            learnerName={document.learner.name || document.learner.email}
+            records={shown}
+            onClose={() => setViewedBoard(null)}
+          />
+        )}
         {boardSkill && boards.view && (
           <TaskBoard
             skillTitle={boardSkill.title}
@@ -371,6 +389,62 @@ export function EnrolledVersionView({ accountId, document, chrome }: {
  * A learner's card facts (ADR 0030): Required or Enrichment and reward, the newest revision's
  * review status and any earlier Approval that still counts, all independent of the card's column.
  */
+/**
+ * A learner's board for one Skill as their Coach reads it (ADR 0031): the learner's own
+ * columns and where each Task sits, with its review state beside it. Nothing here moves a
+ * card or changes the board, and placement is not evidence: Review still works from
+ * what the learner sent.
+ */
+function LearnerBoardView({ enrollmentId, skill, learnerName, records, onClose }: {
+  enrollmentId: string
+  skill: PathSkill
+  learnerName: string
+  records: EnrollmentLearningState | null
+  onClose: () => void
+}) {
+  const [read, setRead] = useState<{ state: 'reading' } | { state: 'read'; board: LearnerBoard | null } | { state: 'failed'; detail: string }>({ state: 'reading' })
+  const load = useCallback(async () => {
+    setRead({ state: 'reading' })
+    const result = await readLearnerBoard(enrollmentId, skill.id).catch(() => null)
+    setRead(result?.ok ? { state: 'read', board: result.value.board } : { state: 'failed', detail: result?.error ?? 'the backend could not be reached' })
+  }, [enrollmentId, skill.id])
+  useEffect(() => { void load() }, [load])
+  const titles = new Map(skill.tasks.map((task) => [task.id, task.title]))
+  return (
+    <TemporaryPanel title={`${learnerName}'s board · ${skill.title}`} closeId="btn-close-learner-board" onClose={onClose}>
+      <div id="learner-board-view" data-state={read.state} data-skill-id={skill.id} className="p-4 flex flex-col gap-3 text-xs">
+        <p id="learner-board-note" className="text-slate-400">
+          Read-only: this is how {learnerName} has arranged this Skill's Tasks. Columns are their own working organization, not evidence; Review works from what they sent.
+        </p>
+        <button id="learner-board-refresh" onClick={() => void load()} disabled={read.state === 'reading'} className="self-start text-slate-200 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 border border-slate-700 px-2 py-1 rounded-lg cursor-pointer">
+          {read.state === 'reading' ? 'Reading…' : 'Refresh'}
+        </button>
+        {read.state === 'failed' && <p id="learner-board-error" role="alert" className="text-red-300">Could not read the board ({read.detail}).</p>}
+        {read.state === 'read' && read.board === null && <p id="learner-board-unopened" className="text-slate-300">{learnerName} has not opened this Skill's board yet, so there is no arrangement to show.</p>}
+        {read.state === 'read' && read.board && (
+          <div id="learner-board-columns" data-revision={read.board.revision} className="flex gap-3 overflow-x-auto pb-1">
+            {read.board.columns.map((column) => (
+              <section key={column.id} data-name={column.name} data-count={column.taskIds.length} aria-label={`${column.name}, ${column.taskIds.length} Tasks`} className="shrink-0 w-52 rounded-xl border border-slate-800 bg-slate-900/60 p-2 flex flex-col gap-2">
+                <h3 className="flex items-center justify-between text-slate-200 font-semibold">
+                  <span className="truncate">{column.name}</span>
+                  <span className="text-slate-500 font-normal">{column.taskIds.length}</span>
+                </h3>
+                {column.taskIds.length === 0 && <p className="text-slate-600">No Tasks</p>}
+                {column.taskIds.map((taskId) => (
+                  <div key={taskId} data-task-id={taskId} className="rounded-lg border border-slate-700 bg-slate-950 p-2 flex flex-col gap-1">
+                    <span className="text-slate-100">{titles.get(taskId) ?? taskId}</span>
+                    <span className="flex flex-wrap gap-1"><LearnerCardBadges taskId={taskId} records={records} /></span>
+                  </div>
+                ))}
+              </section>
+            ))}
+          </div>
+        )}
+      </div>
+    </TemporaryPanel>
+  )
+}
+
 function LearnerCardBadges({ taskId, records }: { taskId: string; records: EnrollmentLearningState | null }) {
   const task = records?.tasks.find((t) => t.taskId === taskId)
   const review = taskReviewState(records, taskId)
@@ -396,6 +470,35 @@ const LATEST_TONE: Record<TaskReviewState['latest']['kind'], string> = {
  * The learner's Skill summary lists each Task's review state (UX05 AC5), read-only: the same
  * two facts as its board card, whatever its column. Work is sent from the board's Task details.
  */
+/** What the learner sent in this Skill and the Coach has not decided yet, on the Skill's summary: each opens that Task's Review. */
+function SummaryAwaitingReview({ tasks, awaiting, inactive, onOpen }: { tasks: PathSkill['tasks']; awaiting: AwaitingRevision[]; inactive: boolean; onOpen: (taskId: string) => void }) {
+  const waiting = awaiting.flatMap((revision) => {
+    const task = tasks.find((t) => t.id === revision.taskId)
+    return task ? [{ revision, task }] : []
+  })
+  if (waiting.length === 0) return null
+  return (
+    <section id="summary-awaiting-review" data-count={waiting.length} aria-labelledby="summary-awaiting-review-heading" className="mt-2 space-y-1.5">
+      <h4 id="summary-awaiting-review-heading" className="text-xs font-semibold uppercase tracking-wider text-sky-300">Sent for your Review</h4>
+      {inactive && <p className="text-[11px] text-amber-200">This Enrollment is inactive; work sent while it was active can still be reviewed.</p>}
+      <ul className="space-y-1.5">
+        {waiting.map(({ revision, task }) => (
+          <li key={revision.revisionId}>
+            <button id={`summary-awaiting-review-${task.id}`} data-revision-number={revision.revisionNumber} onClick={() => onOpen(task.id)}
+              className="w-full text-left text-xs rounded-lg border border-sky-800/70 bg-sky-950/30 hover:bg-sky-900/40 px-2.5 py-2 text-slate-100 cursor-pointer flex items-center justify-between gap-2">
+              <span className="min-w-0">
+                <span className="block font-medium break-words">{task.title}</span>
+                <span className="block text-[11px] text-slate-400">Revision {revision.revisionNumber} · sent {new Date(revision.sentAt).toLocaleString()}</span>
+              </span>
+              <span className="shrink-0 text-sky-200">Review →</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
 function SummaryTaskReviews({ tasks, records }: { tasks: PathSkill['tasks']; records: EnrollmentLearningState | null }) {
   if (tasks.length === 0) return null
   return (

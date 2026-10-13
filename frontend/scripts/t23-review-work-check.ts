@@ -354,7 +354,13 @@ async function main() {
     await carla.waitForSelector('#enrolled-version[data-gpu-status="ready"]', { timeout: 20000 })
     await waitAwaitingReview(carla, 1)
     check((await text(carla, '#enrolled-learner')).includes('lena@gurow.test') && (await data(carla, `#awaiting-review-${la.drills}`)).revisionNumber === '1' && (await readSkillStatus(carla, `#skill-status-${la.vectors}`)).awaitingReview === '1', 'the Enrollment page does not name Lena or list her revision awaiting Review')
+    check(await carla.$eval(`#card-label-${la.vectors} [data-awaiting]`, (el) => (el as HTMLElement).dataset.awaiting).catch(() => null) === '1', 'the Skill card does not show work awaiting Review')
     await canvasSelect(carla, la.vectors)
+    // The Skill's summary lists what was sent; its entry opens that Task's Review directly.
+    await carla.waitForSelector(`#summary-awaiting-review-${la.drills}[data-revision-number="1"]`, { visible: true })
+    await carla.click(`#summary-awaiting-review-${la.drills}`)
+    await carla.waitForSelector(`${reviewPanel(la.drills)}[data-target-revision="1"]`, { visible: true })
+    await carla.click('#btn-back-skill-summary')
     let revisions = await history(carla, la.drills, 1)
     check(revisions[0].status === 'pending' && revisions[0].text.includes('Exercise 1: u + v = (3, 1)') && revisions[0].text.includes('https://notes.example/vectors-v1') && revisions[0].note === 'Awaiting your Review.', `Carla's view of Revision 1: ${JSON.stringify(revisions)}`)
     await at(carla, la.drills)

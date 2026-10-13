@@ -60,7 +60,7 @@ A Skill designated as enrichment within a Learning Path in coach mode, which a l
 A learning activity owned by exactly one Skill. Within a versioned Learning Path, its logical ID remains stable while its definition is specific to each Learning Path Version. In the MVP, reuse in another Skill creates an independent copy with a new logical ID and its own learner work and Reviews; changes to the source do not automatically update the copy, and matching IDs across Versions do not transfer progress between Enrollments.
 
 **Task Board**:
-An arrangement of one Skill's active Tasks into ordered columns: personal work belongs to the personal owner, material preparation belongs to the Coach's Learning Path Draft, and learner organization belongs to one Enrollment. Board placement does not itself represent Submission, Approval, or Mastery.
+An arrangement of one Skill's active Tasks into ordered columns: personal work belongs to the personal owner, material preparation belongs to the Coach's Learning Path Draft, and learner organization belongs to one Enrollment. Only its owner arranges a board; the Coach of an Enrollment's Workspace may read that learner's board but not change it. Board placement does not itself represent Submission, Approval, or Mastery.
 
 **Task Board Column**:
 A user-named, ordered grouping of Tasks within one Task Board. Learner columns describe the learner's working organization, while Coach Draft columns describe material readiness rather than publication eligibility or learner progress.

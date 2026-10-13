@@ -259,7 +259,7 @@ function TaskWorkStatus({ taskId, status, keptLocally, onCheck }: {
     case 'saved': return <p id={id} role="status" className="text-emerald-300">Draft saved privately at {status.at.toLocaleTimeString()}.</p>
     case 'sent': return (
       <p id={id} role="status" className="text-emerald-300">
-        Sent as Revision {status.revisionNumber} at {status.at.toLocaleTimeString()}, confirmed by Gurow{status.fromHistory ? ' (the answer was lost, but your submitted work shows it)' : ''}. It cannot be changed now; edit this draft to prepare a correction.
+        Submission sent · Revision {status.revisionNumber} at {status.at.toLocaleTimeString()}, confirmed by Gurow{status.fromHistory ? ' (the answer was lost, but your submitted work shows it)' : ''}. It cannot be changed now; edit this draft to prepare a correction.
       </p>
     )
     case 'unconfirmed': return (

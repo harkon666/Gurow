@@ -10,8 +10,9 @@ import { initialPlacement, LEARNER_INITIAL_COLUMNS, membershipProblem, sameArran
  * columns express the learner's working organization only: no column has a role, Done
  * included, and a save writes nothing but the board. It never sends, approves, awards,
  * corrects or revokes anything, never starts a Task, and never reads or exposes a
- * Submission Draft. Only the Enrollment's learner reaches it; the owning Coach is told
- * it is the learner's, and anyone else that the Enrollment does not exist (ADR 0013).
+ * Submission Draft. Only the Enrollment's learner arranges it; the owning Coach may read
+ * it as the learner left it (ADR 0031) and is refused any save, and anyone else is told
+ * that the Enrollment does not exist (ADR 0013).
  * Every read and save holds the Enrollment lock, like the Enrollment's evidence mutators,
  * so a first opening places Tasks on one consistent reading of their Approvals.
  */
@@ -21,23 +22,27 @@ export type EnrollmentBoardRefusal =
   | 'board_task_missing' | 'board_task_unknown' | 'column_owned_elsewhere'
 
 type Located =
-  | { ok: true; versionId: string; ownerId: string; active: boolean }
+  | { ok: true; versionId: string; ownerId: string; active: boolean; viewer: 'learner' | 'coach' }
   | { ok: false; refusal: 'enrollment_not_found' | 'learner_only' | 'skill_not_found'; detail: string }
 
-/** Locks the Enrollment of the acting learner and checks that `skillId` is a Skill of its own Version. */
-async function locate(tx: Tx, enrollmentId: string, skillId: string, accountId: string): Promise<Located> {
+/**
+ * Locks the Enrollment of the acting learner and checks that `skillId` is a Skill of its own
+ * Version. With `coachReads`, the owning Coach is located too, as a reader, without the lock.
+ */
+async function locate(tx: Tx, enrollmentId: string, skillId: string, accountId: string, coachReads = false): Promise<Located> {
   const [row] = await tx.select({ enrollment: enrollments, ownerId: coachWorkspaces.ownerAccountId }).from(enrollments)
     .innerJoin(learningPathVersions, eq(learningPathVersions.id, enrollments.learningPathVersionId))
     .innerJoin(learningPaths, eq(learningPaths.id, learningPathVersions.learningPathId))
     .innerJoin(coachWorkspaces, eq(coachWorkspaces.id, learningPaths.coachWorkspaceId))
     .where(eq(enrollments.id, enrollmentId))
-  if (row?.ownerId === accountId) return { ok: false, refusal: 'learner_only', detail: 'a learner\'s board belongs to the learner; Review works from Submissions' }
-  if (!row || row.enrollment.accountId !== accountId) return { ok: false, refusal: 'enrollment_not_found', detail: 'no such Enrollment' }
-  const [enrollment] = await tx.select().from(enrollments).where(eq(enrollments.id, enrollmentId)).for('update')
+  const coach = row?.ownerId === accountId
+  if (coach && !coachReads) return { ok: false, refusal: 'learner_only', detail: 'a learner\'s board belongs to the learner; Review works from Submissions' }
+  if (!row || (!coach && row.enrollment.accountId !== accountId)) return { ok: false, refusal: 'enrollment_not_found', detail: 'no such Enrollment' }
+  const [enrollment] = coach ? [row.enrollment] : await tx.select().from(enrollments).where(eq(enrollments.id, enrollmentId)).for('update')
   const [skill] = await tx.select({ id: versionSkills.skillId }).from(versionSkills)
     .where(and(eq(versionSkills.learningPathVersionId, enrollment.learningPathVersionId), eq(versionSkills.skillId, skillId)))
   if (!skill) return { ok: false, refusal: 'skill_not_found', detail: 'no such Skill in this Enrollment\'s Version' }
-  return { ok: true, versionId: enrollment.learningPathVersionId, ownerId: row.ownerId, active: enrollment.status === 'active' }
+  return { ok: true, versionId: enrollment.learningPathVersionId, ownerId: row.ownerId, active: enrollment.status === 'active', viewer: coach ? 'coach' : 'learner' }
 }
 
 /** The Skill's official Tasks in the Enrollment's Version, in the Coach's saved order; a published Version never changes them. */
@@ -87,14 +92,20 @@ async function ensureBoard(tx: Tx, enrollmentId: string, skillId: string, locate
   return (await readBoardIn(tx, enrollmentId, skillId))!
 }
 
-type ReadResult = { ok: true; board: Board } | Extract<Located, { ok: false }>
+type ReadResult = { ok: true; board: Board | null; readOnly: boolean } | Extract<Located, { ok: false }>
 
-/** Opens one Skill's board for the Enrollment's learner, creating it on first opening, also while the Enrollment is inactive. */
-export async function readEnrollmentBoard(db: Database, enrollmentId: string, skillId: string, accountId: string): Promise<ReadResult> {
+/**
+ * Opens one Skill's board for the Enrollment's learner, creating it on first opening, also
+ * while the Enrollment is inactive. With `coachReads`, the owning Coach reads the board as
+ * the learner left it (ADR 0031): nothing is created or written, so a board the learner has
+ * not opened yet answers `null`.
+ */
+export async function readEnrollmentBoard(db: Database, enrollmentId: string, skillId: string, accountId: string, coachReads = false): Promise<ReadResult> {
   return db.transaction(async (tx) => {
-    const located = await locate(tx, enrollmentId, skillId, accountId)
+    const located = await locate(tx, enrollmentId, skillId, accountId, coachReads)
     if (!located.ok) return located
-    return { ok: true, board: await ensureBoard(tx, enrollmentId, skillId, located) } as const
+    if (located.viewer === 'coach') return { ok: true, board: await readBoardIn(tx, enrollmentId, skillId), readOnly: true } as const
+    return { ok: true, board: await ensureBoard(tx, enrollmentId, skillId, located), readOnly: false } as const
   })
 }
 
