@@ -12,7 +12,7 @@ export function EnrollmentAdmission({ versionId, versionNumber }: { versionId: s
   const [loadError, setLoadError] = useState<string | null>(null)
   const [email, setEmail] = useState('')
   const [pending, setPending] = useState<string | null>(null)
-  const [notice, setNotice] = useState<{ kind: 'sent' | 'undelivered' | 'error'; text: string } | null>(null)
+  const [notice, setNotice] = useState<{ kind: 'sent' | 'copied' | 'undelivered' | 'error'; text: string } | null>(null)
   // Counts the backend answers shown, so the same message twice still reads as a new answer.
   const [answers, setAnswers] = useState(0)
   useEffect(() => { if (notice) setAnswers((n) => n + 1) }, [notice])
@@ -57,6 +57,15 @@ export function EnrollmentAdmission({ versionId, versionNumber }: { versionId: s
     await load()
   }
 
+  // The link the email carries, for the Coach to pass on when the email cannot be delivered.
+  const copyLink = async (invitation: CoachInvitation) => {
+    const link = new URL(`/invitations/${invitation.id}`, window.location.origin).toString()
+    const copied = await navigator.clipboard?.writeText(link).then(() => true, () => false) ?? false
+    setNotice(copied
+      ? { kind: 'copied', text: `Invitation link for ${invitation.email} copied. Only an Account with that email can accept it.` }
+      : { kind: 'copied', text: `Invitation link for ${invitation.email}: ${link}` })
+  }
+
   const toggleClosure = async () => {
     if (!admission) return
     setPending('closure')
@@ -99,8 +108,8 @@ export function EnrollmentAdmission({ versionId, versionNumber }: { versionId: s
         </button>
       </form>
       {notice && (
-        <p id="admission-notice" data-kind={notice.kind} data-answer={answers} role={notice.kind === 'sent' ? 'status' : 'alert'}
-          className={`text-xs ${notice.kind === 'sent' ? 'text-emerald-300' : notice.kind === 'undelivered' ? 'text-amber-300' : 'text-red-300'}`}>
+        <p id="admission-notice" data-kind={notice.kind} data-answer={answers} role={notice.kind === 'sent' || notice.kind === 'copied' ? 'status' : 'alert'}
+          className={`text-xs break-all ${notice.kind === 'sent' || notice.kind === 'copied' ? 'text-emerald-300' : notice.kind === 'undelivered' ? 'text-amber-300' : 'text-red-300'}`}>
           {notice.text}
         </p>
       )}
@@ -119,6 +128,10 @@ export function EnrollmentAdmission({ versionId, versionNumber }: { versionId: s
               <span className={invitation.acceptedAt ? 'text-emerald-300' : 'text-slate-500'}>
                 {invitation.acceptedAt ? `accepted ${new Date(invitation.acceptedAt).toLocaleString()}` : 'not accepted'}
               </span>
+              <button id={`copy-invitation-link-${invitation.id}`} onClick={() => void copyLink(invitation)}
+                className="text-sky-300 hover:text-sky-200 cursor-pointer">
+                Copy link
+              </button>
               <button id={`resend-invitation-${invitation.id}`} onClick={() => void resend(invitation.id)} disabled={pending !== null}
                 className="text-sky-300 hover:text-sky-200 disabled:opacity-50 cursor-pointer">
                 {pending === invitation.id ? 'Sending…' : 'Send again'}
