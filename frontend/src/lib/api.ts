@@ -471,6 +471,8 @@ export interface TaskReviewSummary {
   sentRevisions: number
   latestRevisionNumber: number
   latestStatus: SubmissionRevisionView['status']
+  /** The Coach's feedback on the newest revision's decision; null without a decision or feedback. */
+  latestFeedback: string | null
   /** Revisions whose Approval is valid (not revoked), oldest first. */
   approvedRevisionNumbers: number[]
 }

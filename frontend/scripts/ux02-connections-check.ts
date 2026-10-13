@@ -281,6 +281,8 @@ async function main() {
     check(Math.abs(zoomed - 1) > 0.05 && zoomed < 2, `camera zoom unchanged or too large (${zoomed})`)
     await closePanels(owner)
 
+    // The pan's last pointer move is applied on a later frame; measure only once the camera is still.
+    await owner.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
     const cBefore = await box(owner, `#card-label-${C}`)
     await owner.mouse.move(cBefore.cx - 30, cBefore.cy)
     await owner.mouse.down()

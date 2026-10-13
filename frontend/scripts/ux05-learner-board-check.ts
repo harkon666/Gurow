@@ -454,6 +454,10 @@ export async function main() {
     await reopenBoard(learner, V)
     await learner.waitForFunction((id) => document.getElementById(`board-card-review-${id}`)?.dataset.latest === 'changes_requested', {}, reading)
     check((await shownBoard(learner)).find((c) => c.name === 'Finished')!.taskIds.includes(reading) && same(await storedBoard(V), settled), 'Changes Requested moved the card out of Finished')
+    // The Coach's feedback is on the Skill's summary, and the Skill's card says it needs a revision.
+    const feedback = await learner.$eval(`#summary-review-feedback-${reading}`, (el) => el.textContent ?? '').catch(() => '')
+    check(feedback.includes('Summarize sections 1.2 and 1.3 too') && feedback.includes('asked for changes to Revision 1'), `the Skill summary does not show the Coach's feedback: ${feedback}`)
+    check(await learner.$eval(`#card-label-${V} [data-changes]`, (el) => (el as HTMLElement).dataset.changes).catch(() => null) === '1', 'the Skill card does not say it needs a revision')
     // Corrected send → Approval: XP follows the evidence, not the column.
     await sendFromDetails(learner, reading, 'Chapter 1 summary, all sections', 2)
     const revisions = await revisionsOf(reading)
@@ -466,7 +470,7 @@ export async function main() {
     await learner.waitForFunction((id) => document.getElementById(`board-card-review-${id}`)?.dataset.latest === 'pending', {}, reading)
     const newer = await cardReview(learner, reading)
     check(newer.revision === '3' && newer.counting === '2' && /Approval of Revision 2 still counts/.test(newer.text), `newer pending and still-valid Approval not distinct: ${JSON.stringify(newer)}`)
-    check(same(await reviewOf(reading), { taskId: reading, sentRevisions: 3, latestRevisionNumber: 3, latestStatus: 'pending', approvedRevisionNumbers: [2] }) && (await learnerState()).xp === 25, 'the stored review state or XP is wrong for a newer pending revision')
+    check(same(await reviewOf(reading), { taskId: reading, sentRevisions: 3, latestRevisionNumber: 3, latestStatus: 'pending', latestFeedback: null, approvedRevisionNumbers: [2] }) && (await learnerState()).xp === 25, 'the stored review state or XP is wrong for a newer pending revision')
     // Approval Revocation: the evidence goes, the card stays.
     await ok(coach, `${taskRoute(reading)}/submission/revisions/${revisions[1].id}/review/revoke`, 'POST', { reason: 'Summary copied from the book' })
     await reopenBoard(learner, V)

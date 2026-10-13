@@ -1,5 +1,5 @@
 import { Link } from '@tanstack/react-router'
-import { useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { EnrollmentAdmission } from './Admission'
 import { VersionEnrollments } from './VersionEnrollments'
 import { VersionLayoutEditor } from './VersionLayout'
@@ -160,6 +160,7 @@ export function PublishedVersionView({ account, onSignOut, document, actions, cu
   const [learners, setLearners] = useState<{ count: number; awaiting: number } | null>(null)
   const [sidebar, toggleSidebar] = useCanvasSidebar()
   const titles = new Map(document.application.skills.map((skill) => [skill.id, skill.title]))
+  const taskTitles = useMemo(() => new Map(document.application.skills.flatMap((skill) => skill.tasks.map((task) => [task.id, task.title] as const))), [document])
   const prerequisites = (id: string) => document.editor.connections.filter((edge) => edge.to_id === id).map((edge) => titles.get(edge.from_id) ?? edge.from_id)
   const panelButton = 'w-full text-xs text-slate-200 bg-slate-800/70 hover:bg-slate-700 border border-slate-700 rounded-lg px-2.5 py-2 cursor-pointer flex items-center justify-between gap-2'
   const title = <h1 id="published-path-title" className="text-sm font-semibold text-slate-100 truncate max-w-[16rem]">{document.learningPath.title}</h1>
@@ -231,7 +232,7 @@ export function PublishedVersionView({ account, onSignOut, document, actions, cu
       <KeptPanel id="learners-panel" title={`Version ${version.versionNumber} · Learners`} closeId="close-learners-btn" open={panel === 'learners'} onClose={() => setPanel(null)}>
         <div className="p-4 flex flex-col gap-4">
           <EnrollmentAdmission key={version.id} versionId={version.id} versionNumber={version.versionNumber} />
-          <VersionEnrollments key={`enrollments:${version.id}`} versionId={version.id} onSummary={setLearners} />
+          <VersionEnrollments key={`enrollments:${version.id}`} versionId={version.id} onSummary={setLearners} taskTitles={taskTitles} />
         </div>
       </KeptPanel>
       <CanvasSidebar open={sidebar} onClose={() => toggleSidebar(false)} heading="This Version" account={account} onSignOut={onSignOut} context={{ kind: 'coach' }}>

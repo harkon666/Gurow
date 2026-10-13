@@ -130,6 +130,8 @@ async function taskReviews(db: Reader, enrollmentId: string, ownerId: string) {
       sentRevisions: revisions.length,
       latestRevisionNumber: latest.revision.revisionNumber,
       latestStatus: review ? (review.revokedAt ? 'approval_revoked' as const : review.decision) : latest.revision.supersededAt ? 'superseded' as const : 'pending' as const,
+      // What the Coach wrote when deciding the newest revision, for the learner to act on.
+      latestFeedback: review?.feedback || null,
       // The same validity rule as the derivation (access.ts).
       approvedRevisionNumbers: revisions.filter(({ revision, review }) => review?.decision === 'approval' && !review.revokedAt && review.coachAccountId === ownerId && !revision.supersededAt)
         .map(({ revision }) => revision.revisionNumber),

@@ -37,6 +37,8 @@ interface SkillDetailPanelProps {
   onAddTask?: () => void
   /** Learning records of the selected Skill (Access, Mastery, XP), shown after its outcome. */
   learning?: React.ReactNode
+  /** The Skill's state at a glance, beside its title on the summary and the history. */
+  status?: React.ReactNode
   settings?: React.ReactNode
   history?: React.ReactNode
   editLabel?: string
@@ -112,6 +114,7 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
   onUpdateOutcome,
   onAddTask,
   learning,
+  status,
   settings,
   history,
   editLabel = 'Edit Skill',
@@ -193,20 +196,13 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
       <div className="space-y-6">
         {/* Header & Badges */}
         <div>
-          <div className="flex items-center justify-between gap-2 mb-2">
-            <span
-              id="skill-selection-badge"
-              className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-500/10 text-blue-400 border border-blue-500/20"
-            >
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-              Skill
-            </span>
-          </div>
-
           <div className="flex items-start justify-between gap-3">
-            <h2 id="selected-skill-title" className="min-w-0 break-words text-xl font-bold text-slate-100 tracking-tight">
-              {selectedSkill.title}
-            </h2>
+            <div className="min-w-0 flex flex-wrap items-center gap-x-3 gap-y-2">
+              <h2 id="selected-skill-title" className="min-w-0 break-words text-xl font-bold text-slate-100 tracking-tight">
+                {selectedSkill.title}
+              </h2>
+              {(view === 'summary' || view === 'history') && status}
+            </div>
             {view === 'summary' && skillActions && <div className="relative shrink-0">
               <button id="skill-actions-btn" aria-label="Skill actions" aria-expanded={actionsOpen} aria-controls={actionsOpen ? 'skill-actions-menu' : undefined} onClick={() => setActionsOpen(!actionsOpen)} className="rounded-lg border border-slate-700 px-2.5 py-1.5 text-slate-300 hover:bg-slate-800 focus-visible:outline focus-visible:outline-blue-400 inline-flex items-center justify-center">
                 <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -281,8 +277,8 @@ export const SkillDetailPanel: React.FC<SkillDetailPanelProps> = ({
           <p id="skill-task-count" className="text-sm text-slate-300">{activeTasks.length} Tasks</p>
           <div className="text-xs text-slate-300"><h4 className="font-semibold">Requires</h4><p>{incomingPrereqs.map((c) => allSkills.find((s) => s.id === c.from_id)?.title ?? 'Unavailable Skill').join(', ') || 'No prerequisites'}</p></div>
           <details className="text-xs text-slate-400"><summary className="cursor-pointer">Prerequisite for ({outgoingDependents.length})</summary><p className="mt-2">{outgoingDependents.map((c) => allSkills.find((s) => s.id === c.to_id)?.title ?? 'Unavailable Skill').join(', ') || 'No dependent Skills'}</p></details>
-          {(onConnect || onDisconnect) && <button id="manage-prerequisites-btn" onClick={() => changeView('prerequisites', 'manage-prerequisites-btn')} className="text-xs text-blue-300 text-left">Manage prerequisites</button>}
-          {history && <button id="skill-history-btn" onClick={() => changeView('history', 'skill-history-btn')} className="text-xs text-slate-300 text-left">History</button>}
+          {(onConnect || onDisconnect) && <button id="manage-prerequisites-btn" onClick={() => changeView('prerequisites', 'manage-prerequisites-btn')} className="self-start inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-800 hover:border-slate-600 cursor-pointer">Manage prerequisites<svg className="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg></button>}
+          {history && <button id="skill-history-btn" onClick={() => changeView('history', 'skill-history-btn')} className="self-start inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-2.5 py-1.5 text-xs text-slate-200 hover:bg-slate-800 hover:border-slate-600 cursor-pointer">History<svg className="w-3 h-3 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg></button>}
         </>}
         {view === 'edit' && settings}
         {view === 'history' && history}

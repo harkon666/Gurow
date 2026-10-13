@@ -154,8 +154,8 @@ it('AC8: first placement puts Tasks with a valid Approval in Done and keeps thei
   expect(await storedLearning()).toEqual(before)
   expect(await state()).toEqual(learningBefore)
   // The newest revision stays pending and does not inherit the Approval, which still counts.
-  expect(await reviewOf()).toEqual({ taskId: exercises, sentRevisions: 2, latestRevisionNumber: newer.revisionNumber, latestStatus: 'pending', approvedRevisionNumbers: [1] })
-  expect(await reviewOf(reading)).toEqual({ taskId: reading, sentRevisions: 1, latestRevisionNumber: 1, latestStatus: 'approval_revoked', approvedRevisionNumbers: [] })
+  expect(await reviewOf()).toEqual({ taskId: exercises, sentRevisions: 2, latestRevisionNumber: newer.revisionNumber, latestStatus: 'pending', latestFeedback: null, approvedRevisionNumbers: [1] })
+  expect(await reviewOf(reading)).toEqual({ taskId: reading, sentRevisions: 1, latestRevisionNumber: 1, latestStatus: 'approval_revoked', latestFeedback: null, approvedRevisionNumbers: [] })
   expect((await state()).tasks.find((t: any) => t.taskId === exercises)).toMatchObject({ approved: true, xpContribution: 20 })
 })
 
@@ -227,7 +227,7 @@ it('AC3/AC6: moving cards into and out of Done is organizational only, and Revie
   // A Changes Requested card stays in Done, and the review state says so.
   await unchanged()
   expect(named(settled.columns, 'Done').taskIds).toContain(exercises)
-  expect(await reviewOf()).toMatchObject({ latestRevisionNumber: 1, latestStatus: 'changes_requested', approvedRevisionNumbers: [] })
+  expect(await reviewOf()).toMatchObject({ latestRevisionNumber: 1, latestStatus: 'changes_requested', latestFeedback: 'Show the working', approvedRevisionNumbers: [] })
   const corrected = await send(exercises, 'Corrected')
   await decide(corrected.id, 'approval')
   await unchanged()
@@ -235,7 +235,7 @@ it('AC3/AC6: moving cards into and out of Done is organizational only, and Revie
   expect((await state()).xp).toBe(20)
   const newer = await send(exercises, 'Even better')
   await unchanged()
-  expect(await reviewOf()).toMatchObject({ latestRevisionNumber: newer.revisionNumber, latestStatus: 'pending', approvedRevisionNumbers: [2] })
+  expect(await reviewOf()).toMatchObject({ latestRevisionNumber: newer.revisionNumber, latestStatus: 'pending', latestFeedback: null, approvedRevisionNumbers: [2] })
   expect((await state()).xp).toBe(20)
   await revoke(corrected.id)
   await unchanged()

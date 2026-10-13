@@ -3,6 +3,7 @@ import { WebGpuEditor, type WebGpuEditorActions } from '../editor/WebGpuEditor'
 import { SkillDetailPanel } from '../editor/SkillDetailPanel'
 import { SkillPrerequisiteList } from '../editor/SkillPrerequisiteList'
 import { TemporaryPanel } from '../editor/TemporaryPanel'
+import { InfoPopover } from '../editor/InfoPopover'
 import { loadCameraState, saveCameraState } from '../editor/checkpoint'
 import type { CameraState } from '../editor/protocol'
 import type { GpuStatus, SelectedSkillInfo } from '../editor/types'
@@ -71,9 +72,11 @@ const accessKind = (skill: EnrollmentSkillState): AccessKind => !skill.access ? 
 const ACCESS_TEXT: Record<AccessKind, string> = { open: 'Open', locked: 'Locked', override: 'Open by Coach override' }
 const noLearningEffect = () => {}
 
-export function EnrolledVersionView({ accountId, document, chrome }: {
+export function EnrolledVersionView({ accountId, document, chrome, reviewTaskId }: {
   accountId: string
   document: EnrolledVersion
+  /** A Task whose Review the Coach came to decide: its Skill opens on that Task's Review at once. */
+  reviewTaskId?: string
   /** What floats over the canvas with the Enrollment's own state: the way back, and the Account and context in the menu. */
   chrome: { account: Account; onSignOut: () => void; context: LearningContext; back: ReactNode }
 }) {
@@ -83,12 +86,17 @@ export function EnrolledVersionView({ accountId, document, chrome }: {
   const connections = document.editor.connections
   const [cards] = useState(() => document.editor.cards.map((card) => ({ id: card.id, title: card.title, position: card.position })))
   const [camera] = useState<CameraState | null>(() => (typeof window === 'undefined' ? null : loadCameraState(window.localStorage, accountId, enrollmentCameraContext(enrollmentId))))
-  const [selectedSkill, setSelectedSkill] = useState<SelectedSkillInfo | null>(null)
+  // Only the Coach reviews, and only a Task of this Version can be asked for.
+  const [requested] = useState<SelectedSkillInfo | null>(() => {
+    const skill = document.viewer === 'coach' && reviewTaskId ? document.application.skills.find((s) => s.tasks.some((task) => task.id === reviewTaskId)) : undefined
+    return skill ? { id: skill.id, title: skill.title } : null
+  })
+  const [selectedSkill, setSelectedSkill] = useState<SelectedSkillInfo | null>(requested)
   const [gpuStatus, setGpuStatus] = useState<GpuStatus>('initializing')
   const [view, setView] = useState<RecordsView>({ records: null, readAt: null, generation: 0, reading: true, error: null })
   const actionsRef = useRef<WebGpuEditorActions | null>(null)
   /** The Task whose Review the Coach opened from the queue; its panel takes focus once shown. */
-  const [focusTaskId, setFocusTaskId] = useState<string | null>(null)
+  const [focusTaskId, setFocusTaskId] = useState<string | null>(() => (requested ? reviewTaskId! : null))
   const [reviewOpen, setReviewOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)
   const clearFocusTask = useCallback(() => setFocusTaskId(null), [])
@@ -161,7 +169,11 @@ export function EnrolledVersionView({ accountId, document, chrome }: {
     }
   }, [loadRecords])
 
-  const handleActionsReady = useCallback((actions: WebGpuEditorActions) => { actionsRef.current = actions }, [])
+  const handleActionsReady = useCallback((actions: WebGpuEditorActions) => {
+    actionsRef.current = actions
+    // The Skill opened for a requested Review is the selected card as well.
+    if (requested) actions.selectCard(requested.id)
+  }, [requested])
   const handleCameraChanged = useCallback((next: CameraState) => {
     if (typeof window !== 'undefined') saveCameraState(window.localStorage, accountId, enrollmentCameraContext(enrollmentId), next)
   }, [accountId, enrollmentId])
@@ -183,9 +195,18 @@ export function EnrolledVersionView({ accountId, document, chrome }: {
     }
     return counts
   }, [shown, skills])
+  /** Per Skill, the Tasks whose newest revision came back with Changes Requested: the learner's next work. */
+  const changesBySkill = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const review of shown?.taskReviews ?? []) {
+      const skill = review.latestStatus === 'changes_requested' ? skills.find((s) => s.tasks.some((task) => task.id === review.taskId)) : undefined
+      if (skill) counts.set(skill.id, (counts.get(skill.id) ?? 0) + 1)
+    }
+    return counts
+  }, [shown, skills])
   const labelStatus = useMemo(() => shown
-    ? Object.fromEntries(shown.skills.map((skill) => [skill.skillId, { locked: !skill.access, mastered: skill.mastery, awaiting: coach ? awaitingBySkill.get(skill.skillId) ?? 0 : 0 }]))
-    : undefined, [shown, coach, awaitingBySkill])
+    ? Object.fromEntries(shown.skills.map((skill) => [skill.skillId, { locked: !skill.access, mastered: skill.mastery, awaiting: coach ? awaitingBySkill.get(skill.skillId) ?? 0 : 0, changes: coach ? 0 : changesBySkill.get(skill.skillId) ?? 0 }]))
+    : undefined, [shown, coach, awaitingBySkill, changesBySkill])
   const selected = skills.find((skill) => skill.id === selectedSkill?.id)
   const boardSkill = skills.find((skill) => skill.id === boards.openId)
   /** The Skill whose board the Coach is reading (ADR 0031). */
@@ -305,9 +326,10 @@ export function EnrolledVersionView({ accountId, document, chrome }: {
           tasksLabel="Tasks / Review"
           tasksRequest={coach ? focusTaskId : null}
           editLabel="Manage Access"
-          learning={selected && <><EnrolledSkillLearning view={view} skillId={selected.id} skillTitles={skillTitles} taskTitles={taskTitles} coach={coach} enrollmentId={enrollmentId} names={overrideNames} onRecordsStale={loadRecords} />{coach && <SummaryAwaitingReview tasks={selected.tasks} awaiting={shown?.awaitingReview ?? []} inactive={status === 'inactive'} onOpen={setFocusTaskId} />}{coach && (
+          status={selected && <EnrolledSkillLearning view={view} skillId={selected.id} skillTitles={skillTitles} taskTitles={taskTitles} coach={coach} enrollmentId={enrollmentId} names={overrideNames} onRecordsStale={loadRecords} />}
+          learning={selected && <>{coach && <SummaryAwaitingReview tasks={selected.tasks} awaiting={shown?.awaitingReview ?? []} inactive={status === 'inactive'} onOpen={setFocusTaskId} />}{coach && (
             <button id="view-learner-board-btn" aria-haspopup="dialog" onClick={() => setViewedBoard(selected.id)}
-              className="mt-2 w-full rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-medium py-1.5 cursor-pointer">
+              className="w-full rounded-lg border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-medium py-1.5 cursor-pointer">
               View learner's board
             </button>
           )}{learner && <SummaryTaskReviews tasks={selected.tasks} records={shown} />}</>}
@@ -478,7 +500,7 @@ function SummaryAwaitingReview({ tasks, awaiting, inactive, onOpen }: { tasks: P
   })
   if (waiting.length === 0) return null
   return (
-    <section id="summary-awaiting-review" data-count={waiting.length} aria-labelledby="summary-awaiting-review-heading" className="mt-2 space-y-1.5">
+    <section id="summary-awaiting-review" data-count={waiting.length} aria-labelledby="summary-awaiting-review-heading" className="mb-2 space-y-1.5">
       <h4 id="summary-awaiting-review-heading" className="text-xs font-semibold uppercase tracking-wider text-sky-300">Sent for your Review</h4>
       {inactive && <p className="text-[11px] text-amber-200">This Enrollment is inactive; work sent while it was active can still be reviewed.</p>}
       <ul className="space-y-1.5">
@@ -499,6 +521,21 @@ function SummaryAwaitingReview({ tasks, awaiting, inactive, onOpen }: { tasks: P
   )
 }
 
+/** What the Coach wrote when deciding the Task's newest revision, so the learner reads it on opening the Skill. */
+function SummaryFeedback({ taskId, review }: { taskId: string; review: EnrollmentLearningState['taskReviews'][number] | undefined }) {
+  if (!review?.latestFeedback || (review.latestStatus !== 'changes_requested' && review.latestStatus !== 'approval')) return null
+  const changes = review.latestStatus === 'changes_requested'
+  return (
+    <div id={`summary-review-feedback-${taskId}`} data-status={review.latestStatus} className={`rounded-lg border px-2.5 py-2 ${changes ? 'border-amber-800/70 bg-amber-950/30' : 'border-emerald-900/60 bg-emerald-950/20'}`}>
+      <p className={`text-[11px] font-semibold ${changes ? 'text-amber-200' : 'text-emerald-200'}`}>
+        {changes ? `Your Coach asked for changes to Revision ${review.latestRevisionNumber}` : `Your Coach's note on Revision ${review.latestRevisionNumber}`}
+      </p>
+      <p className="mt-0.5 whitespace-pre-wrap break-words text-slate-200">{review.latestFeedback}</p>
+      {changes && <p className="mt-1 text-[11px] text-slate-400">Open the board, correct your work in the Task, and send it again as a new revision.</p>}
+    </div>
+  )
+}
+
 function SummaryTaskReviews({ tasks, records }: { tasks: PathSkill['tasks']; records: EnrollmentLearningState | null }) {
   if (tasks.length === 0) return null
   return (
@@ -506,9 +543,12 @@ function SummaryTaskReviews({ tasks, records }: { tasks: PathSkill['tasks']; rec
       <h4 id="summary-task-reviews-heading" className="text-xs font-semibold uppercase tracking-wider text-slate-400">Review state</h4>
       <ul className="space-y-1.5">
         {tasks.map((task) => (
-          <li key={task.id} className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-200">
-            <span className="min-w-0 break-words">{task.title}</span>
-            <ReviewStateBadges id={`summary-review-state-${task.id}`} review={taskReviewState(records, task.id)} />
+          <li key={task.id} className="text-xs text-slate-200 space-y-1">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="min-w-0 break-words">{task.title}</span>
+              <ReviewStateBadges id={`summary-review-state-${task.id}`} review={taskReviewState(records, task.id)} />
+            </div>
+            <SummaryFeedback taskId={task.id} review={records?.taskReviews.find((review) => review.taskId === task.id)} />
           </li>
         ))}
       </ul>
@@ -603,6 +643,8 @@ function EnrolledSkillLearning({ view, skillId, skillTitles, taskTitles, coach, 
   onRecordsStale: () => Promise<boolean>
 }) {
   if (!view.records) {
+    // The history shows this beside the chips' own placeholder, so only one of them carries the id.
+    if (section === 'history') return null
     return <div id="skill-learning" data-tracked="false" className="text-[11px] text-slate-500 italic bg-slate-800/30 rounded-xl p-3 border border-slate-700/30">{view.error ? 'Learning records are unavailable.' : 'Loading learning records…'}</div>
   }
   const state = view.records
@@ -614,13 +656,7 @@ function EnrolledSkillLearning({ view, skillId, skillTitles, taskTitles, coach, 
   const masteryEvents = state.masteryHistory.filter((event) => event.skillId === skillId)
   const overrideRecords = state.overrideHistory.filter((record) => record.skillId === skillId)
   const waived = skill.accessOverride ? ordinaryRequirements(skill, state, skillTitles) : []
-  return (
-    <div id="skill-learning" data-tracked="true" className="space-y-3">
-      <section id="skill-access" data-access={kind} aria-labelledby="skill-access-heading" className={`rounded-xl p-3 border ${kind === 'locked' ? 'bg-red-950/30 border-red-900/60' : 'bg-emerald-950/20 border-emerald-900/50'}`}>
-        <div className="flex items-center justify-between gap-2">
-          <h4 id="skill-access-heading" className="text-xs font-semibold uppercase tracking-wider text-slate-400">Access</h4>
-          <span id="skill-access-state" className={`text-xs font-semibold ${kind === 'locked' ? 'text-red-300' : 'text-emerald-300'}`}>{ACCESS_TEXT[kind]}</span>
-        </div>
+  const accessDetails = <>
         {kind === 'locked' && reasons.length > 0 && (
           <ul id="lock-reasons" aria-label="Why this Skill is locked" className="mt-2 space-y-1 text-[11px] text-slate-300 list-disc pl-4">
             {reasons.map((reason) => <li key={reason}>{reason}</li>)}
@@ -644,10 +680,43 @@ function EnrolledSkillLearning({ view, skillId, skillTitles, taskTitles, coach, 
             )}
           </div>
         )}
-        <p className="mt-1 text-[10px] text-slate-500">Access lets you start Tasks and send work. Reaching an XP Threshold spends no XP.</p>
-        {section === 'settings' && coach && <AccessOverrideControl key={skillId} enrollmentId={enrollmentId} skill={skill} records={state} names={names} onChanged={onRecordsStale} />}
-        {section === 'history' && overrideRecords.length > 0 && (
-          <ol id="skill-override-history" data-records={overrideRecords.length} aria-label="Override Records of this Skill" className="mt-2 text-[10px] text-slate-400 space-y-1 border-t border-slate-700/50 pt-2">
+  </>
+  // On the summary and the history, Access and Mastery are two chips beside the Skill's title; what they mean, and why, opens from each one's icon.
+  if (section === 'summary') {
+    const chip = 'inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-xs'
+    return (
+      <div id="skill-learning" data-tracked="true" className="flex flex-wrap items-center gap-2">
+        <section id="skill-access" data-access={kind} aria-label="Access" className={`${chip} ${kind === 'locked' ? 'bg-red-950/30 border-red-900/60' : 'bg-emerald-950/20 border-emerald-900/50'}`}>
+          <span className="text-slate-400">Access</span>
+          <span id="skill-access-state" className={`font-semibold ${kind === 'locked' ? 'text-red-300' : 'text-emerald-300'}`}>{ACCESS_TEXT[kind]}</span>
+          <InfoPopover id="skill-access-info" label="About Access">
+            {accessDetails}
+            <p className="text-slate-400">Access lets you start Tasks and send work. Reaching an XP Threshold spends no XP.</p>
+          </InfoPopover>
+        </section>
+        <section id="skill-mastery" data-mastery={skill.mastery ? 'mastered' : 'not-mastered'} aria-label="Mastery" className={`${chip} bg-slate-800/40 border-slate-700/40`}>
+          <span className="text-slate-400">Mastery</span>
+          <span id="skill-mastery-state" className={`font-semibold ${skill.mastery ? 'text-violet-300' : 'text-slate-300'}`}>{skill.mastery ? 'Mastered' : 'Not mastered yet'}</span>
+          <InfoPopover id="skill-mastery-info" label="About Mastery">
+            <p className="text-slate-400">Awarded when every Required Task of this Skill has an Approval from your Coach, and revoked if one of them loses its last valid Approval.</p>
+            {skill.mastery && !skill.access && (
+              <p id="skill-mastery-kept" className="text-violet-200">
+                This Skill is locked, but its Mastery stays: it rests on the Approvals of its own Required Tasks, which still count. Access and Mastery are separate.
+              </p>
+            )}
+          </InfoPopover>
+        </section>
+      </div>
+    )
+  }
+  // In the history, the chips beside the title carry Access and Mastery; the body keeps only what happened.
+  if (section === 'history') {
+    return (
+      <div id="skill-learning-history" className="space-y-3">
+        {overrideRecords.length > 0 && (
+          <section aria-labelledby="skill-override-history-heading">
+            <h4 id="skill-override-history-heading" className="text-xs font-semibold text-slate-400">Access Override history</h4>
+          <ol id="skill-override-history" data-records={overrideRecords.length} aria-label="Override Records of this Skill" className="mt-2 text-[11px] text-slate-400 space-y-1">
             {overrideRecords.map((record) => {
               const text = overrideRecordText(record, names)
               return (
@@ -657,7 +726,33 @@ function EnrolledSkillLearning({ view, skillId, skillTitles, taskTitles, coach, 
               )
             })}
           </ol>
+          </section>
         )}
+        {masteryEvents.length > 0 && (
+          <section aria-labelledby="skill-mastery-history-heading">
+            <h4 id="skill-mastery-history-heading" className="text-xs font-semibold text-slate-400">Mastery history</h4>
+          <ul id="skill-mastery-history" data-events={masteryEvents.length} aria-label="Mastery history of this Skill" className="mt-2 text-[11px] text-slate-400 space-y-0.5">
+            {masteryEvents.map((event) => (
+              <li key={event.id} data-action={event.action}>{masteryEventText(event, taskTitles.get(event.taskId) ?? 'a Task')} · {new Date(event.occurredAt).toLocaleString()}</li>
+            ))}
+          </ul>
+          </section>
+        )}
+      <p id="skill-xp" data-xp={skillXp} className="text-[11px] text-slate-400">This Skill's Tasks contribute {skillXp} of your {state.xp} Enrollment XP.</p>
+      <section aria-label="XP history"><h4 className="text-xs font-semibold text-slate-400">XP history</h4><ol id="skill-xp-history" className="mt-2 text-[11px] text-slate-300 space-y-1">{state.xpHistory.filter((event) => state.tasks.find((task) => task.taskId === event.taskId)?.skillId === skillId).map((event) => <li key={event.id}>{taskTitles.get(event.taskId) ?? 'a Task'}: {xpEventText(event)}</li>)}</ol></section>
+      </div>
+    )
+  }
+  return (
+    <div id="skill-learning" data-tracked="true" className="space-y-3">
+      <section id="skill-access" data-access={kind} aria-labelledby="skill-access-heading" className={`rounded-xl p-3 border ${kind === 'locked' ? 'bg-red-950/30 border-red-900/60' : 'bg-emerald-950/20 border-emerald-900/50'}`}>
+        <div className="flex items-center justify-between gap-2">
+          <h4 id="skill-access-heading" className="text-xs font-semibold uppercase tracking-wider text-slate-400">Access</h4>
+          <span id="skill-access-state" className={`text-xs font-semibold ${kind === 'locked' ? 'text-red-300' : 'text-emerald-300'}`}>{ACCESS_TEXT[kind]}</span>
+        </div>
+        {accessDetails}
+        <p className="mt-1 text-[10px] text-slate-500">Access lets you start Tasks and send work. Reaching an XP Threshold spends no XP.</p>
+        {section === 'settings' && coach && <AccessOverrideControl key={skillId} enrollmentId={enrollmentId} skill={skill} records={state} names={names} onChanged={onRecordsStale} />}
       </section>
       {section !== 'settings' && <section id="skill-mastery" data-mastery={skill.mastery ? 'mastered' : 'not-mastered'} aria-labelledby="skill-mastery-heading" className="rounded-xl p-3 border bg-slate-800/40 border-slate-700/40">
         <div className="flex items-center justify-between gap-2">
@@ -670,16 +765,7 @@ function EnrolledSkillLearning({ view, skillId, skillTitles, taskTitles, coach, 
             This Skill is locked, but its Mastery stays: it rests on the Approvals of its own Required Tasks, which still count. Access and Mastery are separate.
           </p>
         )}
-        {section === 'history' && masteryEvents.length > 0 && (
-          <ul id="skill-mastery-history" data-events={masteryEvents.length} aria-label="Mastery history of this Skill" className="mt-2 text-[10px] text-slate-400 space-y-0.5">
-            {masteryEvents.map((event) => (
-              <li key={event.id} data-action={event.action}>{masteryEventText(event, taskTitles.get(event.taskId) ?? 'a Task')} · {new Date(event.occurredAt).toLocaleString()}</li>
-            ))}
-          </ul>
-        )}
       </section>}
-      {section === 'history' && <p id="skill-xp" data-xp={skillXp} className="text-[11px] text-slate-400">This Skill's Tasks contribute {skillXp} of your {state.xp} Enrollment XP.</p>}
-      {section === 'history' && <section aria-label="XP history"><h4 className="text-xs font-semibold text-slate-400">XP history</h4><ol id="skill-xp-history" className="mt-2 text-[11px] text-slate-300 space-y-1">{state.xpHistory.filter((event) => state.tasks.find((task) => task.taskId === event.taskId)?.skillId === skillId).map((event) => <li key={event.id}>{taskTitles.get(event.taskId) ?? 'a Task'}: {xpEventText(event)}</li>)}</ol></section>}
     </div>
   )
 }

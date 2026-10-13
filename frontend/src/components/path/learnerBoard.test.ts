@@ -7,7 +7,7 @@ const records = (taskReviews: TaskReviewSummary[]): EnrollmentLearningState => (
   xpHistory: [], masteryHistory: [], taskStarts: [], awaitingReview: [], overrideHistory: [], lifecycleHistory: [], taskReviews,
 })
 const summary = (latestRevisionNumber: number, latestStatus: TaskReviewSummary['latestStatus'], approvedRevisionNumbers: number[] = []): TaskReviewSummary =>
-  ({ taskId: 't', sentRevisions: latestRevisionNumber, latestRevisionNumber, latestStatus, approvedRevisionNumbers })
+  ({ taskId: 't', sentRevisions: latestRevisionNumber, latestRevisionNumber, latestStatus, latestFeedback: null, approvedRevisionNumbers })
 const describeState = (reviews: TaskReviewSummary[]) => {
   const state = taskReviewState(records(reviews), 't')!
   return [latestReviewText(state.latest), countingApprovalText(state)]

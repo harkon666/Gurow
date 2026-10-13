@@ -15,7 +15,7 @@ interface SkillCardOverlayProps {
   connecting?: ConnectionOverlay
 }
 
-export interface LabelStatus { locked: boolean; mastered: boolean; /** Revisions sent in this Skill and awaiting the viewing Coach's Review. */ awaiting?: number }
+export interface LabelStatus { locked: boolean; mastered: boolean; /** Revisions sent in this Skill and awaiting the viewing Coach's Review. */ awaiting?: number; /** Tasks of this Skill whose newest revision the Coach sent back for changes. */ changes?: number }
 
 /** What the overlay shows of connection editing; the engine decides every hit. */
 export interface ConnectionOverlay {
@@ -123,6 +123,7 @@ export const SkillCardOverlay: React.FC<SkillCardOverlayProps> = ({
                 >
                   {status[label.card_id].locked && <span className="px-1 rounded bg-red-950/70 text-red-300">Locked</span>}
                   {status[label.card_id].mastered && <span className="px-1 rounded bg-violet-950/70 text-violet-300">Mastery</span>}
+                  {(status[label.card_id].changes ?? 0) > 0 && <span data-changes={status[label.card_id].changes} className="px-1 rounded bg-amber-700 text-white">Needs revision</span>}
                   {(status[label.card_id].awaiting ?? 0) > 0 && <span data-awaiting={status[label.card_id].awaiting} className="px-1 rounded bg-sky-800 text-white">{status[label.card_id].awaiting} to review</span>}
                 </span>
               )}

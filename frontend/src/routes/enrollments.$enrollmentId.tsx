@@ -9,10 +9,15 @@ import { useOwnedView } from '../lib/useOwnedView'
  * One Enrollment's Version, for its learner (or the owning Coach) only (ADR 0013):
  * the backend answers 404 to every other Account, shown without any of its content.
  */
-export const Route = createFileRoute('/enrollments/$enrollmentId')({ component: EnrollmentPage })
+export const Route = createFileRoute('/enrollments/$enrollmentId')({
+  component: EnrollmentPage,
+  /** `review` names a Task whose Review the Coach opens directly, from the Version's list of learners. */
+  validateSearch: (search: Record<string, unknown>): { review?: string } => ({ review: typeof search.review === 'string' && /^[0-9a-f-]{36}$/i.test(search.review) ? search.review : undefined }),
+})
 
 function EnrollmentPage() {
   const { enrollmentId } = Route.useParams()
+  const { review } = Route.useSearch()
   const navigate = useNavigate()
   const [view] = useOwnedView(`enrollment:${enrollmentId}`, useCallback(() => readEnrolledVersion(enrollmentId), [enrollmentId]))
   const handleSignOut = async () => {
@@ -30,6 +35,7 @@ function EnrollmentPage() {
           key={`${view.account.id}:${enrollmentId}`}
           accountId={view.account.id}
           document={document}
+          reviewTaskId={review}
           chrome={{
             account: view.account,
             onSignOut: handleSignOut,
