@@ -1,0 +1,7 @@
+{$SITE_ADDRESS} {
+	encode zstd gzip
+	# A www name listed in SITE_ADDRESS leads to the one public origin, where sign-in works.
+	@www header_regexp Host ^www\.
+	redir @www {$PUBLIC_ORIGIN}{uri} permanent
+	reverse_proxy frontend:3000
+}
